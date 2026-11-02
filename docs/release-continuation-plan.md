@@ -35,7 +35,7 @@
 | C++ 开发设计 | 已完成 | `docs/local-npc-llm/development-design.md` |
 | 业界实践与三 NPC 验证方案 | 已完成 | 开发设计第 14、15 节 |
 | 持续推进计划 | 当前提交 | 本文件 |
-| Git 初始化 | 当前工作包完成前 | 使用普通 `git` 命令；禁止 `gs-commit` |
+| Git 初始化 | 已完成 | 首个提交 `78f06db`；后续使用普通 `git` 命令，禁止 `gs-commit` |
 | P0 C++ 核心骨架 | 已完成 | `src/core`, `src/world`, `src/npc`, `src/provider`, CMake FetchContent |
 | 三 NPC 村庄运行时 | 已完成 | 日程、资源、目标阶段、记忆、承诺和离线推进 |
 | 自动化验收 | 已完成 | GCC 13、CTest、headless replay/snapshot |
