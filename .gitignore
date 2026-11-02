@@ -1,0 +1,11 @@
+/build/
+/build-*/
+/.cache/
+/.vscode/
+/.idea/
+*.user
+*.swp
+*.tmp
+*.log
+*.save
+*.replay

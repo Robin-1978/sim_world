@@ -1,0 +1,11 @@
+{
+  "id": "eve",
+  "name": "Eve",
+  "role": "archivist",
+  "home": "archive_room",
+  "workplace": "archive",
+  "public_goal": "Preserve the village records",
+  "hidden_goal": "Find proof of the hidden family line",
+  "boundary": "Will not burn a record to win an argument",
+  "schedule": {"08:00-19:00": "archive", "19:00-08:00": "archive_room"}
+}

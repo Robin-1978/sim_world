@@ -1,0 +1,8 @@
+{
+  "content_version": "village-p0.1",
+  "beats": [
+    {"id": "mira_ration", "npc": "mira", "allowed_actions": ["offer_ration", "protect_secret", "explain_ration", "rest"]},
+    {"id": "lorn_ferry", "npc": "lorn", "allowed_actions": ["repair_ferry", "offer_crossing", "ask_debt", "rest"]},
+    {"id": "eve_archive", "npc": "eve", "allowed_actions": ["share_record", "withhold_record", "reveal_clue", "rest"]}
+  ]
+}

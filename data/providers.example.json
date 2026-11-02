@@ -1,0 +1,19 @@
+{
+  "providers": {
+    "local_llamacpp": {
+      "type": "openai_compatible",
+      "base_url": "http://127.0.0.1:8192/v1",
+      "model_env": "TIDE_MARKS_MODEL",
+      "api_key_env": null,
+      "timeout_ms": 15000
+    },
+    "optional_cloud": {
+      "type": "openai_compatible",
+      "base_url": "https://provider.example/v1",
+      "model_env": "TIDE_MARKS_MODEL",
+      "api_key_env": "NPC_CLOUD_API_KEY",
+      "timeout_ms": 15000
+    }
+  },
+  "default_provider": "local_llamacpp"
+}

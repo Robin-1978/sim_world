@@ -1,0 +1,9 @@
+{
+  "content_version": "village-p0.1",
+  "id": "village_tidemark",
+  "display_name": "Tidemark Village",
+  "locations": ["granary", "village_square", "ferry_dock", "archive", "mira_home", "lorn_house", "archive_room"],
+  "resources": {"grain": 100, "boat_integrity": 72, "records_integrity": 80},
+  "scene_asset": "assets/blender/village.glb",
+  "camera": "slanted_top_down"
+}

@@ -1,0 +1,21 @@
+{
+  "date": "2026-11-02",
+  "endpoint": "http://127.0.0.1:8192",
+  "health": "ok",
+  "server": "llama.cpp",
+  "model": "Huihui-Qwen3.5-4B-abliterated.Q4_K_M",
+  "quantization": "Q4_K_M",
+  "context_length": 24576,
+  "slots": 1,
+  "request_mode": "OpenAI-compatible /v1/chat/completions",
+  "temperature": 0.4,
+  "max_tokens": 96,
+  "thinking": false,
+  "structured_output": "JSON Schema",
+  "turns": [
+    {"label": "turn1", "ttft_s": 0.664, "total_s": 1.253, "predicted_tokens": 31},
+    {"label": "turn2", "ttft_s": 0.282, "total_s": 0.648, "predicted_tokens": 20},
+    {"label": "turn3", "ttft_s": 0.297, "total_s": 0.608, "predicted_tokens": 18}
+  ],
+  "result": "three serial requests returned valid NPC JSON"
+}

@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Tide Marks village content",
+  "type": "object",
+  "required": ["content_version", "id"],
+  "properties": {
+    "content_version": {"type": "string"},
+    "id": {"type": "string", "pattern": "^[a-z0-9_-]+$"},
+    "display_name": {"type": "string"},
+    "locations": {"type": "array", "items": {"type": "string"}},
+    "resources": {"type": "object"}
+  },
+  "additionalProperties": true
+}
