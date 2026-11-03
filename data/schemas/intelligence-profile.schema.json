@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Tide Marks intelligence profile",
+  "type": "object",
+  "required": ["kind", "schema_version", "id", "provider", "decision_policy"],
+  "properties": {
+    "kind": {"const": "intelligence_profile"},
+    "schema_version": {"const": 1},
+    "id": {"type": "string", "minLength": 1},
+    "provider": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": {"enum": ["mock", "llama_cpp", "openai_compatible"]},
+        "base_url": {"type": "string"},
+        "model": {"type": "string"},
+        "api_key_env": {"type": ["string", "null"]},
+        "timeout_ms": {"type": "integer", "minimum": 1},
+        "temperature": {"type": "number", "minimum": 0, "maximum": 2}
+      },
+      "additionalProperties": false
+    },
+    "decision_policy": {
+      "type": "object",
+      "required": ["player_dialogue", "autonomous_reappraisal"],
+      "properties": {
+        "player_dialogue": {"$ref": "#/$defs/decision_policy"},
+        "autonomous_reappraisal": {"$ref": "#/$defs/decision_policy"}
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "decision_policy": {
+      "type": "object",
+      "required": ["thinking", "max_tokens"],
+      "properties": {
+        "thinking": {"type": "boolean"},
+        "reasoning_budget_tokens": {"type": "integer", "minimum": 0},
+        "max_tokens": {"type": "integer", "minimum": 1}
+      },
+      "additionalProperties": false
+    }
+  }
+}

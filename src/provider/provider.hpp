@@ -42,6 +42,9 @@ struct DriveView {
 struct DecisionContext {
     std::string npcId;
     std::string npcName;
+    // The trigger is part of the decision context so provider policy can
+    // distinguish a player conversation from an autonomous reappraisal.
+    std::string trigger;
     GameTime now;
     std::string perception;
     std::string memories;
@@ -77,6 +80,15 @@ struct ProviderResponse {
     std::string error;
 };
 
+// A decision policy is content/runtime configuration, not a model name
+// special case.  The same provider can use cheap output for a player turn and
+// a bounded reasoning pass for an autonomous reappraisal.
+struct DecisionPolicy {
+    bool enableThinking{false};
+    int reasoningBudgetTokens{0};
+    int maxTokens{512};
+};
+
 class IProvider {
 public:
     virtual ~IProvider() = default;
@@ -97,12 +109,9 @@ struct LlamaCppConfig {
     std::string model{"local"};
     std::string apiKeyEnv;
     int timeoutMs{120000};
-    // IntentProposal is a short, schema-constrained runtime decision.  Keep
-    // thinking off by default; callers can opt into a bounded reasoning pass
-    // for genuinely ambiguous tasks.
-    int maxTokens{512};
-    bool enableThinking{false};
-    int thinkingBudget{512};
+    double temperature{0.2};
+    DecisionPolicy playerDialogue;
+    DecisionPolicy autonomousReappraisal{true, 128, 1024};
 };
 
 class LlamaCppProvider final : public IProvider {

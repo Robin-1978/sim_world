@@ -80,6 +80,18 @@
       "ambiguous_social_decision": "thinking_128",
       "low_confidence_retry": "thinking_256",
       "evolution_or_sandbox_analysis": "thinking_512_or_1024"
+    },
+    "autonomous_verification": {
+      "profile": "data/intelligence-profile.json",
+      "player_dialogue": {"thinking": false, "max_tokens": 512, "runtime_result": "accepted"},
+      "autonomous_reappraisal": {
+        "thinking": true,
+        "reasoning_budget_tokens": 128,
+        "max_tokens": 1024,
+        "trigger": "high_salience_context",
+        "selected_action": "repair_ferry",
+        "runtime_result": "accepted; resource effects and process completion were committed"
+      }
     }
   }
 }

@@ -12,4 +12,5 @@
 #include "navigation/path_planner.hpp"
 #include "physics/physics_world.hpp"
 #include "provider/provider.hpp"
+#include "provider/provider_profile.hpp"
 #include "world/world_service.hpp"

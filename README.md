@@ -45,12 +45,10 @@ If GitHub is unreachable, set `HTTPS_PROXY` to a proxy configured for your envir
 
 The default raylib view uses a colored procedural village layout and shows a village minimap. Set `TIDE_MARKS_USE_GLB=1` to preview the exported Blender mesh instead. The current world map covers the P0 village; the full island map is planned for the P1/P2 world expansion.
 
-To use the running local model in the 3D client, set the provider before launching:
+To use the running local model in the 3D client, select the checked-in intelligence profile:
 
 ```bash
-TIDE_MARKS_PROVIDER=llama \
-TIDE_MARKS_MODEL=Huihui-Qwen3.5-4B-abliterated.Q4_K_M \
-  ./build/tide_marks_client
+./build/tide_marks_client --profile data/intelligence-profile.json --provider profile
 ```
 
 Bullet 3.25 is an independent CMake option for the production physics adapter:
@@ -62,12 +60,13 @@ cmake --build build -j2
 
 ## Local LLM
 
-With llama.cpp serving OpenAI-compatible HTTP on `127.0.0.1:8192`:
+`data/intelligence-profile.json` selects the local llama.cpp endpoint, model, and per-decision token policy. With llama.cpp serving OpenAI-compatible HTTP on `127.0.0.1:8192`:
 
 ```bash
-TIDE_MARKS_MODEL=Huihui-Qwen3.5-4B-abliterated.Q4_K_M \
-  ./build/tide_marks_headless --provider llama --days 0
+./build/tide_marks_headless --profile data/intelligence-profile.json --provider profile --days 0
 ```
+
+Player dialogue is configured with thinking off. Autonomous reappraisal, which weighs drives and external stimuli without a user turn, uses a short reasoning budget. Use `--provider mock` for deterministic offline runs.
 
 The provider only selects authored actions. If the server times out or returns invalid JSON, the game uses deterministic fallback dialogue.
 

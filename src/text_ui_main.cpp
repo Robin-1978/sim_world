@@ -11,14 +11,10 @@ using namespace tide_marks;
 
 namespace {
 
-std::unique_ptr<IProvider> providerFromEnvironment() {
-    if (const char* selected = std::getenv("TIDE_MARKS_PROVIDER"); selected != nullptr && std::string(selected) == "llama") {
-        LlamaCppConfig config;
-        if (const char* model = std::getenv("TIDE_MARKS_MODEL"); model != nullptr) config.model = model;
-        if (const char* base = std::getenv("TIDE_MARKS_BASE_URL"); base != nullptr) config.baseUrl = base;
-        return std::make_unique<LlamaCppProvider>(config);
-    }
-    return std::make_unique<MockProvider>();
+std::unique_ptr<IProvider> providerFromProfile(const std::string& profilePath, const std::string& overrideType) {
+    if (overrideType == "mock") return std::make_unique<MockProvider>();
+    const auto profile = loadIntelligenceProfile(profilePath);
+    return makeProviderFromProfile(profile, overrideType);
 }
 
 void printHelp() {
@@ -190,11 +186,17 @@ bool execute(WorldService& service, const std::string& line) {
 }  // namespace
 
 int main(int argc, char** argv) {
-    auto service = WorldService::load(ContentPackLoader::defaultRoot(), providerFromEnvironment());
     std::string scriptPath;
-    for (int index = 1; index + 1 < argc; ++index) {
-        if (std::string(argv[index]) == "--script") scriptPath = argv[index + 1];
+    std::string profilePath = defaultIntelligenceProfilePath();
+    std::string providerOverride = "mock";
+    for (int index = 1; index < argc; ++index) {
+        const std::string argument = argv[index];
+        if (argument == "--script" && index + 1 < argc) scriptPath = argv[++index];
+        else if (argument == "--profile" && index + 1 < argc) profilePath = argv[++index];
+        else if (argument == "--provider" && index + 1 < argc) providerOverride = argv[++index];
     }
+    auto service = WorldService::load(ContentPackLoader::defaultRoot(),
+                                      providerFromProfile(profilePath, providerOverride));
     printHelp();
     std::istream* input = &std::cin;
     std::ifstream script;

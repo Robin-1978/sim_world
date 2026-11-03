@@ -1,0 +1,25 @@
+{
+  "kind": "intelligence_profile",
+  "schema_version": 1,
+  "id": "village-qwen35-4b-v1",
+  "provider": {
+    "type": "llama_cpp",
+    "base_url": "http://127.0.0.1:8192/v1",
+    "model": "Huihui-Qwen3.5-4B-abliterated.Q4_K_M",
+    "api_key_env": null,
+    "timeout_ms": 120000,
+    "temperature": 0.2
+  },
+  "decision_policy": {
+    "player_dialogue": {
+      "thinking": false,
+      "reasoning_budget_tokens": 0,
+      "max_tokens": 512
+    },
+    "autonomous_reappraisal": {
+      "thinking": true,
+      "reasoning_budget_tokens": 128,
+      "max_tokens": 1024
+    }
+  }
+}

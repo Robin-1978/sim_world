@@ -73,21 +73,40 @@ ProviderResponse MockProvider::decide(const DecisionContext& context, const std:
 }
 
 LlamaCppProvider::LlamaCppProvider(LlamaCppConfig config) : config_(std::move(config)) {
+    // Environment variables remain an explicit developer override for local
+    // experiments. The checked-in Intelligence Profile is the normal source
+    // of truth for a run.
     if (const char* timeout = std::getenv("TIDE_MARKS_TIMEOUT_MS"); timeout != nullptr) {
         const int parsed = std::atoi(timeout);
         if (parsed > 0) config_.timeoutMs = parsed;
     }
     if (const char* maxTokens = std::getenv("TIDE_MARKS_MAX_TOKENS"); maxTokens != nullptr) {
         const int parsed = std::atoi(maxTokens);
-        if (parsed > 0) config_.maxTokens = parsed;
-    }
-    if (const char* thinkingBudget = std::getenv("TIDE_MARKS_THINKING_BUDGET"); thinkingBudget != nullptr) {
-        const int parsed = std::atoi(thinkingBudget);
-        if (parsed > 0) config_.thinkingBudget = parsed;
+        if (parsed > 0) {
+            config_.playerDialogue.maxTokens = parsed;
+            config_.autonomousReappraisal.maxTokens = parsed;
+        }
     }
     if (const char* enableThinking = std::getenv("TIDE_MARKS_ENABLE_THINKING"); enableThinking != nullptr) {
         const std::string value(enableThinking);
-        config_.enableThinking = value == "1" || value == "true" || value == "on";
+        const bool enabled = value == "1" || value == "true" || value == "on";
+        config_.playerDialogue.enableThinking = enabled;
+        config_.autonomousReappraisal.enableThinking = enabled;
+    }
+    if (const char* thinkingBudget = std::getenv("TIDE_MARKS_THINKING_BUDGET"); thinkingBudget != nullptr) {
+        const int parsed = std::atoi(thinkingBudget);
+        if (parsed > 0) {
+            config_.playerDialogue.reasoningBudgetTokens = parsed;
+            config_.autonomousReappraisal.reasoningBudgetTokens = parsed;
+        }
+    }
+    if (const char* autonomousThinking = std::getenv("TIDE_MARKS_AUTONOMOUS_THINKING"); autonomousThinking != nullptr) {
+        const std::string value(autonomousThinking);
+        config_.autonomousReappraisal.enableThinking = value == "1" || value == "true" || value == "on";
+    }
+    if (const char* autonomousBudget = std::getenv("TIDE_MARKS_AUTONOMOUS_THINKING_BUDGET"); autonomousBudget != nullptr) {
+        const int parsed = std::atoi(autonomousBudget);
+        if (parsed > 0) config_.autonomousReappraisal.reasoningBudgetTokens = parsed;
     }
 }
 
@@ -124,7 +143,11 @@ ProviderResponse LlamaCppProvider::decide(const DecisionContext& context, const 
                               {"sensitivity", drive.sensitivity}, {"evidence_confidence", drive.evidenceConfidence},
                               {"critical", drive.critical}, {"expected_relief", drive.expectedRelief}});
     }
-    const Json userContent{{"npc_id", context.npcId}, {"time", context.now.toString()},
+    const bool autonomousDecision = !context.trigger.empty() && context.trigger != "player_dialogue";
+    const DecisionPolicy& policy = autonomousDecision ? config_.autonomousReappraisal : config_.playerDialogue;
+    const bool useThinking = policy.enableThinking;
+    const int effectiveThinkingBudget = policy.reasoningBudgetTokens;
+    const Json userContent{{"npc_id", context.npcId}, {"time", context.now.toString()}, {"decision_trigger", context.trigger},
                            {"perception", context.perception}, {"memories", context.memories},
                            {"character", context.character}, {"internal_drives", context.internalDrives},
                            {"drives", drives},
@@ -165,17 +188,17 @@ ProviderResponse LlamaCppProvider::decide(const DecisionContext& context, const 
                              {"tradeoffs", Json{{"type", "array"}, {"items", Json{{"type", "string"}}}}},
                              {"expected_relief", Json{{"type", "object"},
                                                        {"additionalProperties", Json{{"type", "number"}, {"minimum", 0.0}, {"maximum", 1.0}}}}}}}};
-    Json request{{"model", config_.model}, {"temperature", 0.2}, {"max_tokens", config_.maxTokens},
+    Json request{{"model", config_.model}, {"temperature", config_.temperature}, {"max_tokens", policy.maxTokens},
                  {"messages", messages},
                  {"response_format", Json{{"type", "json_schema"},
                                            {"json_schema", Json{{"name", "tide_marks_intent_proposal"},
                                                                   {"strict", true}, {"schema", responseSchema}}}}}};
-    request["chat_template_kwargs"] = Json{{"enable_thinking", config_.enableThinking}};
-    if (config_.enableThinking) {
+    request["chat_template_kwargs"] = Json{{"enable_thinking", useThinking}};
+    if (useThinking) {
         // llama.cpp applies this sampler budget only through the top-level
         // reasoning_budget_tokens field.  A template-only thinking_budget is
         // ignored by current servers and can therefore consume max_tokens.
-        request["reasoning_budget_tokens"] = config_.thinkingBudget;
+        request["reasoning_budget_tokens"] = effectiveThinkingBudget;
     } else {
         // Be explicit for servers whose model defaults enable reasoning.
         request["reasoning_effort"] = "none";
@@ -216,6 +239,10 @@ ProviderResponse LlamaCppProvider::decide(const DecisionContext& context, const 
         if (const char* debug = std::getenv("TIDE_MARKS_DEBUG_PROVIDER");
             debug != nullptr && *debug != '\0' && std::string(debug) != "0") {
             std::cerr << "provider_debug finish_reason=" << choice.value("finish_reason", "")
+                      << " trigger=" << context.trigger
+                      << " thinking=" << useThinking
+                      << " reasoning_budget=" << (useThinking ? effectiveThinkingBudget : 0)
+                      << " max_tokens=" << policy.maxTokens
                       << " usage=" << outer.value("usage", Json::object()).dump()
                       << " content=" << choice.at("message").value("content", "")
                       << "\n";

@@ -110,8 +110,9 @@ P0-K 的前三项以及模型关闭、过期提案、重复提案、过程恢复
 ```bash
 cmake --build build -j2
 ctest --test-dir build --output-on-failure
-./build/tide_marks_headless --scenario village --days 2 --dump-events
-./build/tide_marks_text --script docs/examples/village-session.txt
+./build/tide_marks_headless --scenario village --days 2 --provider mock --dump-events
+./build/tide_marks_text --script docs/examples/village-session.txt --provider mock
+./build/tide_marks_headless --scenario village --days 0 --profile data/intelligence-profile.json --provider profile
 ```
 
 每次工作包完成后记录：内容版本、规则/模拟版本、Provider/模型（如有）、随机种子、命令、WorldEvent、Snapshot 截断点、Replay 摘要和失败原因。不得把 API Key 写入日志或回放工件。
@@ -129,6 +130,8 @@ ctest --test-dir build --output-on-failure
 使用 llama.cpp 的 `Huihui-Qwen3.5-4B-abliterated.Q4_K_M`、OpenAI-compatible `/v1/chat/completions` 和 JSON Schema 约束验证 P0 意图输出。结构化短决策默认关闭 thinking；实测关闭 thinking 时返回合法 JSON，并由 Runtime 接受 `offer_ration`。显式设置 `reasoning_budget_tokens=256` 时，llama.cpp 仍正常结束响应，服务端生成量为 426 tokens，说明该字段确实限制思考段而不是被模板静默忽略。小模型不应默认开启长思考：它会显著增加延迟，并可能在 `max_tokens` 用尽前还没有产生最终 JSON。Prompt 同时明确本次请求允许的刺激 ID 和需求 ID，空刺激时强制 `cited_stimulus_ids=[]`，避免模型把需求 ID 当成外部刺激引用。
 
 当前基准的推荐档位是：普通对话关闭 thinking；有社会权衡的决策使用 `reasoning_budget_tokens=128`；低置信度才升级到 256；512 以上留给演化分析。该分档基于同一模型的三类村庄提示实测，而不是单看生成长度。
+
+Provider、模型和两档预算现在由 `data/intelligence-profile.json` 配置，并通过 `--profile` 加载。真实自驱验证中，玩家对白使用关闭 thinking 的 `player_dialogue` 档；当 Lorn 的 crossing safety 越过临界阈值后，`high_salience_context` 自动进入 `autonomous_reappraisal` 档，模型选择 `repair_ferry` 并提交了资源变化和过程完成事件。
 
 ## 恢复工作入口
 

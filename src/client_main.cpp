@@ -71,13 +71,20 @@ void drawVillageMap(Vector3 player, const std::array<std::pair<const char*, Vect
 
 }  // namespace
 
-int main() {
-    std::unique_ptr<tide_marks::IProvider> provider = std::make_unique<tide_marks::MockProvider>();
-    if (const char* selected = std::getenv("TIDE_MARKS_PROVIDER"); selected != nullptr && std::string(selected) == "llama") {
-        tide_marks::LlamaCppConfig config;
-        if (const char* model = std::getenv("TIDE_MARKS_MODEL"); model != nullptr) config.model = model;
-        if (const char* base = std::getenv("TIDE_MARKS_BASE_URL"); base != nullptr) config.baseUrl = base;
-        provider = std::make_unique<tide_marks::LlamaCppProvider>(config);
+int main(int argc, char** argv) {
+    std::string profilePath = tide_marks::defaultIntelligenceProfilePath();
+    std::string providerOverride = "mock";
+    for (int index = 1; index < argc; ++index) {
+        const std::string argument = argv[index];
+        if (argument == "--profile" && index + 1 < argc) profilePath = argv[++index];
+        else if (argument == "--provider" && index + 1 < argc) providerOverride = argv[++index];
+    }
+    std::unique_ptr<tide_marks::IProvider> provider;
+    if (providerOverride == "mock") {
+        provider = std::make_unique<tide_marks::MockProvider>();
+    } else {
+        const auto profile = tide_marks::loadIntelligenceProfile(profilePath);
+        provider = tide_marks::makeProviderFromProfile(profile, providerOverride);
     }
     auto village = tide_marks::WorldService::load(tide_marks::ContentPackLoader::defaultRoot(), std::move(provider));
     InitWindow(1280, 720, "Tide Marks - Tidemark Village");

@@ -685,6 +685,21 @@ void evolution_proposals_are_governed() {
            "LLM cannot approve its own evolution proposal");
 }
 
+void intelligence_profile_configures_decision_budgets() {
+    const auto profile = loadIntelligenceProfile(defaultIntelligenceProfilePath());
+    expect(profile.id == "village-qwen35-4b-v1", "village runs from an explicit intelligence profile");
+    expect(profile.providerType == "llama_cpp", "profile selects the local llama.cpp provider");
+    expect(!profile.llama.playerDialogue.enableThinking &&
+               profile.llama.playerDialogue.maxTokens == 512,
+           "player dialogue uses the fast non-thinking policy");
+    expect(profile.llama.autonomousReappraisal.enableThinking &&
+               profile.llama.autonomousReappraisal.reasoningBudgetTokens == 128 &&
+               profile.llama.autonomousReappraisal.maxTokens == 1024,
+           "autonomous reappraisal uses its bounded thinking policy");
+    const auto provider = makeProviderFromProfile(profile, "mock");
+    expect(provider->name() == "mock", "the profile provider can be overridden for offline tests");
+}
+
 int main() {
     village_has_three_independent_npcs();
     offline_progression_changes_village();
@@ -712,6 +727,7 @@ int main() {
     runtime_loads_a_world_without_village_identifiers();
     npc_activity_slot_is_single_owner();
     evolution_proposals_are_governed();
+    intelligence_profile_configures_decision_budgets();
     if (failures != 0) {
         std::cerr << failures << " test assertion(s) failed\n";
         return EXIT_FAILURE;

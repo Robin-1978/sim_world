@@ -10,7 +10,8 @@ using namespace tide_marks;
 namespace {
 
 void usage(const char* program) {
-    std::cout << "Usage: " << program << " [--scenario village] [--days N] [--provider mock|llama] [--replay PATH] [--dump-events]\n";
+    std::cout << "Usage: " << program
+              << " [--scenario village] [--days N] [--profile PATH] [--provider mock|profile|llama_cpp] [--replay PATH] [--dump-events]\n";
 }
 
 }  // namespace
@@ -19,6 +20,7 @@ int main(int argc, char** argv) {
     int days = 2;
     std::string replayPath;
     std::string providerName = "mock";
+    std::string profilePath = defaultIntelligenceProfilePath();
     bool dumpEvents = false;
     for (int i = 1; i < argc; ++i) {
         const std::string argument = argv[i];
@@ -32,19 +34,19 @@ int main(int argc, char** argv) {
             replayPath = argv[++i];
         } else if (argument == "--provider" && i + 1 < argc) {
             providerName = argv[++i];
+        } else if (argument == "--profile" && i + 1 < argc) {
+            profilePath = argv[++i];
         } else if (argument == "--dump-events") {
             dumpEvents = true;
         }
     }
 
     std::unique_ptr<IProvider> provider;
-    if (providerName == "llama") {
-        LlamaCppConfig config;
-        if (const char* model = std::getenv("TIDE_MARKS_MODEL"); model != nullptr) config.model = model;
-        if (const char* base = std::getenv("TIDE_MARKS_BASE_URL"); base != nullptr) config.baseUrl = base;
-        provider = std::make_unique<LlamaCppProvider>(config);
-    } else {
+    if (providerName == "mock") {
         provider = std::make_unique<MockProvider>();
+    } else {
+        const auto profile = loadIntelligenceProfile(profilePath);
+        provider = makeProviderFromProfile(profile, providerName);
     }
     auto service = WorldService::load(ContentPackLoader::defaultRoot(), std::move(provider));
     std::cout << "《潮痕》 village scenario | provider=" << service.providerName() << '\n';

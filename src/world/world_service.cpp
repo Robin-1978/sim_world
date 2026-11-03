@@ -868,7 +868,8 @@ DialogueTurn WorldService::executeTurn(const std::string& npcId, const std::stri
         result.error = "duplicate_turn";
         return result;
     }
-    const auto context = decisionContext(npcId);
+    auto context = decisionContext(npcId);
+    context.trigger = trigger;
     auto response = provider_->decide(context, input);
     if (!response.ok) {
         // Rule fallback keeps the world playable when the local server is down.
