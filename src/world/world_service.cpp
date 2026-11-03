@@ -35,11 +35,23 @@ Json mergedBehaviorArgs(const MetaActionDefinition& definition, const BehaviorNo
 }
 
 WorldState transactionalBackup(const WorldState& state, std::size_t& eventCount) {
-    WorldState backup = state;
-    eventCount = backup.events.size();
-    // Committed history before this transaction is immutable. Keeping it out
-    // of the rollback copy avoids an O(history) copy on every game-minute.
-    backup.events.clear();
+    eventCount = state.events.size();
+    // Build the rollback image field-by-field so the immutable event history
+    // is never copied into every minute transaction.  A default WorldState
+    // copy would still copy the complete JSON event log before clearing it,
+    // turning a long offline advance into O(history^2) work.
+    WorldState backup;
+    backup.worldId = state.worldId;
+    backup.instanceId = state.instanceId;
+    backup.contentVersion = state.contentVersion;
+    backup.now = state.now;
+    backup.revision = state.revision;
+    backup.resources = state.resources;
+    backup.entities = state.entities;
+    backup.links = state.links;
+    backup.npcs = state.npcs;
+    backup.promises = state.promises;
+    backup.processedTurnIds = state.processedTurnIds;
     return backup;
 }
 
@@ -84,22 +96,16 @@ private:
 };
 
 void WorldService::beginTransaction() {
-    if (transactionDepth_++ == 0) {
-        transactionBackup_ = transactionalBackup(state_, transactionBackupEventCount_);
-        deferredEvents_.clear();
-        transactionRollbackRequested_ = false;
-    }
+    TransactionFrame frame;
+    frame.backup = transactionalBackup(state_, frame.backupEventCount);
+    frame.backupDeferredEventCount = deferredEvents_.size();
+    transactionFrames_.push_back(std::move(frame));
 }
 
 void WorldService::commitTransaction() {
-    if (--transactionDepth_ != 0) return;
-    if (transactionRollbackRequested_) {
-        restoreTransactionalBackup(state_, std::move(transactionBackup_), transactionBackupEventCount_);
-        transactionRollbackRequested_ = false;
-        deferredEvents_.clear();
-        rebuildEntityRegistry();
-        return;
-    }
+    if (transactionFrames_.empty()) throw std::logic_error("transaction commit without an active scope");
+    transactionFrames_.pop_back();
+    if (!transactionFrames_.empty()) return;
     rebuildEntityRegistry();
     auto events = std::move(deferredEvents_);
     deferredEvents_.clear();
@@ -108,13 +114,11 @@ void WorldService::commitTransaction() {
 }
 
 void WorldService::rollbackTransaction() {
-    if (--transactionDepth_ != 0) {
-        transactionRollbackRequested_ = true;
-        return;
-    }
-    restoreTransactionalBackup(state_, std::move(transactionBackup_), transactionBackupEventCount_);
-    transactionRollbackRequested_ = false;
-    deferredEvents_.clear();
+    if (transactionFrames_.empty()) throw std::logic_error("transaction rollback without an active scope");
+    auto frame = std::move(transactionFrames_.back());
+    transactionFrames_.pop_back();
+    restoreTransactionalBackup(state_, std::move(frame.backup), frame.backupEventCount);
+    deferredEvents_.resize(std::min(frame.backupDeferredEventCount, deferredEvents_.size()));
     rebuildEntityRegistry();
 }
 
@@ -489,12 +493,16 @@ void WorldService::processActivity(const ActivityContent& activity) {
 }
 
 void WorldService::tickProcesses() {
-    for (auto& [npcId, npc] : state_.npcs) {
+    // Completion may run a nested recipe savepoint. A failed recipe restores
+    // WorldState and invalidates references/iterators into the NPC map, so
+    // collect durable work items before invoking code that may roll back.
+    std::vector<std::pair<std::string, ProcessExecution>> due;
+    for (const auto& [npcId, npc] : state_.npcs) {
         if (npc.activity.status != ActivityStatus::Active ||
             !npc.activity.process || npc.activity.process->status != ProcessStatus::Running) {
             continue;
         }
-        auto& process = *npc.activity.process;
+        auto process = *npc.activity.process;
         const auto duration = std::max<std::int64_t>(1, process.completesAt.minute - process.startedAt.minute);
         process.progress = std::clamp(static_cast<double>(state_.now.minute - process.startedAt.minute) /
                                           static_cast<double>(duration),
@@ -507,12 +515,16 @@ void WorldService::tickProcesses() {
         if (process.interruptible &&
             interruptSalience >= std::max(process.interruptSalienceThreshold,
                                           content_.npcDeliberation.minInterruptSalience)) {
-            suspendProcess(npcId, process, "new_high_salience_stimulus");
+            state_.npcs.at(npcId).activity.process->progress = process.progress;
+            suspendProcess(npcId, state_.npcs.at(npcId).activity.process.value(),
+                           "new_high_salience_stimulus");
             continue;
         }
         if (state_.now.minute < process.completesAt.minute) continue;
-        const auto completed = *npc.activity.process;
-        completeProcess(npcId, completed);
+        due.emplace_back(npcId, process);
+    }
+    for (const auto& [npcId, process] : due) {
+        completeProcess(npcId, process);
     }
 }
 
@@ -599,8 +611,7 @@ void WorldService::cancelProcess(const std::string& npcId, ProcessExecution& pro
 }
 
 void WorldService::completeProcess(const std::string& npcId, ProcessExecution process) {
-    auto found = state_.npcs.find(npcId);
-    if (found == state_.npcs.end()) return;
+    if (!state_.npcs.contains(npcId)) return;
     const bool applied = applyActionEffects(npcId, process.recipeId.empty() ? process.actionId : process.recipeId,
                                             &process.reservedResources);
     process.progress = 1.0;
@@ -613,6 +624,10 @@ void WorldService::completeProcess(const std::string& npcId, ProcessExecution pr
              Json{{"process_id", process.id}, {"action_id", process.actionId},
                   {"started_at", process.startedAt.minute}, {"completed_at", state_.now.minute},
                   {"progress", process.progress}, {"status", toString(process.status)}});
+    // A failed recipe restores a nested savepoint and invalidates iterators
+    // into WorldState. Reacquire the NPC after the recipe has returned.
+    auto found = state_.npcs.find(npcId);
+    if (found == state_.npcs.end()) return;
     if (found->second.activity.process && found->second.activity.process->id == process.id) {
         found->second.activity.process = process;
         setActivityStatus(found->second.activity,
@@ -1377,7 +1392,7 @@ void WorldService::addEvent(std::string type, std::string actor, std::string tar
     state_.events.push_back(WorldEvent{1, state_.events.size() + 1, state_.now, std::move(type), std::move(actor),
                                        std::move(target), std::move(detail), state_.revision, std::move(data)});
     const WorldEvent committed = state_.events.back();
-    if (transactionDepth_ > 0) {
+    if (!transactionFrames_.empty()) {
         deferredEvents_.push_back(committed);
         projectStimuli(committed);
     } else {

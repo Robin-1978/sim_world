@@ -92,7 +92,7 @@
       "detail": "Sable inspects the service lift",
       "effects": [
         {
-          "operation": "relieve_need",
+          "operation": "need.relieve",
           "action": "inspect"
         }
       ]

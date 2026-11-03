@@ -98,16 +98,20 @@ public:
 private:
     class TransactionScope;
 
+    struct TransactionFrame {
+        WorldState backup;
+        std::size_t backupEventCount{0};
+        std::size_t backupDeferredEventCount{0};
+    };
+
     WorldState state_;
     std::unique_ptr<IProvider> provider_;
     EventBus eventBus_;
     EntityRegistry entities_;
     WorldContentPack content_;
-    int transactionDepth_{0};
-    bool transactionRollbackRequested_{false};
-    WorldState transactionBackup_;
-    std::size_t transactionBackupEventCount_{0};
-    std::uint64_t transactionBackupRevision_{0};
+    // Each nested scope is a savepoint. A failed recipe can roll back its own
+    // partial changes without cancelling the enclosing world-time transition.
+    std::vector<TransactionFrame> transactionFrames_;
     std::vector<WorldEvent> deferredEvents_;
 
     void beginTransaction();

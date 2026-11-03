@@ -8,6 +8,7 @@
 #endif
 
 #include <cstdlib>
+#include <chrono>
 #include <filesystem>
 #include <iostream>
 #include <memory>
@@ -704,33 +705,40 @@ void intelligence_profile_configures_decision_budgets() {
 }
 
 int main() {
-    village_has_three_independent_npcs();
-    offline_progression_changes_village();
-    needs_are_data_driven_and_replayable();
-    accepted_intent_runs_without_reasking_llm();
-    autonomous_deliberation_is_triggered_not_per_tick();
-    high_salience_stimulus_interrupts_and_releases_reservations();
-    behavior_tree_supports_sequence_timeout_and_interrupt();
-    provider_and_action_validation_are_safe();
-    meta_actions_are_loaded_from_content();
-    needs_cover_domains_and_explicit_execution_paths();
-    bounded_drive_expectation_adapts_from_outcomes();
-    external_stimuli_and_structures_are_observable_and_persistent();
-    promise_policy_comes_from_content();
-    promises_cover_accept_renegotiate_refuse_and_break();
-    snapshot_and_replay_are_deterministic();
-    physics_events_are_deterministic_and_drained();
-    event_bus_is_ordered_and_filterable();
-    world_service_publishes_committed_events();
-    global_and_local_planners_are_deterministic();
-    npc_state_machine_handles_interrupts();
-    entity_registry_accepts_feature_components_without_core_changes();
-    entity_projection_tracks_committed_npc_movement();
-    world_entity_lifecycle_is_transactional_and_persistent();
-    runtime_loads_a_world_without_village_identifiers();
-    npc_activity_slot_is_single_owner();
-    evolution_proposals_are_governed();
-    intelligence_profile_configures_decision_budgets();
+    const auto run = [](const char* name, auto&& test) {
+        const auto started = std::chrono::steady_clock::now();
+        std::cerr << "RUN " << name << '\n';
+        test();
+        const auto elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
+        std::cerr << "DONE " << name << " (" << elapsed << "s)\n";
+    };
+    run("village_has_three_independent_npcs", village_has_three_independent_npcs);
+    run("offline_progression_changes_village", offline_progression_changes_village);
+    run("needs_are_data_driven_and_replayable", needs_are_data_driven_and_replayable);
+    run("accepted_intent_runs_without_reasking_llm", accepted_intent_runs_without_reasking_llm);
+    run("autonomous_deliberation_is_triggered_not_per_tick", autonomous_deliberation_is_triggered_not_per_tick);
+    run("high_salience_stimulus_interrupts_and_releases_reservations", high_salience_stimulus_interrupts_and_releases_reservations);
+    run("behavior_tree_supports_sequence_timeout_and_interrupt", behavior_tree_supports_sequence_timeout_and_interrupt);
+    run("provider_and_action_validation_are_safe", provider_and_action_validation_are_safe);
+    run("meta_actions_are_loaded_from_content", meta_actions_are_loaded_from_content);
+    run("needs_cover_domains_and_explicit_execution_paths", needs_cover_domains_and_explicit_execution_paths);
+    run("bounded_drive_expectation_adapts_from_outcomes", bounded_drive_expectation_adapts_from_outcomes);
+    run("external_stimuli_and_structures_are_observable_and_persistent", external_stimuli_and_structures_are_observable_and_persistent);
+    run("promise_policy_comes_from_content", promise_policy_comes_from_content);
+    run("promises_cover_accept_renegotiate_refuse_and_break", promises_cover_accept_renegotiate_refuse_and_break);
+    run("snapshot_and_replay_are_deterministic", snapshot_and_replay_are_deterministic);
+    run("physics_events_are_deterministic_and_drained", physics_events_are_deterministic_and_drained);
+    run("event_bus_is_ordered_and_filterable", event_bus_is_ordered_and_filterable);
+    run("world_service_publishes_committed_events", world_service_publishes_committed_events);
+    run("global_and_local_planners_are_deterministic", global_and_local_planners_are_deterministic);
+    run("npc_state_machine_handles_interrupts", npc_state_machine_handles_interrupts);
+    run("entity_registry_accepts_feature_components_without_core_changes", entity_registry_accepts_feature_components_without_core_changes);
+    run("entity_projection_tracks_committed_npc_movement", entity_projection_tracks_committed_npc_movement);
+    run("world_entity_lifecycle_is_transactional_and_persistent", world_entity_lifecycle_is_transactional_and_persistent);
+    run("runtime_loads_a_world_without_village_identifiers", runtime_loads_a_world_without_village_identifiers);
+    run("npc_activity_slot_is_single_owner", npc_activity_slot_is_single_owner);
+    run("evolution_proposals_are_governed", evolution_proposals_are_governed);
+    run("intelligence_profile_configures_decision_budgets", intelligence_profile_configures_decision_budgets);
     if (failures != 0) {
         std::cerr << failures << " test assertion(s) failed\n";
         return EXIT_FAILURE;
