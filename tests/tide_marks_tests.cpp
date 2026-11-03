@@ -107,7 +107,8 @@ void provider_and_action_validation_are_safe() {
            "decision context separates drives, stimuli, and structural constraints");
     const auto turn = service.converse("mira", "Can you spare a ration?", "dialogue-1");
     expect(turn.accepted, "mock provider returns a valid candidate action");
-    expect(service.state().resources.at("grain") == 95, "validated ration action changes grain atomically");
+    expect(service.state().resources.at("grain").amount == 95,
+           "validated ration action changes grain atomically");
     const auto duplicate = service.converse("mira", "again", "dialogue-1");
     expect(!duplicate.accepted && duplicate.error == "duplicate_turn", "duplicate turn is idempotent");
     const auto unknown = service.submit(Command{"bad-command", "unknown", "mira", {}, {}, {}});
@@ -117,9 +118,9 @@ void provider_and_action_validation_are_safe() {
 }
 
 void meta_action_registry_distinguishes_design_from_execution() {
-    expect(MetaActionRegistry::contains("reserve_resource"),
+    expect(MetaActionRegistry::contains("transfer_resource"),
            "reservation remains in the design registry");
-    expect(!MetaActionRegistry::isImplemented("reserve_resource"),
+    expect(!MetaActionRegistry::isImplemented("transfer_resource"),
            "a design-only meta action is not executable content");
     expect(MetaActionRegistry::isImplemented("consume_resource"),
            "resource consumption has a runtime executor");
@@ -158,7 +159,7 @@ void snapshot_and_replay_are_deterministic() {
     const auto path = std::filesystem::temp_directory_path() / "tide_marks_test_replay.jsonl";
     service.writeReplay(path.string());
     const auto snapshot = service.snapshotJson();
-    expect(snapshot.at("save_schema_version").get<int>() == 4, "snapshot declares its schema version");
+    expect(snapshot.at("save_schema_version").get<int>() == 5, "snapshot declares its schema version");
     expect(snapshot.at("event_sequence").get<std::size_t>() == service.state().events.size(),
            "snapshot records its event-log cutoff");
     const auto replayed = WorldService::replay(path.string());

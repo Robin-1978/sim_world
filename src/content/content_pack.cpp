@@ -207,7 +207,8 @@ ActivityContent parseActivity(const Json& value, const std::string& path) {
         effect.maximum = effectValue.value("maximum", 100);
         effect.effectAction = effectValue.value("action", "");
         effect.targets = effectValue.value("targets", std::vector<std::string>{});
-        if ((effect.operation == "consume_resource" || effect.operation == "produce_resource") &&
+        if ((effect.operation == "consume_resource" || effect.operation == "produce_resource" ||
+             effect.operation == "reserve_resource" || effect.operation == "release_resource") &&
             effect.amount <= 0) {
             throw std::runtime_error("resource meta action needs a positive amount in " + path);
         }

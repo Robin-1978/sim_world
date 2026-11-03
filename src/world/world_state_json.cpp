@@ -102,8 +102,8 @@ Json worldStateToJson(const WorldState& state) {
     Json events = Json::array();
     for (const auto& event : state.events) events.push_back(worldEventToJson(event));
     Json resources = Json::object();
-    for (const auto& [id, value] : state.resources) resources[id] = value;
-    return Json{{"save_schema_version", 4}, {"simulation_version", "adaptive-runtime-p0.4"},
+    for (const auto& [id, value] : state.resources) resources[id] = Json{{"amount", value.amount}, {"reserved", value.reserved}};
+    return Json{{"save_schema_version", 5}, {"simulation_version", "adaptive-runtime-p0.5"},
                 {"event_sequence", state.events.size()}, {"world_id", state.worldId},
                 {"content_version", state.contentVersion}, {"now", state.now.minute},
                 {"revision", state.revision},
@@ -121,7 +121,8 @@ WorldState deserializeWorldState(const Json& json) {
     const auto resources = json.value("resources", Json::object());
     if (!resources.is_object()) throw std::runtime_error("snapshot resources must be an object");
     for (auto it = resources.begin(); it != resources.end(); ++it) {
-        state.resources[it.key()] = it.value().get<int>();
+        state.resources[it.key()] =
+            ResourceState{jsonValue<int>(it.value(), "amount", 0), jsonValue<int>(it.value(), "reserved", 0)};
     }
     const auto entities = json.value("entities", Json::object());
     for (auto it = entities.begin(); it != entities.end(); ++it) {

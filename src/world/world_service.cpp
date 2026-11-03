@@ -81,7 +81,9 @@ WorldService WorldService::fromContent(const WorldContentPack& content,
     service.state_.worldId = content.worldId;
     service.state_.contentVersion = content.contentVersion;
     service.state_.now = content.startTime;
-    for (const auto& [id, resource] : content.resources) service.state_.resources[id] = resource.initial;
+    for (const auto& [id, resource] : content.resources) {
+        service.state_.resources[id] = ResourceState{resource.initial, 0};
+    }
     service.state_.entities["player"] = WorldEntityState{"player", "actor", EntityLifecycle::Active, Json::object()};
     for (const auto& spatial : content.spatialEntities) {
         service.state_.entities["spatial:" + spatial.id] =
@@ -316,22 +318,30 @@ void WorldService::processHourBoundary(int day, int hour) {
 void WorldService::processActivity(const ActivityContent& activity) {
     std::map<std::string, int> required;
     for (const auto& effect : activity.effects) {
-        if (effect.operation == "consume_resource") required[effect.resource] += effect.amount;
+        if (effect.operation == "consume_resource" || effect.operation == "reserve_resource") {
+            required[effect.resource] += effect.amount;
+        }
     }
     for (const auto& [resource, amount] : required) {
-        if (resourceValue(resource) < amount) return;
+        if (availableResourceValue(resource) < amount) return;
     }
 
     Json changes = Json::object();
     std::set<std::string> relievedActions;
     for (const auto& effect : activity.effects) {
         const int before = resourceValue(effect.resource);
+        const int reservedBefore = state_.resources.at(effect.resource).reserved;
         if (effect.operation == "consume_resource") {
             setResource(effect.resource, before - effect.amount);
         } else if (effect.operation == "produce_resource") {
             setResource(effect.resource, before + effect.amount);
+        } else if (effect.operation == "reserve_resource") {
+            state_.resources[effect.resource].reserved += effect.amount;
+        } else if (effect.operation == "release_resource") {
+            auto& resource = state_.resources[effect.resource];
+            resource.reserved = std::max(0, resource.reserved - effect.amount);
         }
-        if (effect.operation == "consume_resource" || effect.operation == "produce_resource") {
+        if (effect.operation != "release_resource") {
             changes[effect.resource] = Json{{"before", before}, {"after", resourceValue(effect.resource)}};
         }
         if (!effect.effectAction.empty() && relievedActions.insert(effect.effectAction).second &&
@@ -356,7 +366,10 @@ void WorldService::processDayBoundary(int day) {
         npc.memories.push_back(Memory{"episode", "A day passed while the world kept working.", state_.now, 1.0});
     }
     reviseNpcStrategies(day);
-    Json resources = state_.resources;
+    Json resources = Json::object();
+    for (const auto& [id, resource] : state_.resources) {
+        resources[id] = Json{{"amount", resource.amount}, {"reserved", resource.reserved}};
+    }
     addEvent("life.day", "world", "instance", "The world completes another day",
              Json{{"day", day}, {"resources", resources}});
 }
@@ -637,13 +650,20 @@ DialogueTurn WorldService::converse(const std::string& npcId, const std::string&
 
 int WorldService::resourceValue(const std::string& resource) const {
     const auto found = state_.resources.find(resource);
-    return found == state_.resources.end() ? 0 : found->second;
+    return found == state_.resources.end() ? 0 : found->second.amount;
+}
+
+int WorldService::availableResourceValue(const std::string& resource) const {
+    const auto found = state_.resources.find(resource);
+    return found == state_.resources.end() ? 0 : found->second.amount - found->second.reserved;
 }
 
 void WorldService::setResource(const std::string& resource, int value) {
     const auto definition = content_.resources.find(resource);
     if (definition == content_.resources.end()) return;
-    state_.resources[resource] = std::clamp(value, definition->second.minimum, definition->second.maximum);
+    auto& state = state_.resources[resource];
+    state.amount = std::clamp(value, definition->second.minimum, definition->second.maximum);
+    state.reserved = std::min(state.reserved, state.amount);
 }
 
 const NpcContent* WorldService::authoredNpc(const std::string& npcId) const {
@@ -656,13 +676,14 @@ bool WorldService::applyActionEffects(const std::string& npcId, const std::strin
     std::map<std::string, int> required;
     for (const auto& activity : content_.activities) {
         for (const auto& effect : activity.effects) {
-            if (effect.effectAction == actionId && effect.operation == "consume_resource") {
+            if (effect.effectAction == actionId &&
+                (effect.operation == "consume_resource" || effect.operation == "reserve_resource")) {
                 required[effect.resource] += effect.amount;
             }
         }
     }
     for (const auto& [resource, amount] : required) {
-        if (resourceValue(resource) < amount) return false;
+        if (availableResourceValue(resource) < amount) return false;
     }
     for (const auto& activity : content_.activities) {
         for (const auto& effect : activity.effects) {
@@ -670,6 +691,11 @@ bool WorldService::applyActionEffects(const std::string& npcId, const std::strin
             const int before = resourceValue(effect.resource);
             if (effect.operation == "consume_resource") setResource(effect.resource, before - effect.amount);
             if (effect.operation == "produce_resource") setResource(effect.resource, before + effect.amount);
+            if (effect.operation == "reserve_resource") state_.resources[effect.resource].reserved += effect.amount;
+            if (effect.operation == "release_resource") {
+                auto& resource = state_.resources[effect.resource];
+                resource.reserved = std::max(0, resource.reserved - effect.amount);
+            }
             if (effect.operation == "consume_resource" || effect.operation == "produce_resource") {
                 addEvent("action.resource", npcId, effect.resource, "Authored action changed a resource",
                          Json{{"action_id", actionId}, {"activity_id", activity.id}, {"resource", effect.resource},
@@ -750,7 +776,7 @@ WorldService WorldService::replay(const std::string& path, std::string contentRo
 std::string summarize(const WorldState& state) {
     std::ostringstream output;
     output << state.now.toString();
-    for (const auto& [id, value] : state.resources) output << "; " << id << '=' << value;
+    for (const auto& [id, value] : state.resources) output << "; " << id << '=' << value.amount;
     output << "; revision=" << state.revision;
     for (const auto& [id, npc] : state.npcs) {
         output << "; " << id << "@" << npc.location << ":stage=" << npc.goalStage;

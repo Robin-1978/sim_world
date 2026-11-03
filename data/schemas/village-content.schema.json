@@ -50,7 +50,7 @@
               "type": "object",
               "required": ["operation", "resource"],
               "properties": {
-                "operation": {"enum": ["consume_resource", "produce_resource"]},
+                "operation": {"enum": ["consume_resource", "produce_resource", "reserve_resource", "release_resource"]},
                 "resource": {"type": "string"},
                 "amount": {"type": "integer"},
                 "action": {"type": "string"},

@@ -98,6 +98,11 @@ struct RuntimeLinkState {
     bool locked{false};
 };
 
+struct ResourceState {
+    int amount{0};
+    int reserved{0};
+};
+
 std::string toString(EntityLifecycle lifecycle);
 EntityLifecycle entityLifecycleFromString(const std::string& value);
 
@@ -118,7 +123,7 @@ struct WorldState {
     std::string contentVersion{"village-p0.2"};
     GameTime now;
     std::uint64_t revision{0};
-    std::map<std::string, int> resources;
+    std::map<std::string, ResourceState> resources;
     // Runtime entity identity and lifecycle are authoritative world facts.
     // Typed components remain projected through EntityRegistry and are only
     // mutated by a transaction/system.

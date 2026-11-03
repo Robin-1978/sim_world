@@ -151,8 +151,9 @@ int main() {
         DrawText("TIDEMARK VILLAGE  |  WASD move  E talk  ESC quit", 24, 16, 22, RAYWHITE);
         DrawText(dialogue.c_str(), 24, 48, 18, Color{224, 210, 170, 255});
         DrawText(TextFormat("%s  grain=%d  ferry=%d  records=%d", village.state().now.toString().c_str(),
-                            village.state().resources.at("grain"), village.state().resources.at("boat_integrity"),
-                            village.state().resources.at("records_integrity")), 820, 16, 16, RAYWHITE);
+                            village.state().resources.at("grain").amount,
+                            village.state().resources.at("boat_integrity").amount,
+                            village.state().resources.at("records_integrity").amount), 820, 16, 16, RAYWHITE);
         drawVillageMap(player, npcs);
         EndDrawing();
     }
