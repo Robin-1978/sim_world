@@ -9,6 +9,7 @@ cmake --preset default
 cmake --build --preset default
 ctest --test-dir build --output-on-failure
 ./build/tide_marks_headless --scenario village --days 2 --replay /tmp/tide_marks-village.jsonl
+./build/tide_marks_headless --scenario village --days 2 --dump-events
 ```
 
 This prints the starting state, a dialogue turn, two days of NPC life, and the replay summary. It does not require a display or a running model server. `./build/tide_marks_client` is a display-free scene inspector.

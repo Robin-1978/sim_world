@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/types.hpp"
+#include "core/event_bus.hpp"
 #include "npc/action_validator.hpp"
 #include "npc/behavior_tree.hpp"
 #include "npc/goal_selector.hpp"
@@ -49,6 +50,7 @@ public:
 
     [[nodiscard]] const WorldState& state() const { return state_; }
     [[nodiscard]] std::string providerName() const { return provider_->name(); }
+    [[nodiscard]] EventBus& eventBus() { return eventBus_; }
     [[nodiscard]] bool hasNpc(const std::string& npcId) const;
     [[nodiscard]] DecisionContext decisionContext(const std::string& npcId) const;
 
@@ -73,6 +75,7 @@ public:
 private:
     WorldState state_;
     std::unique_ptr<IProvider> provider_;
+    EventBus eventBus_;
 
     void addEvent(std::string type, std::string actor, std::string target,
                   std::string detail, Json data = Json::object());

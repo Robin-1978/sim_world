@@ -58,6 +58,7 @@ if(TIDE_MARKS_FETCH_BULLET)
 endif()
 
 add_library(tide_marks_core
+    src/core/event_bus.cpp
     src/core/types.cpp
     src/npc/action_validator.cpp
     src/npc/behavior_tree.cpp

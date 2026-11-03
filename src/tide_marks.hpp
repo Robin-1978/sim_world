@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/event_bus.hpp"
 #include "core/types.hpp"
 #include "npc/action_validator.hpp"
 #include "npc/behavior_tree.hpp"

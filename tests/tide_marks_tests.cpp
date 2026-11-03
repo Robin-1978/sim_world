@@ -138,6 +138,31 @@ void physics_events_are_deterministic_and_drained() {
 #endif
 }
 
+void event_bus_is_ordered_and_filterable() {
+    EventBus bus;
+    std::vector<std::string> seen;
+    const auto dayToken = bus.subscribe("life.day", [&seen](const WorldEvent& event) { seen.push_back("day:" + event.type); });
+    const auto allToken = bus.subscribe("*", [&seen](const WorldEvent& event) { seen.push_back("all:" + event.type); });
+    (void)dayToken;
+    (void)allToken;
+    bus.publish(WorldEvent{1, 1, GameTime{}, "life.ration", "mira", "village", "", 1, Json::object()});
+    bus.publish(WorldEvent{1, 2, GameTime{}, "life.day", "world", "village", "", 2, Json::object()});
+    expect(bus.pending() == 2, "event bus queues before dispatch");
+    bus.dispatch();
+    expect((seen == std::vector<std::string>{"all:life.ration", "day:life.day", "all:life.day"}),
+           "event bus dispatches FIFO with exact and wildcard subscriptions");
+    expect(bus.pending() == 0, "event bus drains its queue");
+}
+
+void world_service_publishes_committed_events() {
+    auto service = WorldService::createVillage();
+    std::size_t delivered = 0;
+    const auto token = service.eventBus().subscribe("life.day", [&delivered](const WorldEvent&) { ++delivered; });
+    (void)token;
+    service.advanceMinutes(2 * 1440);
+    expect(delivered == 2, "WorldService publishes each committed day event");
+}
+
 }  // namespace
 
 int main() {
@@ -148,6 +173,8 @@ int main() {
     promises_cover_accept_renegotiate_refuse_and_break();
     snapshot_and_replay_are_deterministic();
     physics_events_are_deterministic_and_drained();
+    event_bus_is_ordered_and_filterable();
+    world_service_publishes_committed_events();
     if (failures != 0) {
         std::cerr << failures << " test assertion(s) failed\n";
         return EXIT_FAILURE;

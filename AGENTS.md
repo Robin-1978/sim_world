@@ -33,6 +33,8 @@ cmake --build build -j2
 
 The first three commands are the canonical build; the GCC 13 variant is useful for release validation. The headless runner must remain usable without a display or a running LLM server. Use `--provider llama` to exercise the local OpenAI-compatible endpoint; failures must fall back to authored/mock dialogue.
 
+Use `--dump-events` to inspect the committed event stream while debugging a scenario.
+
 ## Coding Style & Naming Conventions
 
 Use C++20, four-space indentation, `PascalCase` types, `camelCase` members/functions, and `snake_case` JSON keys. Keep gameplay mutations inside `WorldService`; providers return candidates and text only. Format changes should be narrow and warning-clean under `-Wall -Wextra -Wpedantic -Wconversion -Wshadow`.

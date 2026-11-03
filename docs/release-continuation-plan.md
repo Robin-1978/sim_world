@@ -37,6 +37,7 @@
 | 持续推进计划 | 当前提交 | 本文件 |
 | Git 初始化 | 已完成 | 首个提交 `78f06db`；后续使用普通 `git` 命令，禁止 `gs-commit` |
 | P0 C++ 核心骨架 | 已完成 | `src/core`, `src/world`, `src/npc`, `src/provider`, CMake FetchContent |
+| 核心事件与调试契约 | 已完成 | `src/core/event_bus.*`, `docs/local-npc-llm/core-architecture.md`, `event-bus.md`, `--dump-events` |
 | 三 NPC 村庄运行时 | 已完成 | 日程、资源、目标阶段、记忆、承诺和离线推进 |
 | 自动化验收 | 已完成 | GCC 13、CTest、headless replay/snapshot |
 | Blender 场景资产 | 已完成 | `assets/blender/village.blend` 和 `village.glb` |

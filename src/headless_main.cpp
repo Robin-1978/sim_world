@@ -10,7 +10,7 @@ using namespace tide_marks;
 namespace {
 
 void usage(const char* program) {
-    std::cout << "Usage: " << program << " [--scenario village] [--days N] [--provider mock|llama] [--replay PATH]\n";
+    std::cout << "Usage: " << program << " [--scenario village] [--days N] [--provider mock|llama] [--replay PATH] [--dump-events]\n";
 }
 
 }  // namespace
@@ -19,6 +19,7 @@ int main(int argc, char** argv) {
     int days = 2;
     std::string replayPath;
     std::string providerName = "mock";
+    bool dumpEvents = false;
     for (int i = 1; i < argc; ++i) {
         const std::string argument = argv[i];
         if (argument == "--help") {
@@ -31,6 +32,8 @@ int main(int argc, char** argv) {
             replayPath = argv[++i];
         } else if (argument == "--provider" && i + 1 < argc) {
             providerName = argv[++i];
+        } else if (argument == "--dump-events") {
+            dumpEvents = true;
         }
     }
 
@@ -56,6 +59,13 @@ int main(int argc, char** argv) {
         service.writeReplay(replayPath);
         const auto replayed = WorldService::replay(replayPath);
         std::cout << "replay: " << summarize(replayed.state()) << '\n';
+    }
+    if (dumpEvents) {
+        for (const auto& event : service.state().events) {
+            std::cout << "event " << event.sequence << ' ' << event.at.toString() << ' '
+                      << event.type << ' ' << event.actor << " -> " << event.target
+                      << " | " << event.detail << '\n';
+        }
     }
     return 0;
 }

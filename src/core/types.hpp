@@ -85,6 +85,7 @@ struct VillageState {
 };
 
 struct WorldEvent {
+    int schemaVersion{1};
     std::uint64_t sequence{0};
     GameTime at;
     std::string type;

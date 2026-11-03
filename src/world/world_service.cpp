@@ -44,11 +44,11 @@ NpcDefinition npcDefinitionFromJson(const Json& json) {
                          jsonValue<std::string>(json, "voice", "")};
 }
 Json eventJson(const WorldEvent& event) {
-    return Json{{"sequence", event.sequence}, {"minute", event.at.minute}, {"type", event.type}, {"actor", event.actor},
+    return Json{{"schema_version", event.schemaVersion}, {"sequence", event.sequence}, {"minute", event.at.minute}, {"type", event.type}, {"actor", event.actor},
                 {"target", event.target}, {"detail", event.detail}, {"world_revision", event.worldRevision}, {"data", event.data}};
 }
 WorldEvent eventFromJson(const Json& json) {
-    return WorldEvent{jsonValue<std::uint64_t>(json, "sequence", 0), GameTime{jsonValue<std::int64_t>(json, "minute", 0)},
+    return WorldEvent{jsonValue<int>(json, "schema_version", 1), jsonValue<std::uint64_t>(json, "sequence", 0), GameTime{jsonValue<std::int64_t>(json, "minute", 0)},
                       jsonValue<std::string>(json, "type", "unknown"), jsonValue<std::string>(json, "actor", ""),
                       jsonValue<std::string>(json, "target", ""), jsonValue<std::string>(json, "detail", ""),
                       jsonValue<std::uint64_t>(json, "world_revision", 0), json.value("data", Json::object())};
@@ -394,8 +394,10 @@ DialogueTurn WorldService::converse(const std::string& npcId, const std::string&
 void WorldService::addEvent(std::string type, std::string actor, std::string target,
                             std::string detail, Json data) {
     ++state_.revision;
-    state_.events.push_back(WorldEvent{state_.events.size() + 1, state_.now, std::move(type), std::move(actor),
+    state_.events.push_back(WorldEvent{1, state_.events.size() + 1, state_.now, std::move(type), std::move(actor),
                                        std::move(target), std::move(detail), state_.revision, std::move(data)});
+    eventBus_.publish(state_.events.back());
+    eventBus_.dispatch();
 }
 
 Json toJson(const WorldState& state) {
