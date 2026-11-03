@@ -1,0 +1,8 @@
+# Deterministic text-client smoke test for the village slice.
+look
+map
+talk mira ration please
+day
+events 8
+save /tmp/tide_marks-example.json
+quit

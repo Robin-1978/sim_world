@@ -23,6 +23,7 @@ public:
     void publish(WorldEvent event);
     void dispatch();
     [[nodiscard]] std::size_t pending() const { return queue_.size(); }
+    [[nodiscard]] std::size_t deliveryFailures() const { return deliveryFailures_; }
     void clear();
 
 private:
@@ -32,6 +33,7 @@ private:
     };
     Token nextToken_{1};
     bool dispatching_{false};
+    std::size_t deliveryFailures_{0};
     std::map<Token, Subscription> subscriptions_;
     std::deque<WorldEvent> queue_;
 };

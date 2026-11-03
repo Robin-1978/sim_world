@@ -1,9 +1,14 @@
 {
-  "content_version": "village-p0.1",
+  "content_version": "village-p0.2",
+  "initial_time": {"day": 1, "hour": 6},
   "id": "village_tidemark",
   "display_name": "Tidemark Village",
   "locations": ["granary", "village_square", "ferry_dock", "archive", "mira_home", "lorn_house", "archive_room"],
   "resources": {"grain": 100, "boat_integrity": 72, "records_integrity": 80},
+  "entity_archetypes": [
+    {"id": "world_object", "kind": "world_object", "metadata": {"owned_by": "world"}},
+    {"id": "marker", "kind": "marker", "metadata": {"persistent": false}}
+  ],
   "map": {
     "bounds": {"min_x": -12, "max_x": 12, "min_z": -10, "max_z": 10},
     "nodes": [
@@ -16,6 +21,20 @@
     ],
     "roads": [["mira_home", "granary"], ["granary", "archive"], ["archive", "ferry_dock"], ["lorn_house", "village_square"]]
   },
+  "entities": [
+    {"id": "mira_home", "kind": "place", "display_name": "Mira's home", "bounds": {"min_x": -8, "max_x": -4, "min_z": -7, "max_z": -3}, "tags": ["home", "private"]},
+    {"id": "lorn_house", "kind": "place", "display_name": "Lorn's house", "bounds": {"min_x": -3, "max_x": 1, "min_z": -7, "max_z": -3}, "tags": ["home", "private"]},
+    {"id": "archive_room", "kind": "place", "display_name": "Archive room", "bounds": {"min_x": 2, "max_x": 6, "min_z": -7, "max_z": -3}, "tags": ["home", "private"]},
+    {"id": "granary", "kind": "place", "display_name": "Granary", "bounds": {"min_x": -7, "max_x": -3, "min_z": 2, "max_z": 5}, "tags": ["workplace", "resource"]},
+    {"id": "archive", "kind": "place", "display_name": "Archive", "bounds": {"min_x": 1, "max_x": 5, "min_z": 2, "max_z": 5}, "tags": ["workplace", "records"]},
+    {"id": "ferry_dock", "kind": "place", "display_name": "Ferry dock", "bounds": {"min_x": 5, "max_x": 8, "min_z": -1.5, "max_z": 1.5}, "tags": ["workplace", "transport"]},
+    {"id": "village_square", "kind": "place", "display_name": "Village square", "bounds": {"min_x": -3, "max_x": 5, "min_z": -1, "max_z": 1}, "tags": ["public", "meeting"]}
+  ],
+  "links": [
+    {"id": "granary_square", "kind": "portal", "endpoints": ["granary", "village_square"], "traversable": true, "tags": ["public"]},
+    {"id": "archive_square", "kind": "portal", "endpoints": ["archive", "village_square"], "traversable": true, "tags": ["public"]},
+    {"id": "ferry_square", "kind": "portal", "endpoints": ["ferry_dock", "village_square"], "traversable": true, "tags": ["public"]}
+  ],
   "scene_asset": "assets/blender/village.glb",
   "camera": "slanted_top_down"
 }

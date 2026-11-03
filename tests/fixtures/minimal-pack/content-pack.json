@@ -1,0 +1,9 @@
+{
+  "kind": "world_content_pack",
+  "schema_version": 1,
+  "id": "fixture.minimal",
+  "version": "1.0.0",
+  "world": "world.json",
+  "npcs": ["npc.json"],
+  "dialogue": "dialogue.json"
+}

@@ -27,7 +27,13 @@ void EventBus::dispatch() {
         for (const auto& [token, subscription] : subscriptions_) {
             (void)token;
             if (subscription.eventType == "*" || subscription.eventType == event.type) {
-                subscription.handler(event);
+                try {
+                    subscription.handler(event);
+                } catch (...) {
+                    // Delivery happens after commit. Projection failures must
+                    // remain observable without rolling back committed facts.
+                    ++deliveryFailures_;
+                }
             }
         }
     }
@@ -36,6 +42,7 @@ void EventBus::dispatch() {
 
 void EventBus::clear() {
     queue_.clear();
+    deliveryFailures_ = 0;
 }
 
 }  // namespace tide_marks

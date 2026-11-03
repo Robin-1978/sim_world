@@ -1,7 +1,7 @@
 # 《潮痕》开放世界 RPG 游戏设计与 NPC Runtime 技术方案
 
-> English version: [design.en.md](design.en.md)
-> 开发实现版：[development-design.md](development-design.md)
+> 当前唯一总设计：产品、Runtime、演化边界和开发阶段均在本文档。
+> 持续推进状态：[../release-continuation-plan.md](../release-continuation-plan.md)
 
 > 文档类型：游戏设计与技术方案
 > 状态：首版完整方案
@@ -15,6 +15,24 @@
 玩家扮演“回声修复师”，拥有修复灯塔中继站的能力。修复网络可以让群岛重新连接，也可能把所有人的身份、债务、秘密和行为重新交给一个中央系统。玩家必须在探索、交易、调查和人与人的承诺中决定群岛恢复成什么样子。
 
 游戏的核心不是和 NPC 聊得越久越好，而是让每次重要交谈都产生一个可执行的选择：答应、拒绝、撒谎、交换、调查、威胁、保护某人，或者把一个承诺留到以后兑现。对话改变关系，关系改变可获得的信息和帮助，帮助改变玩家能走的路线和最终选择。
+
+### 核心哲学：世界是主体，智能受约束地推动演化
+
+《潮痕》不是“加了一个 LLM 对话功能的游戏”，而是“能够持续存在、理解变化并受约束演化的数字世界”。世界拥有自己的时间、居民、资源、关系和历史；玩家可以观察、参与和干预，但不是世界运行的前提。LLM 负责理解、推理、规划和提出变化，不拥有世界事实，也不能绕过运行时。
+
+产品必须具备五项特征：
+
+| 特征 | 设计含义 |
+|---|---|
+| 持续性 | 玩家离开后，村庄按自己的日程、资源和承诺继续生活 |
+| 自主性 | NPC 能形成并执行自己的目标，不等待任务标记 |
+| 记忆性 | 已发生事件影响关系、判断和后续计划 |
+| 涌现性 | 作者定义规则与内容组合，系统产生未逐一编写的事件链 |
+| 演化性 | 世界知识和系统能力可以提案、验证、发布、观察和回滚 |
+
+演化分两条回路。**世界回路**在游戏内运行：观察 → 理解 → 世界变更提案 → 规则验证 → 事务提交 → 观察后果。**能力回路**先作为离线研究流程：发现现有表达不足 → 提出 Schema、组件组合、行为配方或工具 → 沙箱验证 → 版本化发布。世界可以自主演化，系统可以逐步进化，但都不能破坏事务、事件、存档、权限和调度这些支撑自身运行的核心机制。
+
+游戏中的演化先表现为 NPC 修正计划、传闻扩散、经济调整、关系重组和作者内容的组合。新增组件类型、行为树节点和底层能力仍由开发者版本化发布。每个提案必须带来源、影响范围、预期结果和回滚点，并留下可审计记录。
 
 ## 二、核心体验和循环
 
@@ -190,29 +208,24 @@ flowchart LR
     World --> Save[存档与事件日志]
 ```
 
-Provider 由配置选择，不绑定代码中的固定模型：
+Provider 由 JSON 配置选择，不绑定代码中的固定模型：
 
-```yaml
-providers:
-  local_llamacpp:
-    type: openai_compatible
-    base_url: http://127.0.0.1:8192/v1
-    model: Huihui-Qwen3.5-4B-abliterated.Q4_K_M
-    api_key_env: null
-    timeout_ms: 5000
-    supports_stream: true
-    supports_json_schema: true
-
-  cloud_quality:
-    type: openai_compatible
-    base_url: https://provider.example/v1
-    model: provider-model-name
-    api_key_env: NPC_CLOUD_API_KEY
-    timeout_ms: 8000
-    supports_stream: true
-    supports_json_schema: true
-
-default_provider: local_llamacpp
+```json
+{
+  "$schema": "schemas/provider.schema.json",
+  "providers": {
+    "local_llamacpp": {
+      "type": "openai_compatible",
+      "base_url": "http://127.0.0.1:8192/v1",
+      "model": "local-model",
+      "api_key_env": null,
+      "timeout_ms": 5000,
+      "supports_stream": true,
+      "supports_json_schema": true
+    }
+  },
+  "default_provider": "local_llamacpp"
+}
 ```
 
 本地 Provider 不需要 API Key。云 Provider 通过 `api_key_env` 读取环境变量，正式发行版使用操作系统密钥库或平台密钥服务；API Key 不写入 `configs/npcs/`、存档、日志、Prompt、崩溃报告或版本库。Provider Registry 提供 `stream_turn`、`cancel_turn`、`health_check` 和能力查询接口，NPC Runtime 不感知具体供应商。
@@ -235,13 +248,13 @@ default_provider: local_llamacpp
 
 ## 十、开发阶段和首个可玩切片
 
-### 阶段 1：潮门港垂直切片
+### 阶段 1：三 NPC 小村庄运行时验证
 
-制作一个可探索港区、3 个重要 NPC、1 个阵营冲突、1 个小型失踪任务和 1 个灯塔修复点。玩家可以通过不同的承诺完成任务，至少得到三种不同的关系结果。使用本地 Qwen3.5 4B，文本对话，无语音。
+先制作三 NPC 小村庄，使用文本客户端验证确定性时间、每日计划、压力事件、承诺簿、关系四轴、事实记忆、本地 Qwen3.5 4B 对话和无模型回退。玩家推进两天后，必须看到 NPC 自己行动产生的结果，并完成存档、检查点恢复和非法命令零变更验收。
 
-### 阶段 2：NPC 推进和存档
+### 阶段 2：潮门港内容切片
 
-加入每日计划、压力事件、承诺簿、关系四轴、事实记忆和离线回退。玩家离开区域并推进两天后返回，必须能看到 NPC 自己行动产生的结果。
+在已验证的运行时上制作可探索港区、3 个重要 NPC、1 个阵营冲突、1 个小型失踪任务和 1 个灯塔修复点。玩家通过不同承诺完成任务，至少得到三种关系结果。加入 3D 场景、对话 UI 和物理机关。
 
 ### 阶段 3：三阵营和区域联动
 
@@ -266,8 +279,165 @@ default_provider: local_llamacpp
 - 玩家开始新航程后，图鉴和结局记录可以继承，但旧时间线的亲密关系、承诺和世界状态不会被误带入。
 - 新航程不会覆盖或损坏已完成的结局存档；本地模型不可用时，“回潮后”仍可探索、推进 NPC 日程并完成规则任务。
 
-## 十二、参考边界
+## 十二、Runtime 总体架构
+
+《潮痕》的 Runtime 必须先于具体 NPC 内容稳定。它不依赖某个模型，也不允许模型成为事实来源。
+
+### Runtime、内容包和游戏实例
+
+| 层 | 负责什么 | 不允许做什么 |
+|---|---|---|
+| **Adaptive Runtime** | Entity/Component、事务、事件、调度、存档、回放、提案验证、版本和回滚 | 不知道 Mira、村庄或临潮群岛剧情；不接受模型在线注入代码 |
+| **World Content Pack** | 声明式地图、空间实体、连接关系、资源、需求、NPC 原型、日程、目标、行为配方、事件规则和对白 | 不直接操作 Runtime State；不持有某个存档的当前运行事实 |
+| **Game Instance** | 临潮群岛的初始配置、角色实例、开局关系、剧情入口、视觉资产和玩家体验 | 不重复实现通用世界机制 |
+| **LLM Intelligence Profile** | 感知投影、记忆策略、提示模板、模型能力、工具白名单和演化策略 | 不拥有世界事实的最终写入权 |
+| **World Runtime State** | 当前真实存在的实体、组件、时间、资源、关系、承诺、事件和版本 | 不反向覆盖原始 Content Pack；只能作为可迁移的演化输入 |
+
+《潮痕》不是被丢弃的样例，而是第一个完整的 Runtime 实例和验证产品。未来可以用同一个 Runtime 加载不同世界内容包；实例不应把 Mira、Lorn、Eve、空间名称或具体数值编译进核心。当前入口是 `WorldService::load()` / `fromContent()`。
+
+Content Pack 提供 Mira 的初始定义；Game Instance 决定她在临潮群岛中的开局位置和关系；Runtime 创建实体并维护当前状态；运行中的搬家、关系变化和新目标只进入 World Runtime State 与 EventLog。它们可以生成新的 Content/Knowledge/Strategy Proposal，但不能静默改写原始 pack。
+
+| 层 | 职责 | 权威边界 |
+|---|---|---|
+| `WorldService` | 应用入口、命令协调、事务提交 | 唯一公开写入入口 |
+| `WorldState` | 时间、资源、NPC、关系、承诺、任务和事件事实 | 已提交事实的唯一权威 |
+| `EntityRegistry` | 稳定 Entity ID、类型化 Component 索引和生命周期 | 不包含游戏专属 `setDoor()`/`setRoom()`；外部只读 |
+| Domain Systems | NPC、需求、经济、关系、任务、移动和物理规则 | 通过事务提出和验证变更 |
+| `WorldScheduler` | 游戏时间、日程、截止时间和远端压缩推进 | 唯一 `advance_to(target)` 入口 |
+| `EventLog` | 已提交事实的有序历史 | 持久化审计和恢复来源 |
+| `EventBus` | 提交后的进程内通知 | 不能否决或回滚事实 |
+| View/Renderer | 玩家可见投影、文本和 3D 展示 | 只读，不拥有世界状态 |
+
+实体身份和生命周期属于 `WorldState` 的权威事实。每个实体经过 `active -> dormant -> destroyed` 的生命周期；`destroyed` 身份保留在存档和事件历史中，但不会继续出现在活动组件投影。`EntityRegistry` 只把当前可投影的实体索引出来，不能自行创建或删除世界事实。世界可以通过 `WorldService::createEntity()` 创建实体，但创建必须引用内容包登记的 `entity_archetype`，由事务合并默认元数据、校验唯一 ID、追加 `entity.created` 事件后提交。休眠保留身份和组件，激活恢复参与模拟，销毁不可复活。未来的组件初始化、权限和资源分配也必须沿同一事务扩展；LLM 只能提出创建提案，不能直接调用注册表。
+
+这里有三种不同东西，不能混成两份可写游戏状态：JSON 是内容/提案的机器边界，C++ 类型是编译期运行时契约，`WorldState` 是某个世界实例当前事实。加载时 JSON 只负责初始化和校验；运行中只修改 `WorldState`，`EntityRegistry`/Component 是从已提交事实重建的投影，存档只保存实例状态。当前项目尚未发布，因此 schema 变更直接同步修改代码、数据、测试和文档，不保留旧字段别名或未使用的兼容解析路径。
+
+### 变更事务
+
+所有来自玩家、NPC、行为树、物理、离线调度或 LLM 的变更都走同一条链：
+
+```text
+Proposal/Command
+  -> Schema、权限、可见性、版本和业务规则校验
+  -> 在事务暂存状态中修改多个 Entity/Component
+  -> 递增 WorldRevision，追加带 Sequence 的 WorldEvent
+  -> 原子提交 WorldState 和 EventLog
+  -> 同步组件/视图投影
+  -> 提交后发布 EventBus
+```
+
+提交前失败不改变状态、Revision 或事件；提交后订阅者失败只能进入诊断计数，不能回滚世界或阻塞后续订阅者。每条命令有 `turn_id`/幂等键；涉及多个实体时使用同一个事务和版本检查。
+
+### 时间与模拟等级
+
+物理时间、游戏时间和事件时间分开。Bullet 只在近场固定步长运行；NPC 决策由事件唤醒或固定频率运行；远端 NPC 跳到下一个有意义的日程、会面、资源结算或承诺截止。所有游戏时间跳跃都由 `WorldScheduler::advance_to` 按时间排序处理，不允许 `WorldService`、NPC 和物理各自推进时钟。
+
+近场和远端共享 `MovementIntent` 与 `MovementResult`：起点、目的地、路线、预计到达时间、资源消耗和成功/失败原因。近场执行导航、连接通行检查和物理尝试，远端执行路线可达性和时间估算；进入或离开区域时传递同一逻辑位置和结果，不重新初始化 NPC。
+
+## 十三、NPC 决策和 LLM 边界
+
+NPC 不是一个每帧调用模型的 Agent。每个 NPC 由身份、物理状态、需求、长期目标、记忆、关系和当前执行计划组成。
+
+| 层 | 问题 | 决定者 |
+|---|---|---|
+| Needs/Rules | 生存、工作、休息、资源阈值是否触发 | 确定性规则 |
+| GoalSelector | 现在最重要的长期结果是什么 | Utility/规则 |
+| State Machine | NPC 当前处于工作、移动、交谈、打断还是不可用 | 规则信号 |
+| Behavior Tree | 如何执行短计划，何时成功、失败或中断 | 作者/程序定义的树 |
+| LLM | 如何理解复杂社会情境、选择已有候选并表达 | 受限提案 |
+| WorldService | 变更是否真的成立 | 事务和规则 |
+
+LLM 的输出分成 `InteractionProposal` 和 `DialogueProposal`。前者只能选择当前 `DecisionContext` 中的 `action_id`、`beat_id` 或社会意图；后者提供对白、情绪、解释和候选记忆。输出必须带 `world_revision`、`npc_state_version`、Provider/Model、Prompt 版本和 `turn_id`。`rationale` 只用于诊断，不参与规则判断。过期响应可以保留审计，但没有提交权限。
+
+记忆由已提交事件生成：事实记忆和关系轴是规则可用的权威/派生数据，模型只提交候选摘要；MemoryService 失败时可以从 EventLog 重建，不能让已经成立的承诺回滚。Perception 必须记录事实来源、观察时间、置信度和可见范围，传闻不能自动升级为事实。
+
+## 十四、数据驱动内容和演化
+
+机器边界统一使用 JSON。Content Pack、Game Instance、Intelligence Profile、Behavior DSL、Evolution Proposal、Snapshot、EventLog 和 LLM 结构化输出都有 JSON Schema、`kind`、`schema_version`、`content_version` 和稳定 ID。运行时内部可以转换为强类型 C++ 对象，但不能为同一数据再维护 YAML 或另一套隐式格式。硬编码只保留 Runtime 不变量和通用算法。空间实体、连接关系、日程、需求阈值、资源消耗、关系初始值、目标、行为树、事件条件和对白都来自版本化 World Content Pack Schema。加载器负责重复 ID、缺失引用、循环依赖和 schema 版本校验；当前未发布阶段不保留旧字段兼容路径。内容修改不能静默重置已有存档。内容包中的规则只能使用 Runtime 已注册的能力和参数，不能加载任意可执行代码。
+
+Behavior DSL 只组合已注册节点和动作，使用显式节点类型，不允许模型生成 C++ 或任意脚本：
+
+```json
+{
+  "kind": "behavior_recipe",
+  "schema_version": 1,
+  "id": "mira.cooperative_transport",
+  "root": {
+    "type": "sequence",
+    "children": [
+      {"type": "condition", "name": "grain_below", "args": {"value": 80}},
+      {"type": "action", "name": "coordinate_ferry", "args": {"partner": "lorn"}}
+    ]
+  }
+}
+```
+
+LLM 演化是产品的核心能力，不只是对白或辅助工具。世界本身可以随时变化；真正需要受保护的是承载变化的 Runtime 和可验证性。演化对象分为四类：
+
+| 演化对象 | 例子 | 验证与治理 |
+|---|---|---|
+| Content | 新地点、物品、NPC 设定、聚落和路线 | Schema、引用完整性、资源预算、世界规则、存档迁移 |
+| Knowledge | NPC 对人物、事件、地点和传闻的认识 | 来源、时间、置信度、可见范围；主体认知不能自动成为客观事实 |
+| Strategy | 目标权重、协作方式、经济策略、冲突处理 | 沙箱回放、指标对比、版本管理、超时和回滚 |
+| Declarative Capability | 新行为配方、规则组合、查询和工具描述 | 能力白名单、静态校验、资源上限、运行时授权 |
+| Runtime Core | 事务、组件存储、调度、权限、事件和存档代码 | 模型不得直接修改；只允许开发者评审、构建、迁移和发布 |
+
+```text
+LLM 演化回路：
+Observe -> Model / Evaluate -> Proposal -> Validator -> Sandbox / Replay
+-> Versioned activation -> Measure -> Retain / Roll back
+```
+
+演化提案统一使用 JSON，并至少包含：提案 ID、`kind`、schema 版本、来源模型和上下文、依据事实、影响范围、类型化 `operations`、预期效果、指标、预算、过期时间、兼容的 Runtime/Content 版本、沙箱结果、审批/激活记录和回滚点。`operations` 不是任意 JSON Patch，而是 Runtime 注册的操作，例如 `create_entity_archetype`、`add_relationship`、`overlay_strategy`、`schedule_event` 和 `register_behavior_recipe`。LLM 可以主动发现问题并提出改变，但任何在线变更都必须通过 Proposal Validator；能力变更先在隔离世界或回放沙箱验证，再以版本化 overlay 激活。
+
+LLM 的价值最大化体现在认知闭环，而不是越权写入：感知投影、因果解释、异常发现、目标和策略提案、知识整理、内容组合、沙箱实验、结果分析和下一轮修正都由 LLM 参与；事实提交、资源扣除、权限、迁移、事件序列和回滚由 Runtime 决定。模型关闭时，已激活的 JSON overlay 和确定性规则仍能继续运行。
+
+世界演化和系统能力演化使用同一类可追踪提案，但权限不同：
+
+```text
+World Evolution:
+observe -> understand -> propose world change -> validate -> commit -> observe
+
+Capability Evolution:
+detect expressive gap -> propose schema/recipe/tool -> sandbox -> evaluate
+-> developer approval -> versioned activate -> measure -> rollback/retain
+```
+
+世界提案可以组合已有 Entity、Component、规则、行为配方和内容，形成新聚落、路线、传闻、交易和社会关系。Declarative Capability 提案若只使用已注册节点和规则，可以在沙箱通过后版本化激活；新增 C++ Component、System、权限、调度、事件格式、存档迁移或可执行代码仍必须由开发者发布。任何演化都必须有来源、影响范围、预期结果、预算、过期时间、版本和回滚点。
+
+## 十五、存档、回放和诊断
+
+Snapshot 包含 `save_schema_version`、`simulation_version`、`content_version/hash`、`world_revision`、`event_sequence`、游戏时间、权威状态、幂等键和必要的随机数状态。`event_sequence` 是快照截断点，后续 EventLog 只能从它之后追加。
+
+P0 只承诺“检查点恢复”：读取已提交快照和已记录响应，不调用 LLM。未来的“确定性模拟回放”还需要命令输入日志、Provider 响应、上下文版本、RNG 状态和规则重跑；不能把两种回放混为一谈。Bullet 的物理只承诺固定环境下尽量复现，规则层和远端 LifeEvent 才是跨平台确定性目标。
+
+P0 调试工具必须能显示：当前时间和 Revision、Entity/Component、NPC 目标/状态/树节点、最近命令及拒绝原因、事件序列、Provider 响应分类、保存截断点和回放差异。调试工具读已提交状态，暂存预览必须显式标记。
+
+## 十六、实施路线和 P0 展示
+
+### P0：三 NPC 小村庄 Runtime
+
+先完成文本可测试核心：确定性时间、需求/资源压力、三 NPC 日程、目标/状态机/行为树、NPC 间关系、承诺、记忆、通用 Entity/Component、事务、EventLog、Snapshot、Replay 和 LLM fallback。P0 的关键展示不是聊天，而是无需玩家点击的因果链：
+
+```text
+资源压力 -> NPC 产生目标 -> NPC 执行动作 -> 影响另一个 NPC/公共资源
+-> 关系或策略改变 -> 次日计划不同 -> EventLog 可回放
+```
+
+### P1：潮门港内容切片
+
+在已验证 Runtime 上加入港区 3D 场景、阵营冲突、失踪任务、物理机关和完整 UI。P1 再做近远场 LOD、资源预留、内容迁移和开发者事件检查器。
+
+### P2：LLM 演化 Runtime
+
+实现 Evolution Proposal、提案库、来源/事实引用、沙箱世界、回放评估、预算、版本化 Content/Knowledge/Strategy overlay、激活和回滚。世界可以在玩家不参与时触发“世界管家”评估，但不会每帧调用 LLM。先支持声明式能力和已有组件组合，不热加载任意代码。
+
+### P3：群岛与能力扩展
+
+扩展区域、阵营、经济和主线余波；研究声明式 Schema、行为配方、工具和规划器如何扩展系统表达能力。任何新增可执行代码仍通过开发者评审、构建、迁移和发布完成。
+
+## 十七、参考边界
 
 `robot_simu` 只参考固定时间、独立调度、配置事务校验和状态所有权，不作为游戏框架。`BieTheirBed` 只参考 Agent Runtime 的模型步骤、工具副作用隔离、会话持久化、命令/事件分离和恢复语义。两者都不进入游戏运行时依赖。
 
-当前本地验证服务为 `http://127.0.0.1:8192`，模型为 `Huihui-Qwen3.5-4B-abliterated.Q4_K_M`，验证记录位于 `docs/local-npc-llm/evidence/qwen35-4b-llama-cpp.json`。
+当前本地验证模型为 `Huihui-Qwen3.5-4B-abliterated.Q4_K_M`，验证记录位于 [evidence/qwen35-4b-llama-cpp.json](evidence/qwen35-4b-llama-cpp.json)。

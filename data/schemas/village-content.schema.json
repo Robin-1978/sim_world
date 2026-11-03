@@ -1,14 +1,59 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Tide Marks village content",
+  "title": "Adaptive world content",
   "type": "object",
-  "required": ["content_version", "id"],
+  "required": ["content_version", "id", "entities", "links"],
   "properties": {
     "content_version": {"type": "string"},
     "id": {"type": "string", "pattern": "^[a-z0-9_-]+$"},
     "display_name": {"type": "string"},
     "locations": {"type": "array", "items": {"type": "string"}},
-    "resources": {"type": "object"}
+    "resources": {"type": "object"},
+    "entities": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "kind", "display_name", "bounds"],
+        "properties": {
+          "id": {"type": "string"},
+          "kind": {"type": "string"},
+          "display_name": {"type": "string"},
+          "bounds": {"type": "object"},
+          "tags": {"type": "array", "items": {"type": "string"}}
+        },
+        "additionalProperties": true
+      }
+    },
+    "links": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "kind", "endpoints"],
+        "properties": {
+          "id": {"type": "string"},
+          "kind": {"type": "string"},
+          "endpoints": {"type": "array", "minItems": 2, "items": {"type": "string"}},
+          "traversable": {"type": "boolean"},
+          "locked": {"type": "boolean"},
+          "required_item": {"type": "string"},
+          "tags": {"type": "array", "items": {"type": "string"}}
+        },
+        "additionalProperties": true
+      }
+    },
+    "entity_archetypes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "kind"],
+        "properties": {
+          "id": {"type": "string"},
+          "kind": {"type": "string"},
+          "metadata": {"type": "object"}
+        },
+        "additionalProperties": true
+      }
+    }
   },
   "additionalProperties": true
 }

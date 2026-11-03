@@ -42,6 +42,21 @@ std::string toString(PromiseStatus status) {
     return "unknown";
 }
 
+std::string toString(EntityLifecycle lifecycle) {
+    switch (lifecycle) {
+        case EntityLifecycle::Active: return "active";
+        case EntityLifecycle::Dormant: return "dormant";
+        case EntityLifecycle::Destroyed: return "destroyed";
+    }
+    return "active";
+}
+
+EntityLifecycle entityLifecycleFromString(const std::string& value) {
+    if (value == "dormant") return EntityLifecycle::Dormant;
+    if (value == "destroyed") return EntityLifecycle::Destroyed;
+    return EntityLifecycle::Active;
+}
+
 PromiseStatus promiseStatusFromString(const std::string& value) {
     if (value == "accepted") return PromiseStatus::Accepted;
     if (value == "renegotiated") return PromiseStatus::Renegotiated;

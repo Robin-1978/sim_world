@@ -2,6 +2,8 @@
 
 The repository currently contains the first playable three-NPC village slice. Run all commands from the repository root.
 
+Tide Marks is a rule-driven world that keeps living without the player at its center. Local language models interpret events, reason about social situations, and propose constrained changes; deterministic transactions, events, saves, and validators decide what becomes true. World evolution and capability evolution must stay observable, reproducible, and reversible.
+
 ## Headless run
 
 ```bash
@@ -13,6 +15,20 @@ ctest --test-dir build --output-on-failure
 ```
 
 This prints the starting state, a dialogue turn, two days of NPC life, and the replay summary. It does not require a display or a running model server. `./build/tide_marks_client` is a display-free scene inspector.
+
+## Text interface
+
+For core gameplay without graphics, use the terminal client:
+
+```bash
+./build/tide_marks_text
+```
+
+Try `look`, `map`, `entities`, `talk mira ration please`, `day`, `events`, `save /tmp/village.json`, and `quit`. The text console also exposes the lifecycle path with `entity-create <id> <archetype>`, `entity-dormant <id>`, `entity-activate <id>`, and `entity-destroy <id>`. Scripted sessions are also supported:
+
+```bash
+./build/tide_marks_text --script docs/examples/village-session.txt
+```
 
 ## 3D window
 
@@ -55,4 +71,4 @@ TIDE_MARKS_MODEL=Huihui-Qwen3.5-4B-abliterated.Q4_K_M \
 
 The provider only selects authored actions. If the server times out or returns invalid JSON, the game uses deterministic fallback dialogue.
 
-The design and continuation checkpoint are in [`docs/release-continuation-plan.md`](docs/release-continuation-plan.md).
+The design and continuation checkpoint are in [`docs/design.md`](docs/design.md) and [`docs/release-continuation-plan.md`](docs/release-continuation-plan.md).

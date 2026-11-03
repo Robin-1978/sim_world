@@ -46,7 +46,7 @@ int main(int argc, char** argv) {
     } else {
         provider = std::make_unique<MockProvider>();
     }
-    auto service = WorldService::createVillage(std::move(provider));
+    auto service = WorldService::load(ContentPackLoader::defaultRoot(), std::move(provider));
     std::cout << "《潮痕》 village scenario | provider=" << service.providerName() << '\n';
     std::cout << summarize(service.state()) << '\n';
 

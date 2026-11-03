@@ -7,5 +7,6 @@
   "public_goal": "Keep grain rationing fair",
   "hidden_goal": "Protect an undocumented family member",
   "boundary": "Never endanger a child to satisfy an official order",
+  "initial": {"location": "granary", "resource": 100, "pressure": 0.25, "strategy": "ration_ledger", "peer_trust": {"lorn": 0.35, "eve": 0.30}},
   "schedule": {"06:00-12:00": "granary", "12:00-16:00": "village_square", "16:00-06:00": "mira_home"}
 }

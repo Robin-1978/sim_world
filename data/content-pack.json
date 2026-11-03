@@ -1,0 +1,9 @@
+{
+  "kind": "world_content_pack",
+  "schema_version": 1,
+  "id": "tide_marks.village",
+  "version": "0.2.0",
+  "world": "world/village.json",
+  "npcs": ["npcs/mira.json", "npcs/lorn.json", "npcs/eve.json"],
+  "dialogue": "dialogue/village-beats.json"
+}

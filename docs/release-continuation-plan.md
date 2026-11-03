@@ -1,15 +1,15 @@
 # 《潮痕》持续推进计划
 
-> 状态：P0 小村庄垂直切片开发中  
+> 状态：P0 内容包与通用拓扑迁移已完成，进入演化提案基础设施
 > 最后更新：2026-11-03  
-> 当前目标：完成三 NPC 小村庄的可运行核心、LLM 决策适配、行为树执行、世界推进、回放和自动化验证。
+> 当前目标：完成三 NPC 小村庄的可测试核心，并在进入港区之前完成事务、事件、存档和组件投影的验收。
 
 ## 上下文恢复入口
 
 对话被压缩、会话重启或开发者接手时，按以下顺序恢复，不重复已经通过的工作：
 
 1. 阅读本文件的“当前检查点”和“未完成工作”。
-2. 阅读 [development-design.md](local-npc-llm/development-design.md) 第 3、5、15 节。
+2. 阅读 [design.md](design.md) 的“核心哲学”“Runtime 总体架构”“数据驱动内容和演化”和“实施路线”四节。
 3. 查看 `git status --short` 和最近一次提交。
 4. 运行 `cmake --build --preset default` 与 `ctest --test-dir build --output-on-failure`。
 5. 先修复失败的验收项，再继续当前检查点；不要为了通过测试删除功能或放宽断言。
@@ -17,12 +17,14 @@
 
 ## 已锁定的产品和技术决策
 
-- 产品是单人 3D 开放世界 RPG；P0 使用 3D 斜俯视/跟随相机，UI 使用 2D 面板。
+- 产品是单人开放世界叙事 RPG，长期架构是“规则驱动、可自主运行、可通过验证提案演化的数字世界”；《潮痕》是第一个世界应用。
+- 第一交付先完成文本可测试核心，3D 斜俯视客户端随后接入；渲染不决定世界规则。
 - 游戏核心使用 C++20/CMake；渲染使用 raylib 6.x；UI 使用 TGUI raylib backend。
 - 物理使用 Bullet 3.25，通过 `IPhysicsWorld` 隔离；不让 NPC 和剧情代码包含 Bullet 头文件。
 - 世界由 `WorldService` 作为 Model 权威推进；Controller 只提交命令；View 只读投影。
 - NPC 由 WorldState、Perception、Memory、Character、Decision、Execution 六层组成。
-- `GoalSelector` 选择目标，LLM 在候选行动中做高层决策，行为树执行行动，ActionExecutor 原子提交事件。
+- `GoalSelector` 选择长期目标，状态机管理模式，行为树执行计划；LLM 只提出受约束的交互意图和表达候选，ActionExecutor 原子提交事件。
+- LLM、规则系统、UI 和物理都只能提交命令或提案；世界演化必须可验证、可追溯、可回滚，系统能力演化必须经过沙箱和版本化发布，核心运行时不能被模型在线改写。
 - LLM 使用本地 llama.cpp OpenAI-compatible API；单共享模型槽位、触发式调用、串行队列；失败回退规则台词。
 - 游戏运行中推进所有区域；未加载区域使用 LifeEvent 压缩推进；进程关闭默认不按现实时间推进。
 - P0 场景是一个村庄、三个重要 NPC、一个公共资源冲突、一个承诺任务和一个物理互动。
@@ -31,14 +33,21 @@
 
 | 项目 | 状态 | 证据 |
 |---|---|---|
-| 游戏和技术设计 | 已完成 | `docs/local-npc-llm/design.md`、`design.en.md` |
-| C++ 开发设计 | 已完成 | `docs/local-npc-llm/development-design.md` |
-| 业界实践与三 NPC 验证方案 | 已完成 | 开发设计第 14、15 节 |
+| 游戏和技术设计 | 已整合 | `docs/design.md` 是唯一总设计 |
+| 业界实践与三 NPC 验证方案 | 已整合 | `docs/design.md` 的实施路线和 P0 展示 |
 | 持续推进计划 | 当前提交 | 本文件 |
 | Git 初始化 | 已完成 | 首个提交 `78f06db`；后续使用普通 `git` 命令，禁止 `gs-commit` |
 | P0 C++ 核心骨架 | 已完成 | `src/core`, `src/world`, `src/npc`, `src/provider`, CMake FetchContent |
-| 核心事件与调试契约 | 已完成 | `src/core/event_bus.*`, `docs/local-npc-llm/core-architecture.md`, `event-bus.md`, `--dump-events` |
+| 核心事件与调试契约 | 已完成 | `src/core/event_bus.*`, `docs/design.md`, `--dump-events` |
 | 三 NPC 村庄运行时 | 已完成 | 日程、资源、目标阶段、记忆、承诺和离线推进 |
+| 通用实体/组件索引与生命周期 | 已完成 | `WorldState.entities`、`WorldService::createEntity/setEntityLifecycle`、`EntityRegistry` 投影 |
+| NPC 状态机和全局/局部规划 | 已实现，待提交验收 | `src/npc/state_machine.*`, `src/navigation/path_planner.*` |
+| 文本调试界面 | 已实现并验证 | `src/text_ui_main.cpp`, `docs/examples/village-session.txt` |
+| 事务原子性与提交后事件 | 已实现并验证 | `WorldService::TransactionScope`, CTest 提交后发布和订阅者失败测试 |
+| 存档 schema/事件截断点 | 字段已实现，迁移校验待补 | `save_schema_version`, `simulation_version`, `event_sequence` |
+| LLM 演化回路 | 产品核心，设计与内容包接口待实现 | Evolution Proposal、沙箱评估、版本化激活、回滚和审计 |
+| 三 NPC 自主因果链演示 | 已完成 | 无玩家推进产生 `life.*`、`social.cooperation`、`npc.goal_revised`，文本和 headless EventLog 可观察 |
+| World Content Pack 加载 | 已完成 | `WorldService::load()` 从 JSON 内容包构建实例；拓扑使用通用 `entities`/`links`，不保留房间/门专用运行时接口 |
 | 自动化验收 | 已完成 | GCC 13、CTest、headless replay/snapshot |
 | Blender 场景资产 | 已完成 | `assets/blender/village.blend` 和 `village.glb` |
 | 3D 客户端 | 已完成 P0 | raylib 5.5 client、Blender GLB loading、2D HUD、WASD/E interaction；Bullet 3.25 adapter is optional and tested separately |
@@ -57,6 +66,7 @@
 8. 存档、事件日志和 replay 能在不访问 LLM 的情况下得到一致世界结果。
 9. LLM 服务关闭时，规则台词、世界推进、任务和存档仍然可用。
 10. 3D 客户端可以加载村庄、移动玩家、观察三个 NPC 和触发至少一个 Bullet 物理互动；headless 核心测试不依赖显示器。
+11. 无玩家输入时，至少一条“资源压力 → NPC 行动 → NPC 间影响 → 次日状态变化”的因果链可由规则系统完成，并能在文本界面和 EventLog 中观察。
 
 ## 工作顺序
 
@@ -84,6 +94,26 @@
 
 接入 raylib 5.5、斜俯视相机、Blender GLB、玩家移动、NPC 标记、2D 对话 HUD、Bullet 3.25 适配器和 replay viewer。TGUI 面板保留在 P1 UI 工作包；P0 的 HUD 使用 raylib 原生 2D API。
 
+### P0-G：核心一致性收尾（已完成）
+
+完成通用实体组件索引、NPC 粗粒度状态机、全局 Dijkstra/局部 A* 规划和文本客户端的测试验收。随后把世界写入收口到可回滚事务，确保事件只在提交后发布；区分持久化事件日志和进程内 EventBus，并为存档记录 schema、规则/内容身份和事件序列截断点。此工作包完成前不扩展港区内容。
+
+验收命令：
+
+```bash
+cmake --build build -j2
+ctest --test-dir build --output-on-failure
+./build/tide_marks_text --script docs/examples/village-session.txt
+```
+
+### P0-H：自主因果链（已完成）
+
+在现有三 NPC 日程之上完成不依赖玩家输入的最小闭环：资源/需求检测产生 NPC 目标，目标通过规则动作影响另一个 NPC 或公共资源，第二天由关系或资源结果改变计划。链路使用同一 `WorldService` 事务和 `WorldEvent`，模型关闭时仍可完成。
+
+### P0-I：内容包加载（已完成）
+
+把实例定义从应用代码拆成版本化 JSON 内容包：NPC 定义、空间实体、连接关系、日程、资源和行为候选由 Schema 加载；Runtime 只保留通用算法、组件和验证器。当前入口是 `WorldService::load()` / `fromContent()`，加载后的状态由事务维护。
+
 ## 自动化验收
 
 ```bash
@@ -110,7 +140,7 @@ cmake --build --preset engine
 
 ## 下一步
 
-当前检查点已完成 P0-A 至 P0-F：三 NPC 核心、离线推进、LLM fallback、承诺、回放、Blender 场景、raylib 客户端和 Bullet 适配器均有构建或测试证据。下一步进入 P1 港区垂直切片，再按长期路线扩展潮痕的区域、主线、战斗、工具和内容生产管线。
+当前检查点已完成 P0-A 至 P0-I 的主要实现，构建、CTest、文本会话、通用拓扑加载、实体生命周期和 headless 回放均通过。下一项是把演化提案的 Schema、沙箱评估和版本化激活接入 Runtime；在此之前不扩展港区内容。
 
 
 

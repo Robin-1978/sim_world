@@ -1,19 +1,59 @@
 #include "world/world_service.hpp"
+#include "world/world_state_json.hpp"
 #include <algorithm>
 #include <fstream>
 #include <sstream>
 #include <stdexcept>
 #include <string_view>
+#include <tuple>
+#include <exception>
 
 namespace tide_marks {
 
-namespace {
+class WorldService::TransactionScope {
+public:
+    explicit TransactionScope(WorldService& service)
+        : service_(service), uncaughtAtConstruction_(std::uncaught_exceptions()) {
+        service_.beginTransaction();
+    }
 
-template <typename T>
-T jsonValue(const Json& value, const char* key, T fallback) {
-    if (!value.contains(key) || value.at(key).is_null()) return fallback;
-    return value.at(key).get<T>();
+    ~TransactionScope() {
+        if (std::uncaught_exceptions() > uncaughtAtConstruction_) service_.rollbackTransaction();
+        else service_.commitTransaction();
+    }
+
+    TransactionScope(const TransactionScope&) = delete;
+    TransactionScope& operator=(const TransactionScope&) = delete;
+
+private:
+    WorldService& service_;
+    int uncaughtAtConstruction_;
+};
+
+void WorldService::beginTransaction() {
+    if (transactionDepth_++ == 0) {
+        transactionBackup_ = state_;
+        deferredEvents_.clear();
+    }
 }
+
+void WorldService::commitTransaction() {
+    if (--transactionDepth_ != 0) return;
+    rebuildEntityRegistry();
+    auto events = std::move(deferredEvents_);
+    deferredEvents_.clear();
+    for (const auto& event : events) eventBus_.publish(event);
+    eventBus_.dispatch();
+}
+
+void WorldService::rollbackTransaction() {
+    if (--transactionDepth_ != 0) return;
+    state_ = std::move(transactionBackup_);
+    deferredEvents_.clear();
+    rebuildEntityRegistry();
+}
+
+namespace {
 
 std::string join(const std::vector<std::string>& values, std::string_view separator) {
     std::ostringstream output;
@@ -24,73 +64,118 @@ std::string join(const std::vector<std::string>& values, std::string_view separa
     return output.str();
 }
 
-Json memoryJson(const Memory& memory) {
-    return Json{{"kind", memory.kind}, {"text", memory.text}, {"minute", memory.at.minute}, {"confidence", memory.confidence}};
-}
-Memory memoryFromJson(const Json& json) {
-    return Memory{jsonValue<std::string>(json, "kind", "fact"), jsonValue<std::string>(json, "text", ""),
-                  GameTime{jsonValue<std::int64_t>(json, "minute", 0)}, jsonValue<double>(json, "confidence", 1.0)};
-}
-Json npcDefinitionJson(const NpcDefinition& definition) {
-    return Json{{"id", definition.id}, {"name", definition.name}, {"role", definition.role}, {"home", definition.home},
-                {"workplace", definition.workplace}, {"public_goal", definition.publicGoal}, {"hidden_goal", definition.hiddenGoal},
-                {"boundary", definition.boundary}, {"voice", definition.voice}};
-}
-NpcDefinition npcDefinitionFromJson(const Json& json) {
-    return NpcDefinition{jsonValue<std::string>(json, "id", ""), jsonValue<std::string>(json, "name", ""),
-                         jsonValue<std::string>(json, "role", ""), jsonValue<std::string>(json, "home", ""),
-                         jsonValue<std::string>(json, "workplace", ""), jsonValue<std::string>(json, "public_goal", ""),
-                         jsonValue<std::string>(json, "hidden_goal", ""), jsonValue<std::string>(json, "boundary", ""),
-                         jsonValue<std::string>(json, "voice", "")};
-}
-Json eventJson(const WorldEvent& event) {
-    return Json{{"schema_version", event.schemaVersion}, {"sequence", event.sequence}, {"minute", event.at.minute}, {"type", event.type}, {"actor", event.actor},
-                {"target", event.target}, {"detail", event.detail}, {"world_revision", event.worldRevision}, {"data", event.data}};
-}
-WorldEvent eventFromJson(const Json& json) {
-    return WorldEvent{jsonValue<int>(json, "schema_version", 1), jsonValue<std::uint64_t>(json, "sequence", 0), GameTime{jsonValue<std::int64_t>(json, "minute", 0)},
-                      jsonValue<std::string>(json, "type", "unknown"), jsonValue<std::string>(json, "actor", ""),
-                      jsonValue<std::string>(json, "target", ""), jsonValue<std::string>(json, "detail", ""),
-                      jsonValue<std::uint64_t>(json, "world_revision", 0), json.value("data", Json::object())};
-}
-
 }  // namespace
 WorldService::WorldService(std::unique_ptr<IProvider> provider)
     : provider_(provider ? std::move(provider) : std::make_unique<MockProvider>()) {}
 
-WorldService WorldService::createVillage(std::unique_ptr<IProvider> provider) {
+WorldService WorldService::load(std::string contentRoot, std::unique_ptr<IProvider> provider) {
+    return fromContent(ContentPackLoader::load(contentRoot), std::move(provider));
+}
+
+WorldService WorldService::fromContent(const WorldContentPack& content,
+                                       std::unique_ptr<IProvider> provider) {
     WorldService service(std::move(provider));
-    service.state_.contentVersion = "village-p0.1";
-    service.state_.now = GameTime::fromDayHour(1, 6);
-    service.state_.village = VillageState{};
-    service.state_.npcs.emplace("mira", NpcState{
-        NpcDefinition{"mira", "Mira", "village coordinator", "mira_home", "granary",
-                       "Keep grain rationing fair", "Protect an undocumented family member",
-                       "Never endanger a child to satisfy an official order", "measured and warm"},
-        "granary", "morning ledger", 0, 100, 0.25, RelationshipAxes{},
-        {Memory{"fact", "The village depends on the granary ledger.", service.state_.now, 1.0}}, {}, 0});
-    service.state_.npcs.emplace("lorn", NpcState{
-        NpcDefinition{"lorn", "Lorn", "ferryman", "lorn_house", "ferry_dock",
-                       "Keep the crossing open", "Repay Mira while hiding a damaged skiff",
-                       "Will not abandon passengers on the water", "dry, joking, practical"},
-        "ferry_dock", "first crossing", 0, 72, 0.3, RelationshipAxes{},
-        {Memory{"episode", "The east ferry is taking on water.", service.state_.now, 0.95}}, {}, 0});
-    service.state_.npcs.emplace("eve", NpcState{
-        NpcDefinition{"eve", "Eve", "archivist", "archive_room", "archive",
-                       "Preserve the village records", "Find proof of the hidden family line",
-                       "Will not burn a record to win an argument", "precise, guarded, curious"},
-        "archive", "morning index", 0, 80, 0.35, RelationshipAxes{},
-        {Memory{"fact", "Some names were removed from the old tide registry.", service.state_.now, 0.9}}, {}, 0});
-    service.addEvent("village.initialized", "world", "village", "Three NPC village slice ready",
-                     Json{{"npcs", Json::array({"mira", "lorn", "eve"})}});
+    service.content_ = content;
+    service.state_.worldId = content.worldId;
+    service.state_.contentVersion = content.contentVersion;
+    service.state_.now = content.startTime;
+    service.state_.village = content.initialVillage;
+    service.state_.entities["player"] = WorldEntityState{"player", "actor", EntityLifecycle::Active, Json::object()};
+    for (const auto& spatial : content.spatialEntities) {
+        service.state_.entities["spatial:" + spatial.id] =
+            WorldEntityState{"spatial:" + spatial.id, spatial.kind, EntityLifecycle::Active, Json::object()};
+    }
+    for (const auto& link : content.links) {
+        service.state_.entities["link:" + link.id] =
+            WorldEntityState{"link:" + link.id, link.kind, EntityLifecycle::Active, Json::object()};
+        service.state_.links[link.id] = RuntimeLinkState{link.link.traversable, link.link.locked};
+    }
+    for (const auto& authored : content.npcs) {
+        NpcState npc{authored.definition, authored.initialLocation, authored.initialScheduleLabel,
+                     authored.initialGoalStage, authored.initialResource, authored.initialPressure,
+                     RelationshipAxes{}, {}, {}, 0, "working", authored.initialStrategy, authored.initialPeerTrust};
+        npc.memories.push_back(Memory{"authored", "Initial content pack memory.", service.state_.now, 1.0});
+        service.state_.npcs.emplace(authored.definition.id, std::move(npc));
+        service.state_.entities["npc:" + authored.definition.id] =
+            WorldEntityState{"npc:" + authored.definition.id, "npc", EntityLifecycle::Active, Json::object()};
+    }
+    service.rebuildEntityRegistry();
+    Json ids = Json::array();
+    for (const auto& authored : content.npcs) ids.push_back(authored.definition.id);
+    service.addEvent("world.initialized", "world", content.id, "World content pack loaded",
+                     Json{{"content_pack", content.id}, {"content_version", content.version}, {"npcs", ids}});
     return service;
 }
 
+void WorldService::rebuildEntityRegistry() {
+    entities_ = EntityRegistry{};
+    const auto playerState = state_.entities.find("player");
+    if (playerState == state_.entities.end() || playerState->second.lifecycle != EntityLifecycle::Destroyed) {
+        entities_.create(EntityRecord{"player", "player", playerState == state_.entities.end() ||
+                                                   playerState->second.lifecycle == EntityLifecycle::Active});
+    }
+    if (entities_.contains("player")) entities_.set<TransformComponent>("player", TransformComponent{0.0, 0.0, 0.0, 0.0});
+    const auto defaultLocation = content_.spatialEntities.empty() ? std::string{} : content_.spatialEntities.front().id;
+    const auto regionId = state_.worldId.empty() ? content_.worldId : state_.worldId;
+    if (entities_.contains("player")) {
+        entities_.set<LocationComponent>("player", LocationComponent{defaultLocation, regionId});
+        entities_.set<InventoryComponent>("player", InventoryComponent{});
+    }
+    for (const auto& authored : content_.spatialEntities) {
+        const auto entity = "spatial:" + authored.id;
+        const auto stateEntity = state_.entities.find(entity);
+        if (stateEntity != state_.entities.end() && stateEntity->second.lifecycle == EntityLifecycle::Destroyed) continue;
+        const bool active = stateEntity == state_.entities.end() || stateEntity->second.lifecycle == EntityLifecycle::Active;
+        if (!entities_.create(EntityRecord{entity, authored.kind, active})) continue;
+        entities_.set<SpatialComponent>(entity, authored.spatial);
+        entities_.set<LocationComponent>(entity, LocationComponent{authored.id, regionId});
+    }
+    for (const auto& authored : content_.links) {
+        const auto entity = "link:" + authored.id;
+        const auto stateEntity = state_.entities.find(entity);
+        if (stateEntity != state_.entities.end() && stateEntity->second.lifecycle == EntityLifecycle::Destroyed) continue;
+        const bool active = stateEntity == state_.entities.end() || stateEntity->second.lifecycle == EntityLifecycle::Active;
+        if (!entities_.create(EntityRecord{entity, authored.kind, active})) continue;
+        auto link = authored.link;
+        if (const auto runtime = state_.links.find(authored.id); runtime != state_.links.end()) {
+            link.traversable = runtime->second.traversable;
+            link.locked = runtime->second.locked;
+        }
+        entities_.set<LinkComponent>(entity, std::move(link));
+    }
+    for (const auto& [id, npc] : state_.npcs) {
+        const auto entity = "npc:" + id;
+        const auto stateEntity = state_.entities.find(entity);
+        if (stateEntity != state_.entities.end() && stateEntity->second.lifecycle == EntityLifecycle::Destroyed) continue;
+        const bool active = stateEntity == state_.entities.end() || stateEntity->second.lifecycle == EntityLifecycle::Active;
+        entities_.create(EntityRecord{entity, "npc", active});
+        entities_.set<NpcComponent>(entity, NpcComponent{id, npc.mode});
+        entities_.set<LocationComponent>(entity, LocationComponent{npc.location, content_.worldId});
+        entities_.set<RenderableComponent>(entity, RenderableComponent{"npc." + id, true});
+        entities_.set<InventoryComponent>(entity, InventoryComponent{});
+    }
+    for (const auto& [id, runtimeEntity] : state_.entities) {
+        if (runtimeEntity.lifecycle == EntityLifecycle::Destroyed || entities_.contains(id)) continue;
+        if (!entities_.create(EntityRecord{id, runtimeEntity.kind, runtimeEntity.lifecycle == EntityLifecycle::Active})) continue;
+    }
+}
+
+void WorldService::syncNpcEntityState() {
+    for (const auto& [id, npc] : state_.npcs) {
+        const auto entity = "npc:" + id;
+        entities_.set<NpcComponent>(entity, NpcComponent{id, npc.mode});
+        entities_.set<LocationComponent>(entity, LocationComponent{npc.location, state_.worldId});
+    }
+}
+
 bool WorldService::hasNpc(const std::string& npcId) const {
-    return state_.npcs.find(npcId) != state_.npcs.end();
+    if (state_.npcs.find(npcId) == state_.npcs.end()) return false;
+    const auto entity = state_.entities.find("npc:" + npcId);
+    return entity == state_.entities.end() || entity->second.lifecycle == EntityLifecycle::Active;
 }
 
 DecisionContext WorldService::decisionContext(const std::string& npcId) const {
+    if (!hasNpc(npcId)) return {};
     const auto found = state_.npcs.find(npcId);
     if (found == state_.npcs.end()) return {};
     const auto& npc = found->second;
@@ -109,22 +194,15 @@ DecisionContext WorldService::decisionContext(const std::string& npcId) const {
     context.character = npc.definition.name + ": " + npc.definition.role + "; public goal=" +
                         npc.definition.publicGoal + "; hidden goal=" + npc.definition.hiddenGoal +
                         "; boundary=" + npc.definition.boundary + "; pressure=" +
-                        std::to_string(npc.pressure);
-    if (npcId == "mira") {
-        context.candidates = {{"offer_ration", "ration", "offer a fair ration"},
-                              {"protect_secret", "family", "protect the family secret"},
-                              {"explain_ration", "ration", "explain the ledger",},
-                              {"rest", "daily", "return home"}};
-    } else if (npcId == "lorn") {
-        context.candidates = {{"repair_ferry", "ferry", "repair the ferry"},
-                              {"offer_crossing", "route", "offer a safe crossing"},
-                              {"ask_debt", "debt", "ask Mira for help"},
-                              {"rest", "daily", "return home"}};
-    } else {
-        context.candidates = {{"share_record", "archive", "share a verified record"},
-                              {"withhold_record", "archive", "protect the archive"},
-                              {"reveal_clue", "family", "reveal a cautious clue"},
-                              {"rest", "daily", "return home"}};
+                        std::to_string(npc.pressure) + "; strategy=" + npc.strategy;
+    for (const auto& [peer, trust] : npc.peerTrust) {
+        context.character += "; trust(" + peer + ")=" + std::to_string(trust);
+    }
+    for (const auto& authored : content_.npcs) {
+        if (authored.definition.id == npcId) {
+            context.candidates = authored.actions;
+            break;
+        }
     }
     // Utility ranking chooses the long-term intent deterministically. The
     // provider may still choose any authored candidate after seeing this list.
@@ -148,6 +226,7 @@ DecisionContext WorldService::decisionContext(const std::string& npcId) const {
 
 void WorldService::advanceMinutes(std::int64_t minutes) {
     if (minutes <= 0) return;
+    TransactionScope transaction(*this);
     const auto target = state_.now.minute + minutes;
     while (state_.now.minute < target) {
         ++state_.now.minute;
@@ -155,69 +234,124 @@ void WorldService::advanceMinutes(std::int64_t minutes) {
         if (state_.now.minute % 1440 == 0) processDayBoundary(state_.now.day());
         applyPromiseDeadline();
     }
+    syncNpcEntityState();
 }
 
 void WorldService::processHourBoundary(int day, int hour) {
-    auto& mira = state_.npcs.at("mira");
-    auto& lorn = state_.npcs.at("lorn");
-    auto& eve = state_.npcs.at("eve");
-    mira.location = (hour >= 6 && hour < 16) ? (hour < 12 ? "granary" : "village_square") : "mira_home";
-    lorn.location = (hour >= 6 && hour < 18) ? "ferry_dock" : "lorn_house";
-    eve.location = (hour >= 8 && hour < 19) ? "archive" : "archive_room";
-    mira.scheduleLabel = mira.location;
-    lorn.scheduleLabel = lorn.location;
-    eve.scheduleLabel = eve.location;
-    for (auto* npc : {&mira, &lorn, &eve}) ++npc->stateVersion;
+    const int minuteOfDay = hour * 60;
+    for (auto& [id, npc] : state_.npcs) {
+        const auto entity = state_.entities.find("npc:" + id);
+        if (entity != state_.entities.end() && entity->second.lifecycle != EntityLifecycle::Active) continue;
+        std::string scheduledLocation = npc.definition.home;
+        for (const auto& authored : content_.npcs) {
+            if (authored.definition.id != npc.definition.id) continue;
+            for (const auto& slot : authored.schedule) {
+                const bool within = slot.startMinute < slot.endMinute
+                                        ? minuteOfDay >= slot.startMinute && minuteOfDay < slot.endMinute
+                                        : (slot.startMinute == slot.endMinute || minuteOfDay >= slot.startMinute || minuteOfDay < slot.endMinute);
+                if (within) {
+                    scheduledLocation = slot.location;
+                    break;
+                }
+            }
+            break;
+        }
+        if (npc.location != scheduledLocation) ++npc.stateVersion;
+        npc.location = scheduledLocation;
+        npc.scheduleLabel = scheduledLocation;
+        npc.mode = npc.location == npc.definition.home ? "at_home" : "working";
+    }
+    auto miraFound = state_.npcs.find("mira");
+    auto lornFound = state_.npcs.find("lorn");
+    auto eveFound = state_.npcs.find("eve");
     if (hour == 8) {
         const int ration = std::min(5, state_.village.grain);
         state_.village.grain -= ration;
-        mira.resource = state_.village.grain;
-        mira.pressure = state_.village.grain < 70 ? 0.8 : 0.3;
+        if (miraFound != state_.npcs.end()) {
+            miraFound->second.resource = state_.village.grain;
+            miraFound->second.pressure = state_.village.grain < 70 ? 0.8 : 0.3;
+        }
         addEvent("life.ration", "mira", "village", "Mira records the morning ration",
                  Json{{"grain_used", ration}, {"grain_remaining", state_.village.grain}, {"day", day}});
     }
     if (hour == 10 && state_.village.boatIntegrity < 100) {
         if (state_.village.grain >= 5) state_.village.grain -= 5;
         state_.village.boatIntegrity = std::min(100, state_.village.boatIntegrity + 8);
-        lorn.resource = state_.village.boatIntegrity;
+        if (lornFound != state_.npcs.end()) lornFound->second.resource = state_.village.boatIntegrity;
+        double previousTrust = 0.0;
+        if (miraFound != state_.npcs.end()) {
+            previousTrust = miraFound->second.peerTrust["lorn"];
+            miraFound->second.peerTrust["lorn"] = std::min(1.0, previousTrust + 0.12);
+            miraFound->second.pressure = std::max(0.0, miraFound->second.pressure - 0.05);
+            miraFound->second.memories.push_back(Memory{"relationship", "Lorn spent village grain to keep the ferry running.", state_.now, 0.95});
+            ++miraFound->second.stateVersion;
+        }
+        ++state_.village.cooperation;
         addEvent("life.repair", "lorn", "ferry", "Lorn patches the ferry before the next crossing",
                  Json{{"boat_integrity", state_.village.boatIntegrity}});
+        const double nextTrust = miraFound == state_.npcs.end() ? previousTrust : miraFound->second.peerTrust["lorn"];
+        addEvent("social.cooperation", "lorn", "mira", "Lorn spends grain and repairs the crossing for the village",
+                 Json{{"peer", "lorn"}, {"trust_before", previousTrust}, {"trust_after", nextTrust}});
     }
     if (hour == 14) {
         state_.village.recordsIntegrity = std::min(100, state_.village.recordsIntegrity + 2);
-        eve.resource = state_.village.recordsIntegrity;
+        if (eveFound != state_.npcs.end()) eveFound->second.resource = state_.village.recordsIntegrity;
         addEvent("life.archive", "eve", "archive", "Eve indexes the tide registry",
                  Json{{"records_integrity", state_.village.recordsIntegrity}});
     }
 }
 
 void WorldService::processDayBoundary(int day) {
-    auto& mira = state_.npcs.at("mira");
-    auto& lorn = state_.npcs.at("lorn");
-    auto& eve = state_.npcs.at("eve");
     state_.village.boatIntegrity = std::max(0, state_.village.boatIntegrity - 3);
-    mira.resource = state_.village.grain;
-    lorn.resource = state_.village.boatIntegrity;
-    eve.resource = state_.village.recordsIntegrity;
+    auto miraFound = state_.npcs.find("mira");
+    auto lornFound = state_.npcs.find("lorn");
+    auto eveFound = state_.npcs.find("eve");
+    if (miraFound != state_.npcs.end()) miraFound->second.resource = state_.village.grain;
+    if (lornFound != state_.npcs.end()) lornFound->second.resource = state_.village.boatIntegrity;
+    if (eveFound != state_.npcs.end()) eveFound->second.resource = state_.village.recordsIntegrity;
     if (state_.village.grain < 85) {
-        mira.goalStage = std::max(mira.goalStage, 1);
-        mira.pressure = std::min(1.0, mira.pressure + 0.12);
+        if (miraFound != state_.npcs.end()) {
+            miraFound->second.goalStage = std::max(miraFound->second.goalStage, 1);
+            miraFound->second.pressure = std::min(1.0, miraFound->second.pressure + 0.12);
+        }
     }
     if (state_.village.boatIntegrity < 70) {
-        lorn.goalStage = std::max(lorn.goalStage, 1);
-        lorn.pressure = std::min(1.0, lorn.pressure + 0.1);
+        if (lornFound != state_.npcs.end()) {
+            lornFound->second.goalStage = std::max(lornFound->second.goalStage, 1);
+            lornFound->second.pressure = std::min(1.0, lornFound->second.pressure + 0.1);
+        }
     }
     if (state_.village.recordsIntegrity > 80 || day >= 2) {
-        eve.goalStage = std::max(eve.goalStage, 1);
-        eve.pressure = std::min(1.0, eve.pressure + 0.08);
+        if (eveFound != state_.npcs.end()) {
+            eveFound->second.goalStage = std::max(eveFound->second.goalStage, 1);
+            eveFound->second.pressure = std::min(1.0, eveFound->second.pressure + 0.08);
+        }
     }
-    for (auto* npc : {&mira, &lorn, &eve}) {
-        ++npc->stateVersion;
-        npc->memories.push_back(Memory{"episode", "A day passed while the village kept working.", state_.now, 1.0});
+    for (auto& [id, npc] : state_.npcs) {
+        const auto entity = state_.entities.find("npc:" + id);
+        if (entity != state_.entities.end() && entity->second.lifecycle != EntityLifecycle::Active) continue;
+        ++npc.stateVersion;
+        npc.memories.push_back(Memory{"episode", "A day passed while the world kept working.", state_.now, 1.0});
     }
+    reviseNpcStrategies(day);
     addEvent("life.day", "world", "village", "The village completes another day",
              Json{{"day", day}, {"grain", state_.village.grain}, {"boat_integrity", state_.village.boatIntegrity},
                   {"records_integrity", state_.village.recordsIntegrity}});
+}
+
+void WorldService::reviseNpcStrategies(int day) {
+    auto found = state_.npcs.find("mira");
+    if (found == state_.npcs.end()) return;
+    auto& mira = found->second;
+    if (mira.strategy != "cooperative_transport" && mira.peerTrust["lorn"] >= 0.45) {
+        mira.strategy = "cooperative_transport";
+        mira.goalStage = std::max(mira.goalStage, 2);
+        mira.pressure = std::max(0.0, mira.pressure - 0.08);
+        mira.memories.push_back(Memory{"plan", "Mira trusts Lorn enough to coordinate transport with him.", state_.now, 0.9});
+        ++mira.stateVersion;
+        addEvent("npc.goal_revised", "mira", "lorn", "Mira changes her next-day plan to cooperative transport",
+                 Json{{"strategy", mira.strategy}, {"reason", "repeated_cooperation"}, {"day", day}});
+    }
 }
 
 void WorldService::applyPromiseDeadline() {
@@ -248,6 +382,7 @@ CommandResult WorldService::reject(std::string code, std::string message) const 
 }
 
 CommandResult WorldService::submit(const Command& command) {
+    TransactionScope transaction(*this);
     if (command.expectedWorldRevision != 0 && command.expectedWorldRevision != state_.revision) {
         return reject("state_conflict", "The world changed before this command was committed.");
     }
@@ -277,12 +412,32 @@ CommandResult WorldService::submit(const Command& command) {
         if (command.kind == "promise_break") status = PromiseStatus::Broken;
         return decidePromise(command.promiseId, status, command.actor, command.turnId, command.detail);
     }
-    return reject("unknown_command", "The command is not part of the village action vocabulary.");
+    if (command.kind == "entity_create") {
+        return createEntity(command.target, command.detail, Json::object(), command.turnId);
+    }
+    if (command.kind == "entity_activate" || command.kind == "entity_dormant" || command.kind == "entity_destroy") {
+        const auto lifecycle = command.kind == "entity_activate" ? EntityLifecycle::Active
+                              : command.kind == "entity_dormant" ? EntityLifecycle::Dormant
+                                                                  : EntityLifecycle::Destroyed;
+        return setEntityLifecycle(command.target, lifecycle, command.turnId);
+    }
+    if (command.kind == "link_open" || command.kind == "link_close" ||
+        command.kind == "link_lock" || command.kind == "link_unlock") {
+        const auto state = state_.links.find(command.target);
+        if (state == state_.links.end()) return reject("unknown_link", "That link does not exist.");
+        const bool traversable = command.kind == "link_open" ? true
+                              : command.kind == "link_close" ? false : state->second.traversable;
+        const bool locked = command.kind == "link_lock" ? true
+                          : command.kind == "link_unlock" ? false : state->second.locked;
+        return setLinkState(command.target, traversable, locked, command.turnId);
+    }
+    return reject("unknown_command", "The command is not part of the registered action vocabulary.");
 }
 
 CommandResult WorldService::createPromise(const std::string& from, const std::string& to,
                                            const std::string& description, int dueInDays,
                                            const std::string& turnId) {
+    TransactionScope transaction(*this);
     const bool validFrom = from == "player" || hasNpc(from);
     const bool validTo = to == "player" || hasNpc(to);
     if (!validFrom || !validTo || from == to) return reject("unknown_actor", "Both promise parties must be distinct.");
@@ -302,6 +457,7 @@ CommandResult WorldService::createPromise(const std::string& from, const std::st
 CommandResult WorldService::decidePromise(const std::string& promiseId, PromiseStatus decision,
                                           const std::string& actor, const std::string& turnId,
                                           const std::string& detail) {
+    TransactionScope transaction(*this);
     if (!turnId.empty() && state_.processedTurnIds.contains(turnId)) return reject("duplicate_turn", "The turn was already applied.");
     auto found = state_.promises.find(promiseId);
     if (found == state_.promises.end()) return reject("unknown_promise", "That promise does not exist.");
@@ -334,8 +490,74 @@ CommandResult WorldService::decidePromise(const std::string& promiseId, PromiseS
     return CommandResult{true, "ok", toString(decision), state_.events.back()};
 }
 
+CommandResult WorldService::createEntity(const std::string& id, const std::string& archetypeId,
+                                         Json metadata, const std::string& turnId) {
+    TransactionScope transaction(*this);
+    if (id.empty() || archetypeId.empty()) return reject("invalid_entity", "Entity id and archetype are required.");
+    if (state_.entities.contains(id)) return reject("duplicate_entity", "That entity id already exists.");
+    if (!turnId.empty() && state_.processedTurnIds.contains(turnId)) return reject("duplicate_turn", "The turn was already applied.");
+    const auto archetype = std::find_if(content_.entityArchetypes.begin(), content_.entityArchetypes.end(),
+                                        [&archetypeId](const auto& item) { return item.id == archetypeId; });
+    if (archetype == content_.entityArchetypes.end()) return reject("unknown_archetype", "The entity archetype is not registered.");
+    Json merged = archetype->defaultMetadata;
+    for (auto it = metadata.begin(); it != metadata.end(); ++it) merged[it.key()] = it.value();
+    state_.entities.emplace(id, WorldEntityState{id, archetype->kind, EntityLifecycle::Active, std::move(merged)});
+    if (!turnId.empty()) state_.processedTurnIds.insert(turnId);
+    addEvent("entity.created", "world", id, "Runtime entity created",
+             Json{{"entity_id", id}, {"archetype", archetypeId}, {"kind", archetype->kind},
+                  {"metadata", state_.entities.at(id).metadata}});
+    return CommandResult{true, "ok", id, state_.events.back()};
+}
+
+CommandResult WorldService::setEntityLifecycle(const std::string& id, EntityLifecycle lifecycle,
+                                               const std::string& turnId) {
+    TransactionScope transaction(*this);
+    auto found = state_.entities.find(id);
+    if (found == state_.entities.end()) return reject("unknown_entity", "That entity does not exist.");
+    if (found->second.lifecycle == EntityLifecycle::Destroyed) return reject("destroyed_entity", "A destroyed entity cannot be revived.");
+    if (!turnId.empty() && state_.processedTurnIds.contains(turnId)) return reject("duplicate_turn", "The turn was already applied.");
+    found->second.lifecycle = lifecycle;
+    if (!turnId.empty()) state_.processedTurnIds.insert(turnId);
+    addEvent("entity.lifecycle", "world", id, "Runtime entity lifecycle changed",
+             Json{{"entity_id", id}, {"lifecycle", toString(lifecycle)}});
+    return CommandResult{true, "ok", toString(lifecycle), state_.events.back()};
+}
+
+CommandResult WorldService::setLinkState(const std::string& linkId, bool traversable, bool locked,
+                                         const std::string& turnId) {
+    TransactionScope transaction(*this);
+    const auto entity = state_.entities.find("link:" + linkId);
+    if (entity == state_.entities.end()) return reject("unknown_link", "That link does not exist.");
+    if (entity->second.lifecycle != EntityLifecycle::Active) return reject("inactive_link", "The link is not active.");
+    if (!turnId.empty() && state_.processedTurnIds.contains(turnId)) return reject("duplicate_turn", "The turn was already applied.");
+    state_.links[linkId] = RuntimeLinkState{traversable, locked};
+    if (!turnId.empty()) state_.processedTurnIds.insert(turnId);
+    addEvent("link.state", "world", "link:" + linkId, "Traversal link state changed",
+             Json{{"link_id", linkId}, {"traversable", traversable}, {"locked", locked}});
+    return CommandResult{true, "ok", linkId, state_.events.back()};
+}
+
+std::optional<std::vector<std::string>> WorldService::planRoute(const std::string& from,
+                                                                const std::string& to) const {
+    GlobalPlanner planner;
+    for (const auto& spatial : content_.spatialEntities) planner.addNode(spatial.id);
+    for (const auto& authored : content_.links) {
+        const auto entity = state_.entities.find("link:" + authored.id);
+        const auto runtime = state_.links.find(authored.id);
+        if (entity != state_.entities.end() && entity->second.lifecycle != EntityLifecycle::Active) continue;
+        if (runtime != state_.links.end() && (!runtime->second.traversable || runtime->second.locked)) continue;
+        for (std::size_t left = 0; left < authored.link.endpoints.size(); ++left) {
+            for (std::size_t right = left + 1; right < authored.link.endpoints.size(); ++right) {
+                planner.addEdge(authored.link.endpoints[left], authored.link.endpoints[right], 1.0, true);
+            }
+        }
+    }
+    return planner.plan(from, to);
+}
+
 DialogueTurn WorldService::converse(const std::string& npcId, const std::string& playerInput,
                                     const std::string& turnId) {
+    TransactionScope transaction(*this);
     DialogueTurn result;
     result.npcId = npcId;
     result.provider = provider_->name();
@@ -388,6 +610,7 @@ DialogueTurn WorldService::converse(const std::string& npcId, const std::string&
     result.motivation = response.motivation;
     result.dialogue = response.dialogue;
     result.event = state_.events.back();
+    syncNpcEntityState();
     return result;
 }
 
@@ -396,87 +619,15 @@ void WorldService::addEvent(std::string type, std::string actor, std::string tar
     ++state_.revision;
     state_.events.push_back(WorldEvent{1, state_.events.size() + 1, state_.now, std::move(type), std::move(actor),
                                        std::move(target), std::move(detail), state_.revision, std::move(data)});
-    eventBus_.publish(state_.events.back());
-    eventBus_.dispatch();
+    if (transactionDepth_ > 0) {
+        deferredEvents_.push_back(state_.events.back());
+    } else {
+        eventBus_.publish(state_.events.back());
+        eventBus_.dispatch();
+    }
 }
 
-Json toJson(const WorldState& state) {
-    Json npcs = Json::object();
-    for (const auto& [id, npc] : state.npcs) {
-        Json memories = Json::array();
-        for (const auto& memory : npc.memories) memories.push_back(memoryJson(memory));
-        npcs[id] = Json{{"definition", npcDefinitionJson(npc.definition)}, {"location", npc.location},
-                        {"schedule_label", npc.scheduleLabel}, {"goal_stage", npc.goalStage},
-                        {"resource", npc.resource}, {"pressure", npc.pressure},
-                        {"relation", {{"trust", npc.playerRelation.trust}, {"respect", npc.playerRelation.respect},
-                                       {"fear", npc.playerRelation.fear}, {"owed", npc.playerRelation.owed}}},
-                        {"memories", memories}, {"open_promises", npc.openPromises},
-                        {"state_version", npc.stateVersion}};
-    }
-    Json promises = Json::object();
-    for (const auto& [id, promise] : state.promises) {
-        promises[id] = Json{{"id", promise.id}, {"from", promise.from}, {"to", promise.to},
-                            {"description", promise.description}, {"due", promise.due.minute},
-                            {"status", toString(promise.status)}, {"version", promise.version}};
-    }
-    Json events = Json::array();
-    for (const auto& event : state.events) events.push_back(eventJson(event));
-    return Json{{"content_version", state.contentVersion}, {"now", state.now.minute}, {"revision", state.revision},
-                {"village", {{"grain", state.village.grain}, {"boat_integrity", state.village.boatIntegrity},
-                              {"records_integrity", state.village.recordsIntegrity}, {"lantern_lit", state.village.lanternLit},
-                              {"reputation", state.village.reputation}}},
-                {"npcs", npcs}, {"promises", promises}, {"events", events},
-                {"processed_turn_ids", state.processedTurnIds}};
-}
-
-WorldState worldStateFromJson(const Json& json) {
-    WorldState state;
-    state.contentVersion = jsonValue<std::string>(json, "content_version", "village-p0.1");
-    state.now = GameTime{jsonValue<std::int64_t>(json, "now", 0)};
-    state.revision = jsonValue<std::uint64_t>(json, "revision", 0);
-    const auto village = json.value("village", Json::object());
-    state.village.grain = jsonValue<int>(village, "grain", 100);
-    state.village.boatIntegrity = jsonValue<int>(village, "boat_integrity", 72);
-    state.village.recordsIntegrity = jsonValue<int>(village, "records_integrity", 80);
-    state.village.lanternLit = jsonValue<bool>(village, "lantern_lit", true);
-    state.village.reputation = jsonValue<int>(village, "reputation", 0);
-    const auto npcs = json.value("npcs", Json::object());
-    for (auto it = npcs.begin(); it != npcs.end(); ++it) {
-        const auto value = it.value();
-        NpcState npc;
-        npc.definition = npcDefinitionFromJson(value.value("definition", Json::object()));
-        npc.location = jsonValue<std::string>(value, "location", "");
-        npc.scheduleLabel = jsonValue<std::string>(value, "schedule_label", "");
-        npc.goalStage = jsonValue<int>(value, "goal_stage", 0);
-        npc.resource = jsonValue<int>(value, "resource", 0);
-        npc.pressure = jsonValue<double>(value, "pressure", 0.2);
-        const auto relation = value.value("relation", Json::object());
-        npc.playerRelation = RelationshipAxes{jsonValue<double>(relation, "trust", 0.35),
-                                              jsonValue<double>(relation, "respect", 0.35),
-                                              jsonValue<double>(relation, "fear", 0.0),
-                                              jsonValue<double>(relation, "owed", 0.0)};
-        for (const auto& memory : value.value("memories", Json::array())) npc.memories.push_back(memoryFromJson(memory));
-        npc.openPromises = value.value("open_promises", std::vector<std::string>{});
-        npc.stateVersion = jsonValue<std::uint64_t>(value, "state_version", 0);
-        state.npcs[it.key()] = std::move(npc);
-    }
-    const auto promises = json.value("promises", Json::object());
-    for (auto it = promises.begin(); it != promises.end(); ++it) {
-        const auto value = it.value();
-        state.promises[it.key()] = Promise{jsonValue<std::string>(value, "id", it.key()),
-                                           jsonValue<std::string>(value, "from", ""),
-                                           jsonValue<std::string>(value, "to", ""),
-                                           jsonValue<std::string>(value, "description", ""),
-                                           GameTime{jsonValue<std::int64_t>(value, "due", 0)},
-                                           promiseStatusFromString(jsonValue<std::string>(value, "status", "proposed")),
-                                           jsonValue<int>(value, "version", 0)};
-    }
-    for (const auto& event : json.value("events", Json::array())) state.events.push_back(eventFromJson(event));
-    for (const auto& turn : json.value("processed_turn_ids", std::vector<std::string>{})) state.processedTurnIds.insert(turn);
-    return state;
-}
-
-Json WorldService::snapshotJson() const { return toJson(state_); }
+Json WorldService::snapshotJson() const { return worldStateToJson(state_); }
 
 void WorldService::saveSnapshot(const std::string& path) const {
     std::ofstream output(path);
@@ -488,23 +639,29 @@ void WorldService::writeReplay(const std::string& path) const {
     std::ofstream output(path);
     if (!output) throw std::runtime_error("cannot write replay: " + path);
     output << Json{{"kind", "snapshot"}, {"state", snapshotJson()}}.dump() << '\n';
-    for (const auto& event : state_.events) output << Json{{"kind", "event"}, {"event", eventJson(event)}}.dump() << '\n';
+    for (const auto& event : state_.events) output << Json{{"kind", "event"}, {"event", worldEventToJson(event)}}.dump() << '\n';
 }
 
-WorldService WorldService::fromSnapshot(const Json& json, std::unique_ptr<IProvider> provider) {
+WorldService WorldService::fromSnapshot(const Json& json, std::string contentRoot,
+                                        std::unique_ptr<IProvider> provider) {
     WorldService service(std::move(provider));
-    service.state_ = worldStateFromJson(json.contains("state") ? json.at("state") : json);
+    service.content_ = ContentPackLoader::load(contentRoot);
+    service.state_ = deserializeWorldState(json.contains("state") ? json.at("state") : json);
+    service.rebuildEntityRegistry();
     return service;
 }
 
-WorldService WorldService::replay(const std::string& path, std::unique_ptr<IProvider> provider) {
+WorldService WorldService::replay(const std::string& path, std::string contentRoot,
+                                  std::unique_ptr<IProvider> provider) {
     std::ifstream input(path);
     if (!input) throw std::runtime_error("cannot read replay: " + path);
     std::string line;
     while (std::getline(input, line)) {
         if (line.empty()) continue;
         const auto json = Json::parse(line);
-        if (json.value("kind", "") == "snapshot") return fromSnapshot(json.at("state"), std::move(provider));
+        if (json.value("kind", "") == "snapshot") {
+            return fromSnapshot(json.at("state"), std::move(contentRoot), std::move(provider));
+        }
     }
     throw std::runtime_error("replay has no snapshot");
 }

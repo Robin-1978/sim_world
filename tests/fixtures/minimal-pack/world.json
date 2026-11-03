@@ -1,0 +1,18 @@
+{
+  "kind": "world",
+  "content_version": "fixture-1.0.0",
+  "id": "fixture_world",
+  "display_name": "Fixture World",
+  "initial_time": {"day": 4, "hour": 9},
+  "resources": {"grain": 7, "boat_integrity": 3, "records_integrity": 11},
+  "entity_archetypes": [
+    {"id": "fixture_object", "kind": "object", "metadata": {"persistent": true}}
+  ],
+  "entities": [
+    {"id": "workshop", "kind": "zone", "display_name": "Workshop", "bounds": {"min_x": 0, "max_x": 2, "min_z": 0, "max_z": 2}, "tags": ["work"]},
+    {"id": "yard", "kind": "zone", "display_name": "Yard", "bounds": {"min_x": 3, "max_x": 5, "min_z": 0, "max_z": 2}, "tags": ["public"]}
+  ],
+  "links": [
+    {"id": "service_lift", "kind": "lift", "endpoints": ["workshop", "yard"], "traversable": true, "tags": ["mechanism"]}
+  ]
+}

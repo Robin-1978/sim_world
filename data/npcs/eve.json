@@ -7,5 +7,6 @@
   "public_goal": "Preserve the village records",
   "hidden_goal": "Find proof of the hidden family line",
   "boundary": "Will not burn a record to win an argument",
+  "initial": {"location": "archive", "resource": 80, "pressure": 0.35, "strategy": "archive_index", "peer_trust": {"mira": 0.20}},
   "schedule": {"08:00-19:00": "archive", "19:00-08:00": "archive_room"}
 }

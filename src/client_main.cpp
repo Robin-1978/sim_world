@@ -79,7 +79,7 @@ int main() {
         if (const char* base = std::getenv("TIDE_MARKS_BASE_URL"); base != nullptr) config.baseUrl = base;
         provider = std::make_unique<tide_marks::LlamaCppProvider>(config);
     }
-    auto village = tide_marks::WorldService::createVillage(std::move(provider));
+    auto village = tide_marks::WorldService::load(tide_marks::ContentPackLoader::defaultRoot(), std::move(provider));
     InitWindow(1280, 720, "Tide Marks - Tidemark Village");
     SetTargetFPS(60);
     const bool sceneAssetAvailable = FileExists("assets/blender/village.glb");
@@ -168,7 +168,7 @@ int main() {
 // layer will consume the same WorldService/ViewProjection API in the next
 // client milestone; no gameplay code depends on a renderer.
 int main() {
-    auto village = tide_marks::WorldService::createVillage();
+    auto village = tide_marks::WorldService::load();
     std::cout << "Tide Marks village client (headless scene preview)\n";
     std::cout << "Renderer disabled. Reconfigure build with -DTIDE_MARKS_FETCH_RAYLIB=ON for the 3D window.\n";
     std::cout << "camera=slanted-top-down scene=assets/blender/village.glb\n";

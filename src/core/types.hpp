@@ -60,6 +60,9 @@ struct NpcState {
     std::vector<Memory> memories;
     std::vector<std::string> openPromises;
     std::uint64_t stateVersion{0};
+    std::string mode{"working"};
+    std::string strategy{"routine"};
+    std::map<std::string, double> peerTrust;
 };
 
 enum class PromiseStatus { Proposed, Accepted, Renegotiated, Refused, Fulfilled, Broken };
@@ -82,7 +85,25 @@ struct VillageState {
     int recordsIntegrity{80};
     bool lanternLit{true};
     int reputation{0};
+    int cooperation{0};
 };
+
+enum class EntityLifecycle { Active, Dormant, Destroyed };
+
+struct WorldEntityState {
+    std::string id;
+    std::string kind;
+    EntityLifecycle lifecycle{EntityLifecycle::Active};
+    Json metadata = Json::object();
+};
+
+struct RuntimeLinkState {
+    bool traversable{true};
+    bool locked{false};
+};
+
+std::string toString(EntityLifecycle lifecycle);
+EntityLifecycle entityLifecycleFromString(const std::string& value);
 
 struct WorldEvent {
     int schemaVersion{1};
@@ -97,10 +118,18 @@ struct WorldEvent {
 };
 
 struct WorldState {
-    std::string contentVersion{"village-p0.1"};
+    std::string worldId{"world"};
+    std::string contentVersion{"village-p0.2"};
     GameTime now;
     std::uint64_t revision{0};
     VillageState village;
+    // Runtime entity identity and lifecycle are authoritative world facts.
+    // Typed components remain projected through EntityRegistry and are only
+    // mutated by a transaction/system.
+    std::map<std::string, WorldEntityState> entities;
+    // Endpoints and link kind are authored content.  The current access state
+    // belongs to this world instance and is therefore authoritative here.
+    std::map<std::string, RuntimeLinkState> links;
     std::map<std::string, NpcState> npcs;
     std::map<std::string, Promise> promises;
     std::vector<WorldEvent> events;

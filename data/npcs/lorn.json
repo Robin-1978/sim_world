@@ -7,5 +7,6 @@
   "public_goal": "Keep the crossing open",
   "hidden_goal": "Repay Mira while hiding a damaged skiff",
   "boundary": "Will not abandon passengers on the water",
+  "initial": {"location": "ferry_dock", "resource": 72, "pressure": 0.30, "strategy": "crossing_revenue", "peer_trust": {"mira": 0.45}},
   "schedule": {"06:00-18:00": "ferry_dock", "18:00-06:00": "lorn_house"}
 }

@@ -1,10 +1,15 @@
 #pragma once
 
 #include "core/event_bus.hpp"
+#include "core/entity_registry.hpp"
 #include "core/types.hpp"
+#include "content/content_pack.hpp"
+#include "world/components.hpp"
 #include "npc/action_validator.hpp"
 #include "npc/behavior_tree.hpp"
 #include "npc/goal_selector.hpp"
+#include "npc/state_machine.hpp"
+#include "navigation/path_planner.hpp"
 #include "physics/physics_world.hpp"
 #include "provider/provider.hpp"
 #include "world/world_service.hpp"

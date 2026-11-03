@@ -1,0 +1,7 @@
+{
+  "kind": "dialogue_beats",
+  "schema_version": 1,
+  "beats": [
+    {"id": "inspect_lift", "npc": "sable", "allowed_actions": ["inspect"]}
+  ]
+}

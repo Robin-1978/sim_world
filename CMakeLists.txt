@@ -59,15 +59,22 @@ endif()
 
 add_library(tide_marks_core
     src/core/event_bus.cpp
+    src/core/entity_registry.cpp
     src/core/types.cpp
+    src/content/content_pack.cpp
     src/npc/action_validator.cpp
     src/npc/behavior_tree.cpp
     src/npc/goal_selector.cpp
+    src/npc/state_machine.cpp
+    src/navigation/path_planner.cpp
     src/physics/physics_world.cpp
     src/provider/provider.cpp
     src/world/world_service.cpp
+    src/world/world_state_json.cpp
 )
 target_include_directories(tide_marks_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_compile_definitions(tide_marks_core PRIVATE
+    TIDE_MARKS_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/data")
 target_link_libraries(tide_marks_core PUBLIC nlohmann_json::nlohmann_json)
 if(TIDE_MARKS_WARNINGS)
     if(MSVC)
@@ -82,6 +89,9 @@ target_link_libraries(tide_marks_headless PRIVATE tide_marks_core)
 
 add_executable(tide_marks_client src/client_main.cpp)
 target_link_libraries(tide_marks_client PRIVATE tide_marks_core)
+
+add_executable(tide_marks_text src/text_ui_main.cpp)
+target_link_libraries(tide_marks_text PRIVATE tide_marks_core)
 if(TIDE_MARKS_FETCH_RAYLIB)
     target_compile_definitions(tide_marks_client PRIVATE TIDE_MARKS_HAS_ENGINE_DEPS=1 TIDE_MARKS_HAS_RAYLIB=1)
     target_link_libraries(tide_marks_client PRIVATE raylib)
@@ -98,11 +108,13 @@ endif()
 enable_testing()
 add_executable(tide_marks_tests tests/tide_marks_tests.cpp)
 target_link_libraries(tide_marks_tests PRIVATE tide_marks_core)
+target_compile_definitions(tide_marks_tests PRIVATE
+    TIDE_MARKS_TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures")
 if(TIDE_MARKS_FETCH_BULLET)
     target_compile_definitions(tide_marks_tests PRIVATE TIDE_MARKS_HAS_BULLET=1)
     target_include_directories(tide_marks_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 endif()
 add_test(NAME tide_marks_tests COMMAND tide_marks_tests)
 
-set_target_properties(tide_marks_headless tide_marks_client tide_marks_tests
+set_target_properties(tide_marks_headless tide_marks_client tide_marks_text tide_marks_tests
     PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})

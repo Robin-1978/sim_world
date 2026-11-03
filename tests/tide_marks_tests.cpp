@@ -8,6 +8,7 @@
 #include <filesystem>
 #include <iostream>
 #include <memory>
+#include <stdexcept>
 #include <string>
 
 using namespace tide_marks;
@@ -24,7 +25,7 @@ void expect(bool condition, const std::string& message) {
 }
 
 void village_has_three_independent_npcs() {
-    const auto service = WorldService::createVillage();
+    const auto service = WorldService::load();
     expect(service.state().npcs.size() == 3, "village has exactly three important NPCs");
     expect(service.state().npcs.at("mira").definition.hiddenGoal != service.state().npcs.at("lorn").definition.hiddenGoal,
            "NPC hidden goals are distinct");
@@ -34,7 +35,7 @@ void village_has_three_independent_npcs() {
 }
 
 void offline_progression_changes_village() {
-    auto service = WorldService::createVillage();
+    auto service = WorldService::load();
     const auto before = summarize(service.state());
     service.advanceMinutes(2 * 1440);
     const auto after = summarize(service.state());
@@ -69,7 +70,7 @@ void behavior_tree_supports_sequence_timeout_and_interrupt() {
 }
 
 void provider_and_action_validation_are_safe() {
-    auto service = WorldService::createVillage(std::make_unique<MockProvider>());
+    auto service = WorldService::load(ContentPackLoader::defaultRoot(), std::make_unique<MockProvider>());
     const auto turn = service.converse("mira", "Can you spare a ration?", "dialogue-1");
     expect(turn.accepted, "mock provider returns a valid candidate action");
     expect(service.state().village.grain == 95, "validated ration action changes grain atomically");
@@ -82,7 +83,7 @@ void provider_and_action_validation_are_safe() {
 }
 
 void promises_cover_accept_renegotiate_refuse_and_break() {
-    auto service = WorldService::createVillage();
+    auto service = WorldService::load();
     const auto made = service.createPromise("mira", "lorn", "repair the east ferry", 1, "promise-create");
     expect(made.accepted, "promise can be created");
     const auto id = made.message;
@@ -108,11 +109,15 @@ void promises_cover_accept_renegotiate_refuse_and_break() {
 }
 
 void snapshot_and_replay_are_deterministic() {
-    auto service = WorldService::createVillage();
+    auto service = WorldService::load();
     service.converse("eve", "Tell me about the record", "replay-dialogue");
     service.advanceMinutes(2 * 1440);
     const auto path = std::filesystem::temp_directory_path() / "tide_marks_test_replay.jsonl";
     service.writeReplay(path.string());
+    const auto snapshot = service.snapshotJson();
+    expect(snapshot.at("save_schema_version").get<int>() == 2, "snapshot declares its schema version");
+    expect(snapshot.at("event_sequence").get<std::size_t>() == service.state().events.size(),
+           "snapshot records its event-log cutoff");
     const auto replayed = WorldService::replay(path.string());
     expect(summarize(service.state()) == summarize(replayed.state()), "replay restores identical final state");
     std::filesystem::remove(path);
@@ -152,15 +157,136 @@ void event_bus_is_ordered_and_filterable() {
     expect((seen == std::vector<std::string>{"all:life.ration", "day:life.day", "all:life.day"}),
            "event bus dispatches FIFO with exact and wildcard subscriptions");
     expect(bus.pending() == 0, "event bus drains its queue");
+
+    EventBus isolated;
+    std::size_t deliveredAfterFailure = 0;
+    (void)isolated.subscribe("life.day", [](const WorldEvent&) { throw std::runtime_error("projection failed"); });
+    (void)isolated.subscribe("life.day", [&deliveredAfterFailure](const WorldEvent&) { ++deliveredAfterFailure; });
+    isolated.publish(WorldEvent{1, 1, GameTime{}, "life.day", "world", "village", "", 1, Json::object()});
+    isolated.dispatch();
+    expect(deliveredAfterFailure == 1, "a failed subscriber does not block later subscribers");
+    expect(isolated.deliveryFailures() == 1, "subscriber failures are observable without escaping dispatch");
 }
 
 void world_service_publishes_committed_events() {
-    auto service = WorldService::createVillage();
+    auto service = WorldService::load();
     std::size_t delivered = 0;
-    const auto token = service.eventBus().subscribe("life.day", [&delivered](const WorldEvent&) { ++delivered; });
+    std::int64_t observedMinute = -1;
+    const auto token = service.eventBus().subscribe("life.day", [&service, &delivered, &observedMinute](const WorldEvent&) {
+        ++delivered;
+        observedMinute = service.state().now.minute;
+    });
     (void)token;
     service.advanceMinutes(2 * 1440);
     expect(delivered == 2, "WorldService publishes each committed day event");
+    expect(observedMinute == service.state().now.minute,
+           "events are published only after the complete transaction is committed");
+}
+
+void global_and_local_planners_are_deterministic() {
+    GlobalPlanner global;
+    global.addEdge("village", "marsh", 2.0);
+    global.addEdge("marsh", "harbor", 2.0);
+    global.addEdge("village", "harbor", 10.0);
+    const auto route = global.plan("village", "harbor");
+    expect(route.has_value() && *route == std::vector<std::string>{"village", "marsh", "harbor"},
+           "global planner chooses the cheapest authored route");
+
+    LocalPlanner local(5, 5);
+    local.setBlocked({2, 0});
+    local.setBlocked({2, 1});
+    local.setBlocked({2, 2});
+    const auto path = local.plan({0, 0}, {4, 0});
+    expect(path.has_value() && path->front() == GridPoint{0, 0} && path->back() == GridPoint{4, 0},
+           "local planner routes around obstacles");
+}
+
+void npc_state_machine_handles_interrupts() {
+    auto mode = NpcMode::Working;
+    mode = transition(mode, NpcSignal::StartConversation);
+    expect(mode == NpcMode::InConversation, "NPC enters conversation mode");
+    mode = transition(mode, NpcSignal::Interrupt);
+    expect(mode == NpcMode::Interrupted, "interrupt preempts conversation");
+    mode = transition(mode, NpcSignal::Resume);
+    expect(mode == NpcMode::Working, "NPC resumes working after interruption");
+    mode = transition(mode, NpcSignal::Disable);
+    expect(mode == NpcMode::Unavailable, "NPC can become unavailable");
+}
+
+void entity_registry_accepts_feature_components_without_core_changes() {
+    struct WeatherComponent { int tide{0}; };
+    EntityRegistry registry;
+    expect(registry.create(EntityRecord{"fixture:test", "world_object", true}), "entity registry creates an entity");
+    expect(registry.set<WeatherComponent>("fixture:test", WeatherComponent{3}), "custom component attaches generically");
+    const auto* weather = registry.get<WeatherComponent>("fixture:test");
+    expect(weather != nullptr && weather->tide == 3, "custom component can be queried by type");
+    expect(registry.componentCount("fixture:test") == 1, "component count is tracked without type-specific setters");
+    expect(registry.setActive("fixture:test", false), "entity lifecycle can mark an entity dormant");
+    expect(!registry.isActive("fixture:test"), "dormant entities remain stored but are inactive");
+    expect(registry.get<WeatherComponent>("fixture:test") != nullptr, "dormancy preserves components");
+}
+
+void entity_projection_tracks_committed_npc_movement() {
+    auto service = WorldService::load();
+    service.advanceMinutes(6 * 60);
+    const auto* location = service.entities().get<LocationComponent>("npc:mira");
+    expect(location != nullptr && location->locationId == service.state().npcs.at("mira").location,
+           "NPC component projection matches committed world state");
+}
+
+void world_entity_lifecycle_is_transactional_and_persistent() {
+    auto service = WorldService::load();
+    const auto created = service.createEntity("object:field-note", "world_object",
+                                               Json{{"author", "mira"}}, "entity-create");
+    expect(created.accepted, "world can create an entity from an authored archetype");
+    expect(service.entities().isActive("object:field-note"), "created entity is active in its projection");
+    expect(service.state().entities.at("object:field-note").metadata.at("owned_by") == "world",
+           "created entity merges archetype defaults with instance metadata");
+    expect(service.state().entities.at("object:field-note").metadata.at("author") == "mira",
+           "created entity retains command metadata");
+
+    const auto invalid = service.createEntity("object:invalid", "missing_archetype");
+    expect(!invalid.accepted && invalid.code == "unknown_archetype", "unregistered entity archetypes are rejected");
+
+    expect(service.setEntityLifecycle("object:field-note", EntityLifecycle::Dormant).accepted,
+           "active entity can become dormant");
+    expect(service.entities().contains("object:field-note") && !service.entities().isActive("object:field-note"),
+           "dormant entity keeps identity and components");
+    expect(service.setEntityLifecycle("object:field-note", EntityLifecycle::Destroyed).accepted,
+           "dormant entity can be destroyed");
+    expect(!service.entities().contains("object:field-note"), "destroyed entity leaves active projection");
+    expect(service.state().entities.at("object:field-note").lifecycle == EntityLifecycle::Destroyed,
+           "destroyed entity identity remains auditable in world state");
+    expect(!service.setEntityLifecycle("object:field-note", EntityLifecycle::Active).accepted,
+           "destroyed entity identity cannot be revived");
+
+    const auto restored = WorldService::fromSnapshot(service.snapshotJson());
+    expect(restored.state().entities.at("object:field-note").lifecycle == EntityLifecycle::Destroyed,
+           "entity lifecycle survives snapshot restore");
+    expect(!restored.entities().contains("object:field-note"), "destroyed entities are not projected after restore");
+}
+
+void runtime_loads_a_world_without_village_identifiers() {
+    const std::filesystem::path fixtureRoot = std::filesystem::path(TIDE_MARKS_TEST_DATA_DIR) / "minimal-pack";
+    auto service = WorldService::load(fixtureRoot.string());
+    expect(service.state().worldId == "fixture_world", "world identity comes from the content pack");
+    expect(service.state().now == GameTime::fromDayHour(4, 9), "world clock comes from the content pack");
+    expect(service.state().npcs.contains("sable") && !service.state().npcs.contains("mira"),
+           "world loads arbitrary authored NPCs without village identifiers");
+    const auto workshop = service.entities().record("spatial:workshop");
+    const auto serviceLift = service.entities().record("link:service_lift");
+    expect(workshop.has_value() && workshop->kind == "zone", "authored spatial kinds remain generic");
+    expect(serviceLift.has_value() && serviceLift->kind == "lift", "authored link kinds remain generic");
+    const auto* location = service.entities().get<LocationComponent>("npc:sable");
+    expect(location != nullptr && location->locationId == "workshop" && location->regionId == "fixture_world",
+           "NPC location projection uses authored IDs and world identity");
+    const auto* link = service.entities().get<LinkComponent>("link:service_lift");
+    expect(link != nullptr && link->endpoints == std::vector<std::string>{"workshop", "yard"},
+           "N-ary authored links load into runtime components");
+    expect(service.planRoute("workshop", "yard").has_value(), "active links provide a global route");
+    expect(service.setLinkState("service_lift", false, false).accepted, "link state is a transactional world fact");
+    expect(!service.planRoute("workshop", "yard").has_value(), "closed links block route planning");
+    expect(service.setLinkState("service_lift", true, false).accepted, "link can be reopened by a command");
 }
 
 }  // namespace
@@ -175,6 +301,12 @@ int main() {
     physics_events_are_deterministic_and_drained();
     event_bus_is_ordered_and_filterable();
     world_service_publishes_committed_events();
+    global_and_local_planners_are_deterministic();
+    npc_state_machine_handles_interrupts();
+    entity_registry_accepts_feature_components_without_core_changes();
+    entity_projection_tracks_committed_npc_movement();
+    world_entity_lifecycle_is_transactional_and_persistent();
+    runtime_loads_a_world_without_village_identifiers();
     if (failures != 0) {
         std::cerr << failures << " test assertion(s) failed\n";
         return EXIT_FAILURE;
