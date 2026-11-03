@@ -15,7 +15,7 @@
       "name": "engine",
       "displayName": "raylib and Bullet client",
       "inherits": "default",
-      "binaryDir": "${sourceDir}/build-engine",
+      "binaryDir": "${sourceDir}/build",
       "cacheVariables": {
         "TIDE_MARKS_FETCH_RAYLIB": "ON",
         "TIDE_MARKS_FETCH_BULLET": "ON"

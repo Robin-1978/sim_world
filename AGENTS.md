@@ -27,8 +27,8 @@ cmake -S . -B build-gcc13 -G Ninja -DCMAKE_CXX_COMPILER=g++-13
 cmake --build build-gcc13 -j2
 ./build-gcc13/tide_marks_headless --days 2 --replay /tmp/tide_marks-village.jsonl
 # Optional renderer/physics build (FetchContent, no system raylib/Bullet)
-cmake -S . -B build-engine -G Ninja -DTIDE_MARKS_FETCH_RAYLIB=ON -DTIDE_MARKS_FETCH_BULLET=ON
-cmake --build build-engine -j2
+cmake -S . -B build -G Ninja -DTIDE_MARKS_FETCH_RAYLIB=ON -DTIDE_MARKS_FETCH_BULLET=ON
+cmake --build build -j2
 ```
 
 The first three commands are the canonical build; the GCC 13 variant is useful for release validation. The headless runner must remain usable without a display or a running LLM server. Use `--provider llama` to exercise the local OpenAI-compatible endpoint; failures must fall back to authored/mock dialogue.

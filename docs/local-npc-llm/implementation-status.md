@@ -23,8 +23,8 @@ cmake --build --preset default
 ctest --test-dir build --output-on-failure
 ./build/tide_marks_headless --scenario village --days 2 --replay /tmp/tide_marks-village.jsonl
 # Optional interactive build; dependencies are fetched by CMake
-cmake -S . -B build-engine -G Ninja -DTIDE_MARKS_FETCH_RAYLIB=ON -DTIDE_MARKS_FETCH_BULLET=ON
-cmake --build build-engine -j2
+cmake -S . -B build -G Ninja -DTIDE_MARKS_FETCH_RAYLIB=ON -DTIDE_MARKS_FETCH_BULLET=ON
+cmake --build build -j2
 ```
 
 The checked-in nlohmann/json source is consumed through CMake `FetchContent`; raylib and Bullet are pinned URL dependencies when enabled. No API key, model response, build output, or replay artifact belongs in Git.
