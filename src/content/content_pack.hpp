@@ -25,6 +25,9 @@ struct NeedContent {
     double weight{1.0};
     double priority{0.0};
     std::map<std::string, double> satisfiers;
+    std::string sourceKind{"authored"};
+    std::string sourceId;
+    std::string sourceVersion;
 };
 
 struct NpcContent {
@@ -32,7 +35,6 @@ struct NpcContent {
     std::string initialLocation;
     std::string initialScheduleLabel;
     int initialGoalStage{0};
-    int initialResource{0};
     std::string initialStrategy{"routine"};
     std::map<std::string, double> initialPeerTrust;
     std::vector<NeedContent> needs;
@@ -58,14 +60,52 @@ struct EntityArchetypeContent {
     Json defaultMetadata = Json::object();
 };
 
+struct ResourceContent {
+    std::string id;
+    std::string unit;
+    std::string kind;
+    std::string owner;
+    std::string location;
+    int initial{0};
+    int minimum{0};
+    int maximum{100};
+    bool divisible{true};
+    std::vector<std::string> qualityAxes;
+    std::vector<std::string> substitutes;
+    Json decay = Json::object();
+};
+
+struct EffectContent {
+    std::string operation;
+    std::string resource;
+    int amount{0};
+    int maximum{100};
+    std::string effectAction;
+    std::vector<std::string> targets;
+};
+
+struct ActivityContent {
+    std::string id;
+    std::string trigger;
+    int hour{-1};
+    std::string actor;
+    std::string target;
+    std::string conditionResource;
+    int conditionBelow{0};
+    std::string eventType;
+    std::string detail;
+    std::vector<EffectContent> effects;
+};
+
 struct WorldContentPack {
     std::string id;
     std::string version;
     std::string contentVersion;
     std::string worldId;
     GameTime startTime;
-    VillageState initialVillage;
+    std::map<std::string, ResourceContent> resources;
     std::vector<NpcContent> npcs;
+    std::vector<ActivityContent> activities;
     std::vector<SpatialContent> spatialEntities;
     std::vector<LinkContent> links;
     std::vector<EntityArchetypeContent> entityArchetypes;

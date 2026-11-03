@@ -117,6 +117,48 @@ utility(a) = Σ(drive_i × expected_relief_i)
 
 P0 只实现个体需求和公共资源，验证“资源变化—行动—他人受影响”的因果链；P1 增加家庭/组织 CollectiveDriver、资源预留和冲突仲裁；P2 才允许 World Intelligence 提出新的社会指标或策略，并通过历史回放沙箱比较效果。自主性、胜任感和关系性作为横向调制因素，不压缩成单一需求层级。
 
+### 世界模型的基本对象
+
+在增加任何新行为前，先确认行为操作的对象、状态变量和计量单位已经存在。小村庄 P0 采用 ODD（Overview、Design concepts、Details）式检查；每个对象同时有三种表示：
+
+1. **Definition**：内容包中的稳定定义，例如资源单位、过程配方、角色能力和规则版本；只读，运行中不能被状态污染。
+2. **Runtime state**：由 C++ 维护的当前事实，例如持有数量、预留、位置、合同状态和过程进度；所有写入都经过事务。
+3. **Cognitive projection**：主体看到、相信或推断的事实，例如传闻、解释、偏好和置信度；可以不完整或错误，不能反向成为世界事实。
+
+| 对象 | Definition 必须声明 | Runtime state 必须维护 | 典型事实 |
+|---|---|---|---|
+| Entity / Agent | 稳定 ID、kind、原型、角色、能力标签、可执行权限、生命周期策略 | 生命周期、位置、所有者、当前模式、活动/休眠状态、参与过程 | 创建、移动、获得、失去、休眠、销毁 |
+| Resource definition / holding | 资源 ID、单位、可分割性、质量轴、替代组、可再生/衰减规则、容量规则 | 持有者、保管位置、数量、质量、已预留量、可用量、来源和到期时间 | 生产、消耗、转移、预留、释放、过期、损耗 |
+| Capability / facility | 能力 ID、适用角色/设施、输入输出类型、许可和版本 | 当前可用性、占用者、冷却、损坏和维护状态 | 获得能力、占用设施、维修、失效 |
+| Production process | 输入（资源/数量/单位/质量）、输出/副产物/废料、设施、角色技能、持续时间、能耗、容量、失败条件、结果质量和随机源 | execution ID、参与者、开始/结束时间、预留、进度、实际输入输出、状态和失败原因 | 开始、完成、失败、产出、损耗、能力提升 |
+| Consumption rule / need | 消费者类型、可满足需求、资源替代、效用曲线、时间窗口、预算和副作用 | 需求缺口、最近满足来源、实际消费量、效用和短缺 | 消费、需求缓解、预算变化、浪费、短缺 |
+| Exchange / contract | 参与方角色、报价/支付资源、数量和单位、交付地点/时间、预留策略、信任门槛、结算和违约规则 | 合同状态、版本、各方预留、已交付量、应付款、截止时间和争议 | 提议、接受、拒绝、交付、结算、违约、重谈 |
+| Communication / speech act | 渠道、可见范围、话语行为类型、允许引用的事实、成本、承诺效果和记忆策略 | 消息、参与者、发送/接收时间、观察者、来源、置信度、已兑现承诺 | 说出、听见、询问、请求、承诺、拒绝、误解、传播 |
+| Institution / rule | 适用范围、角色权限、价格/税率/配额、优先级、有效期、执行者和处罚 | 当前版本、启用状态、例外、执行记录和违规次数 | 发布、生效、许可、拒绝、处罚、废止 |
+| Event / causal record | 事件类型、schema、因果来源、允许参与者和数据契约 | 时间、顺序、规则/内容版本、前置事实、结果、影响范围和回放输入 | 可审计的世界历史 |
+
+生产、创造、交易、消费和聊天是同一套过程语义的不同入口，而不是五套互相独立的逻辑：
+
+- **生产**是一个有输入、输出、设施、能力、持续时间和失败结果的 `ProductionProcess`。输入先预留，完成时按过程规则结算；不能由 LLM 直接写“产出 10 个物品”。
+- **创造**分为运行时实体实例化和内容/能力演化。运行时只能从已登记的 archetype 创建实体；新实体类型、行为配方或规则组合属于 `EvolutionProposal`，要经过验证、沙箱、批准、版本化激活和回滚。
+- **交易**先创建合同，再预留双方支付物和交付物；接受不等于交付，交付不等于结算，截止时间触发履约或违约。价格是规则或提案输入，不能由对话文本凭空改变。
+- **消费**把资源转成需求满足、效用和副作用，同时记录实际消耗、替代品、浪费和短缺；需求数值由 Runtime 衰减和结算。
+- **聊天**是带可见范围和话语行为的 `Communication`。自然语言由 LLM 生成或解释，询问、请求、承诺、撒谎和威胁是结构化意图；只有经过事实、权限和承诺规则验证的结果才能进入 WorldState。
+
+对象之间的最小因果链是：
+
+```text
+Perception / Need / Opportunity
+  -> IntentProposal
+  -> BehaviorRecipe / ProcessExecution
+  -> reserve inputs and permissions
+  -> atomic meta-actions
+  -> WorldState facts + WorldEvents
+  -> memory, relationship and next drives
+```
+
+因此，P0 可以先用通用资源池验证村庄因果链，但必须保留单位、所有权、质量、容量、预留和时间窗口这些字段的语义入口；只有数量而没有这些属性时，系统只能称为“资源计数器”，不能称为生产、经济或社会模拟。
+
 ## 5. NPC Runtime 与 World Intelligence
 
 NPC 由身份、物理状态、需求、长期目标、关系、感知、记忆、当前模式、意图和执行计划组成。各层职责固定：
@@ -201,6 +243,43 @@ Command / IntentProposal / EvolutionProposal
 
 提交前失败不改变状态、Revision 或事件；提交后订阅者失败只能进入诊断计数，不能回滚事实。跨实体操作使用同一事务和版本检查；命令使用幂等键。
 
+### 原子元动作与复合行为
+
+Runtime 只向内容和模型暴露一组可审计的原子元动作。元动作不是任意字段写入器，而是带有 `id`、参数 Schema、前置条件、目标范围、权限、资源成本、直接效果、产生事件的规则和失败码的注册执行器。注册表还必须标记 `implemented`；未实现的设计目录项不能被内容加载器接受。后续能力必须通过注册表和 C++ 执行器增加，不能由 JSON 指向任意函数或代码。
+
+小村庄 P0 的第一版元动作目录按真实因果需要收敛如下：
+
+| 组 | 元动作 | 说明 |
+|---|---|---|
+| 资源 | `consume_resource` | 检查可用量、单位、质量和预留后扣减资源 |
+| 资源 | `produce_resource` | 按过程输出和容量上限增加资源或耐久 |
+| 资源 | `transfer_resource` | 在实体或公共池之间转移库存，不直接覆盖绝对数值 |
+| 资源 | `reserve_resource` / `release_resource` | 为承诺、维修或交易预留资源，避免并发超用 |
+| 需求 | `relieve_need` | 依据已提交行动和来源事件降低需求缺口 |
+| 关系 | `adjust_relationship` | 按 trust、respect、fear、owed 单轴调整并记录原因 |
+| 移动 | `move_entity` / `arrive_entity` | 校验拓扑和通行状态，再由 MovementSystem 执行 |
+| 承诺 | `create_promise` / `transition_promise` | 建立、接受、重谈、兑现或违约承诺 |
+| 知识 | `append_memory` / `assert_known_fact` | 保存来源、时间、置信度和可见范围 |
+| 拓扑 | `set_link_state` | 开关、锁定或改变连接通行状态 |
+| 实体 | `create_entity` / `set_entity_lifecycle` | 从注册原型创建实体，或休眠/销毁 |
+
+`emit_event` 不作为可由模型自由调用的独立“改写动作”；每个成功元动作和事务由 Runtime 自动产生 WorldEvent，避免事实与事件分开提交。`set_resource`、`adjust_resource` 和 `set_npc_resource` 这类可写入任意绝对值或第二份库存的接口不向内容和 LLM 暴露，内容使用受单位、所有权、预留、前置条件和容量约束的语义化元动作。
+
+村庄复合行为可以由这些元动作自然生成：配给是“检查粮食 → 预留/消耗粮食 → 满足需求 → 记录”；修船是“检查粮食和船况 → 消耗粮食 → 增加船况 → 调整关系 → 追加记忆”；档案整理是“检查档案实体 → 增加记录完整性 → 满足认知需求”；承诺履行是“检查物品和时间 → 转移资源 → 转换承诺状态 → 调整关系与记忆”。这些配方可以从 JSON 组合，不需要为每个故事动作添加新的 C++ 方法。
+
+定时 `Activity` 只负责何时唤醒一个已注册过程或 BehaviorRecipe；它不直接承载资源效果。`ProductionProcess` 描述输入、输出和过程进度，`BehaviorRecipe` 描述条件、顺序、选择、超时、中断、资源预留和补偿步骤，`MetaActionDefinition` 才描述单个事实变更。三者由 ID 引用并分别校验。LLM 可以创造性提出新的行为组合、参数和目标，但必须使用已注册元动作；缺少表达力时生成 CapabilityProposal。整条计划先在暂存事务中汇总成本、预留和效果，不能逐个元动作直接写 WorldState。
+
+```text
+IntentProposal + BehaviorRecipe
+  -> precondition and whole-plan validation
+  -> staged atomic effects and reservations
+  -> commit all effects or none
+  -> ordered WorldEvents
+  -> next facts, stimuli and memories
+```
+
+这种分层把“判断条件、执行计划、改写事实”拆开：条件属于规则和上下文，执行属于受控计划，事实改写只发生在事务提交点。LLM 获得组合和创造空间，Runtime 保留幂等、原子性、权限、回放和回滚。
+
 ### 时间、移动和模拟等级
 
 物理时间、游戏时间和事件时间分开。近场物理固定步长，NPC 事件唤醒或低频更新，远端跳到下一个有意义的日程、会面、资源结算或承诺截止。所有跳时由 `WorldScheduler::advance_to` 按时间边界处理；需求结算、目标唤醒和资源冲突不能各自维护时钟。
@@ -211,24 +290,77 @@ Command / IntentProposal / EvolutionProposal
 
 Content Pack、Game Instance、Intelligence Profile、Behavior DSL、Evolution/Scenario Proposal、Snapshot、EventLog 和 LLM 结构化输出统一使用 JSON，并带 `kind`、`schema_version`、版本身份和稳定 ID。当前 NPC 需求使用 `data/schemas/npc-content.schema.json`，LLM 意图使用 `data/schemas/intent-proposal.schema.json`；世界拓扑和实体使用 `data/schemas/village-content.schema.json`。加载器检查重复 ID、缺失引用、连接端点、需求 satisfier 和 schema 版本；内容规则只能调用 Runtime 已注册的能力，不能加载任意脚本。
 
-Behavior DSL 只组合注册节点和动作，例如：
+Behavior DSL 只组合注册节点、条件和元动作，例如：
 
 ```json
 {
   "kind": "behavior_recipe",
   "schema_version": 1,
-  "id": "cooperative_transport",
+  "id": "unload_crate",
+  "allowed_actors": ["role:dockworker"],
+  "reservation_scope": "transaction",
   "root": {
     "type": "sequence",
     "children": [
-      {"type": "condition", "name": "need_critical", "args": {"taxonomy": "safety"}},
-      {"type": "action", "name": "coordinate_transport", "args": {"partner": "lorn"}}
+      {"type": "condition", "name": "resource_available", "args": {"resource": "crate", "minimum": 1}},
+      {"type": "meta_action", "name": "transfer_resource", "args": {"from": "boat", "to": "dock", "resource": "crate", "amount": 1}},
+      {"type": "meta_action", "name": "append_memory", "args": {"subject": "actor", "source_event": "last_commit", "scope": "self"}}
     ]
   }
 }
 ```
 
 演化操作是类型化的，例如 `create_entity_archetype`、`overlay_strategy`、`register_behavior_recipe`、`add_relationship` 和 `schedule_event`；不是任意 JSON Patch。新增 C++ Component、System、权限、调度、事件格式、存档迁移或可执行代码必须由开发者发布。
+
+内容定义必须描述对象的语义属性，而不只是给动作起名字。资源定义与运行时持有量分开；生产过程定义与一次执行分开。资源定义至少声明单位、是否可分割、质量轴、替代组、容量和衰减规则；持有量至少记录所有者、位置、数量、已预留量、可用量、来源和到期时间。
+
+```json
+{
+  "kind": "resource_definition",
+  "schema_version": 1,
+  "id": "ration_grain",
+  "unit": "ration",
+  "divisible": false,
+  "quality_axes": ["freshness", "contamination"],
+  "substitutes": ["preserved_grain"],
+  "capacity": {"default": 100, "minimum": 0},
+  "decay": {"amount_per_day": 0, "reason": "ration_grain.decayed"}
+}
+```
+
+```json
+{
+  "kind": "production_process_definition",
+  "schema_version": 1,
+  "id": "repair_ferry",
+  "inputs": [{"resource": "grain", "quantity": 5, "unit": "ration"}],
+  "outputs": [{"resource": "boat_integrity", "quantity": 8, "unit": "points"}],
+  "actor_role": "ferryman",
+  "facility": "ferry_dock",
+  "duration_minutes": 60,
+  "failure": {"event": "repair.failed", "reason": "insufficient_input"}
+}
+```
+
+一次过程执行还要记录定义版本、参与者、设施、预留、开始/截止时间、进度、实际输入输出和状态：
+
+```json
+{
+  "kind": "process_execution",
+  "schema_version": 1,
+  "id": "process:ferry-repair:42",
+  "definition_id": "repair_ferry",
+  "definition_version": 1,
+  "participants": ["lorn"],
+  "facility": "ferry_dock",
+  "reservations": ["reservation:grain:17"],
+  "started_at": "day:3T10:00",
+  "due_at": "day:3T11:00",
+  "state": "running"
+}
+```
+
+交易合同至少记录双方、交换资源、数量/质量、报价或支付物、预留、交付地点和时间、有效期、结算及违约路径。聊天记录至少包含 `speech_act`、发送者、接收者/观察者、渠道、事实引用、来源和置信度、会话轮次、回复期限及预期后果。对话里的“我答应给你粮食”只能提交 `promise.offer` 或合同提案，不能直接增加粮食或关系。运行时把确认后的定义编译成 `consume_resource`、`produce_resource`、`transfer_resource`、`relieve_need`、`adjust_relationship` 等元动作事务；Event 由提交器自动产生。LLM 可以提出新的过程组合，但不能只凭一段文字生成不存在的产量、所有权或承诺结果。
 
 ## 9. 存档、回放和调试
 
@@ -276,6 +408,12 @@ P0 必须支持：任意最小内容包启动；NPC 无玩家继续运行；需�
 - Park et al., *Generative Agents: Interactive Simulacra of Human Behavior*, 2023, DOI: 10.1145/3586183.3606763。
 - Wang et al., *A survey on large language model based autonomous agents*, 2024, DOI: 10.1007/s11704-024-40231-1。
 - *Understanding the planning of LLM agents: A survey*, 2024, DOI: 10.48550/arXiv.2402.02716。
+- Grimm et al., *The ODD Protocol for Describing Agent-Based and Other Simulation Models*, JASSS 23(2):7, 2020, DOI: 10.18564/jasss.4259。用于检查模型目的、实体、状态变量、过程、调度、交互、随机性和可复现描述。
+- Ostrom, *A General Framework for Analyzing Sustainability of Social-Ecological Systems*, Science 325(5939), 2009, DOI: 10.1126/science.1172133。用于把 resource system、resource unit、actor、governance、interaction 和 outcome 分开，避免把库存、制度与主体认知揉成一个资源数字。
+- Lancaster, *A New Approach to Consumer Theory*, Journal of Political Economy 74(2), 1966, DOI: 10.1086/259131。用于把消费建模为资源属性向需求满足/效用的转换，而不是“买一个物品就加满意值”。
+- Smith, *The Contract Net Protocol: High-Level Communication and Control in a Distributed Problem Solver*, IEEE Transactions on Computers C-29(12), 1980, DOI: 10.1109/TC.1980.1675516。用于区分任务公告、报价/提议、授予/接受和执行，支持交易与协作合同的显式状态。
+- Akerlof, *The Market for Lemons: Quality Uncertainty and the Market Mechanism*, Quarterly Journal of Economics 84(3), 1970, DOI: 10.2307/1879431。用于要求交易对象记录质量、信息不对称、来源和担保，不能只用数量表示商品。
+- Searle, *Speech Acts: An Essay in the Philosophy of Language*, 1969；结合 Clark & Brennan 的 grounding 研究。用于把聊天拆成话语行为、事实引用、共同确认和后续承诺，而不是把自然语言文本当作世界事实。
 - AgentSociety v1, *Large-Scale Simulation of LLM-Driven Generative Agents*, arXiv:2502.08691；AgentSociety 2, arXiv:2607.11895。借鉴其环境模块化、实验回放、工作区隔离和研究工作流；不把分布式执行框架直接带入 P0。
 - AgentTorch / Large Population Models 的公开架构。借鉴其组合式机制、LLM 与机制模型分离和跨领域泛化方向；不把可微分大规模训练作为小村庄 Runtime 的前置条件。
 - SimCity 系列的城市模拟实践。借鉴其资源流、交通、土地/设施约束和政策反馈必须由规则持续结算的思想；具体实现以本项目的事实、事务和事件契约为准。

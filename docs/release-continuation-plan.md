@@ -17,9 +17,11 @@
 | NPC 状态机、行为树、全局/局部规划 | 已完成 | `src/npc/state_machine.*`, `src/npc/behavior_tree.*`, `src/navigation/*` |
 | 文本调试界面和 headless 回放 | 已完成 | `src/text_ui_main.cpp`, `src/headless_main.cpp` |
 | 内容包加载 | 已完成 | `WorldService::load/fromContent`, `data/`, `tests/fixtures/minimal-pack` |
-| 存档 schema 与事件截断点 | 已完成 | `world_state_json.*`, `save_schema_version=3`, `event_sequence` |
+| 存档 schema 与事件截断点 | 已完成 | `world_state_json.*`, `save_schema_version=4`, `event_sequence` |
 | 内驱/需求模型 | 已实现，待扩展验收 | `src/npc/drive_system.*`, `NeedContent`, `NeedState`, `need.*` events |
 | 意图上下文边界 | 已实现，待结构化回归 | `DecisionContext.internalDrives`, `externalStimuli`, `structuralConstraints`, `IntentProposal` |
+| 通用资源与实例活动 | 基础层已实现，语义待扩展 | `ResourceContent`, scalar resource state, `ActivityContent`, data-driven schedule effects |
+| 元动作语义目录 | 已冻结，资源执行器已接入 | `src/world/meta_actions.*`, 设计文档“原子元动作与复合行为” |
 | World Intelligence 演化提案 | 未开始 | 设计已冻结，待 P2 工作包 |
 | 3D 表现和 Blender 场景 | 已有 P0 原型 | 不参与当前平台模型验收 |
 
@@ -41,7 +43,7 @@
 3. 在文本界面显示每个 NPC 的 deficit、drive、临界状态和最近满足来源。
 4. 增加需求衰减、临界事件、满足、快照恢复和最小内容包的自动化断言。
 5. 清理剩余内容特例，使 P0 行为通过内容包动作和注册规则表达，避免把 NPC ID 写进 Runtime 算法。
-6. 将当前村庄资源字段收口为通用资源组件/资源存储；村庄名称只能出现在实例内容和展示层。
+6. 将当前村庄资源字段收口为通用资源组件/资源存储；该基础层已完成，下一步补生产、交易、合同和通信对象。
 
 ### P0-K：意图和行动契约
 
@@ -56,6 +58,14 @@
 2. 记录每个节点的事实来源和规则原因，支持事件检查和回放差异。
 3. 保持一个共享模型槽位；不让 LLM 阻塞游戏时间，也不让 LLM 直接修改 WorldState。
 4. P0 通过后再进入港区内容，不提前实现商店、利率或政策沙箱。
+
+### P0-M：世界对象与元动作建模（先于扩展行为）
+
+1. 冻结 Entity/Agent、Resource、ProductionProcess、ConsumptionNeed、Exchange/Contract、Communication、Institution/Rule 和 Event 的属性契约。
+2. 让内容加载器校验单位、所有权、容量、输入/输出、时间窗口、权限和引用，不接受只有名称没有语义属性的动作。
+3. 完成 P0 元动作注册表：资源消耗/产出/转移/预留、需求满足、关系调整、移动、承诺、记忆、连接状态和实体生命周期。
+4. 把小村庄真实的配给、修船、档案整理和承诺行为组合为 BehaviorRecipe；不再为每个 NPC 添加 C++ 特例。
+5. 为元动作、复合行为、事务失败和回滚补自动化测试；测试通过前不增加商店、利率或政策规则。
 
 ## 后续工作包
 

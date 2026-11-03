@@ -70,6 +70,7 @@ add_library(tide_marks_core
     src/navigation/path_planner.cpp
     src/physics/physics_world.cpp
     src/provider/provider.cpp
+    src/world/meta_actions.cpp
     src/world/world_service.cpp
     src/world/world_state_json.cpp
 )

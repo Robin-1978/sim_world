@@ -8,7 +8,61 @@
     "id": {"type": "string", "pattern": "^[a-z0-9_-]+$"},
     "display_name": {"type": "string"},
     "locations": {"type": "array", "items": {"type": "string"}},
-    "resources": {"type": "object"},
+    "resources": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["kind", "unit", "initial", "minimum", "maximum"],
+        "properties": {
+          "kind": {"type": "string"},
+          "unit": {"type": "string"},
+          "owner": {"type": "string"},
+          "location": {"type": "string"},
+          "initial": {"type": "integer"},
+          "minimum": {"type": "integer"},
+          "maximum": {"type": "integer"},
+          "divisible": {"type": "boolean"},
+          "quality_axes": {"type": "array", "items": {"type": "string"}},
+          "substitutes": {"type": "array", "items": {"type": "string"}},
+          "decay": {"type": "object"}
+        },
+        "additionalProperties": false
+      }
+    },
+    "activities": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "trigger", "event_type", "effects"],
+        "properties": {
+          "id": {"type": "string"},
+          "trigger": {"enum": ["hour", "day"]},
+          "hour": {"type": "integer", "minimum": 0, "maximum": 23},
+          "actor": {"type": "string"},
+          "target": {"type": "string"},
+          "condition_resource": {"type": "string"},
+          "condition_below": {"type": "integer"},
+          "event_type": {"type": "string"},
+          "detail": {"type": "string"},
+          "effects": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["operation", "resource"],
+              "properties": {
+                "operation": {"enum": ["consume_resource", "produce_resource"]},
+                "resource": {"type": "string"},
+                "amount": {"type": "integer"},
+                "action": {"type": "string"},
+                "targets": {"type": "array", "items": {"type": "string"}}
+              },
+              "additionalProperties": false
+            }
+          }
+        },
+        "additionalProperties": false
+      }
+    },
     "entities": {
       "type": "array",
       "items": {

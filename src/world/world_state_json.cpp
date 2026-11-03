@@ -1,5 +1,7 @@
 #include "world/world_state_json.hpp"
 
+#include <stdexcept>
+
 namespace tide_marks {
 namespace {
 
@@ -84,7 +86,7 @@ Json worldStateToJson(const WorldState& state) {
         for (const auto& [needId, need] : npc.needs) needs[needId] = needStateJson(need);
         npcs[id] = Json{{"definition", npcDefinitionJson(npc.definition)}, {"location", npc.location},
                         {"schedule_label", npc.scheduleLabel}, {"goal_stage", npc.goalStage},
-                        {"resource", npc.resource}, {"needs", needs},
+                        {"needs", needs},
                         {"relation", {{"trust", npc.playerRelation.trust}, {"respect", npc.playerRelation.respect},
                                        {"fear", npc.playerRelation.fear}, {"owed", npc.playerRelation.owed}}},
                         {"memories", memories}, {"open_promises", npc.openPromises},
@@ -99,16 +101,13 @@ Json worldStateToJson(const WorldState& state) {
     }
     Json events = Json::array();
     for (const auto& event : state.events) events.push_back(worldEventToJson(event));
-    return Json{{"save_schema_version", 3}, {"simulation_version", "adaptive-runtime-p0.3"},
+    Json resources = Json::object();
+    for (const auto& [id, value] : state.resources) resources[id] = value;
+    return Json{{"save_schema_version", 4}, {"simulation_version", "adaptive-runtime-p0.4"},
                 {"event_sequence", state.events.size()}, {"world_id", state.worldId},
                 {"content_version", state.contentVersion}, {"now", state.now.minute},
                 {"revision", state.revision},
-                {"village", {{"grain", state.village.grain},
-                              {"boat_integrity", state.village.boatIntegrity},
-                              {"records_integrity", state.village.recordsIntegrity},
-                              {"lantern_lit", state.village.lanternLit},
-                              {"reputation", state.village.reputation},
-                              {"cooperation", state.village.cooperation}}},
+                {"resources", resources},
                 {"entities", entities}, {"links", links}, {"npcs", npcs}, {"promises", promises}, {"events", events},
                 {"processed_turn_ids", state.processedTurnIds}};
 }
@@ -116,16 +115,14 @@ Json worldStateToJson(const WorldState& state) {
 WorldState deserializeWorldState(const Json& json) {
     WorldState state;
     state.worldId = jsonValue<std::string>(json, "world_id", "world");
-    state.contentVersion = jsonValue<std::string>(json, "content_version", "village-p0.2");
+    state.contentVersion = jsonValue<std::string>(json, "content_version", "adaptive-runtime-p0.4");
     state.now = GameTime{jsonValue<std::int64_t>(json, "now", 0)};
     state.revision = jsonValue<std::uint64_t>(json, "revision", 0);
-    const auto village = json.value("village", Json::object());
-    state.village.grain = jsonValue<int>(village, "grain", 100);
-    state.village.boatIntegrity = jsonValue<int>(village, "boat_integrity", 72);
-    state.village.recordsIntegrity = jsonValue<int>(village, "records_integrity", 80);
-    state.village.lanternLit = jsonValue<bool>(village, "lantern_lit", true);
-    state.village.reputation = jsonValue<int>(village, "reputation", 0);
-    state.village.cooperation = jsonValue<int>(village, "cooperation", 0);
+    const auto resources = json.value("resources", Json::object());
+    if (!resources.is_object()) throw std::runtime_error("snapshot resources must be an object");
+    for (auto it = resources.begin(); it != resources.end(); ++it) {
+        state.resources[it.key()] = it.value().get<int>();
+    }
     const auto entities = json.value("entities", Json::object());
     for (auto it = entities.begin(); it != entities.end(); ++it) {
         const auto value = it.value();
@@ -147,7 +144,6 @@ WorldState deserializeWorldState(const Json& json) {
         npc.location = jsonValue<std::string>(value, "location", "");
         npc.scheduleLabel = jsonValue<std::string>(value, "schedule_label", "");
         npc.goalStage = jsonValue<int>(value, "goal_stage", 0);
-        npc.resource = jsonValue<int>(value, "resource", 0);
         const auto needs = value.value("needs", Json::object());
         for (auto need = needs.begin(); need != needs.end(); ++need) {
             npc.needs[need.key()] = needStateFromJson(need.value());

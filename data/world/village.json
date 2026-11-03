@@ -4,7 +4,66 @@
   "id": "village_tidemark",
   "display_name": "Tidemark Village",
   "locations": ["granary", "village_square", "ferry_dock", "archive", "mira_home", "lorn_house", "archive_room"],
-  "resources": {"grain": 100, "boat_integrity": 72, "records_integrity": 80},
+  "resources": {
+    "grain": {"kind": "material", "unit": "ration", "owner": "village", "location": "granary", "initial": 100, "minimum": 0, "maximum": 100},
+    "boat_integrity": {"kind": "condition", "unit": "point", "owner": "village", "location": "ferry_dock", "initial": 72, "minimum": 0, "maximum": 100},
+    "records_integrity": {"kind": "information", "unit": "point", "owner": "village", "location": "archive", "initial": 80, "minimum": 0, "maximum": 100},
+    "cooperation": {"kind": "collective_metric", "unit": "point", "owner": "village", "initial": 0, "minimum": 0, "maximum": 100},
+    "reputation": {"kind": "collective_metric", "unit": "point", "owner": "village", "initial": 0, "minimum": 0, "maximum": 100}
+  },
+  "activities": [
+    {
+      "id": "morning_ration",
+      "trigger": "hour",
+      "hour": 8,
+      "actor": "mira",
+      "target": "village",
+      "event_type": "life.ration",
+      "detail": "Mira records the morning ration",
+      "effects": [
+        {"operation": "consume_resource", "resource": "grain", "amount": 5, "action": "offer_ration"}
+      ]
+    },
+    {
+      "id": "ferry_repair",
+      "trigger": "hour",
+      "hour": 10,
+      "actor": "lorn",
+      "target": "ferry",
+      "condition_resource": "boat_integrity",
+      "condition_below": 100,
+      "event_type": "life.repair",
+      "detail": "Lorn patches the ferry before the next crossing",
+      "effects": [
+        {"operation": "consume_resource", "resource": "grain", "amount": 5, "action": "repair_ferry"},
+        {"operation": "produce_resource", "resource": "boat_integrity", "amount": 8, "action": "repair_ferry"},
+        {"operation": "produce_resource", "resource": "cooperation", "amount": 1}
+      ]
+    },
+    {
+      "id": "archive_index",
+      "trigger": "hour",
+      "hour": 14,
+      "actor": "eve",
+      "target": "archive",
+      "event_type": "life.archive",
+      "detail": "Eve indexes the tide registry",
+      "effects": [
+        {"operation": "produce_resource", "resource": "records_integrity", "amount": 2, "action": "share_record"}
+      ]
+    },
+    {
+      "id": "daily_ferry_decay",
+      "trigger": "day",
+      "actor": "world",
+      "target": "ferry",
+      "event_type": "life.ferry_decay",
+      "detail": "The ferry loses integrity with another day of use",
+      "effects": [
+        {"operation": "consume_resource", "resource": "boat_integrity", "amount": 3}
+      ]
+    }
+  ],
   "entity_archetypes": [
     {"id": "world_object", "kind": "world_object", "metadata": {"owned_by": "world"}},
     {"id": "marker", "kind": "marker", "metadata": {"persistent": false}}

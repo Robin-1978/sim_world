@@ -1,4 +1,5 @@
 #include "content/content_pack.hpp"
+#include "world/meta_actions.hpp"
 
 #include <fstream>
 #include <cstdlib>
@@ -92,6 +93,9 @@ std::vector<NeedContent> parseNeeds(const Json& value, const std::vector<ActionC
         need.criticalThreshold = boundedNumber(item, "critical_threshold", path, 0.0, 1.0);
         need.weight = boundedNumber(item, "weight", path, 0.0, 100.0);
         need.priority = boundedNumber(item, "priority", path, 0.0, 100.0);
+        need.sourceKind = item.value("source_kind", "authored");
+        need.sourceId = item.value("source_id", need.id);
+        need.sourceVersion = item.value("source_version", "1");
         if (!item.contains("satisfiers") || !item.at("satisfiers").is_object()) {
             throw std::runtime_error("need must define an object 'satisfiers' in " + path);
         }
@@ -154,7 +158,6 @@ NpcContent parseNpc(const Json& value, const Json& beats, const std::string& pat
     result.initialLocation = initial.value("location", result.definition.workplace);
     result.initialScheduleLabel = initial.value("schedule_label", result.initialLocation);
     result.initialGoalStage = initial.value("goal_stage", 0);
-    result.initialResource = initial.value("resource", 0);
     result.initialStrategy = initial.value("strategy", "routine");
     const auto peerTrust = initial.value("peer_trust", Json::object());
     for (auto it = peerTrust.begin(); it != peerTrust.end(); ++it) {
@@ -163,6 +166,56 @@ NpcContent parseNpc(const Json& value, const Json& beats, const std::string& pat
     result.schedule = parseSchedule(value.value("schedule", Json::object()), path);
     result.actions = parseActions(beats, result.definition.id);
     result.needs = parseNeeds(value, result.actions, path);
+    return result;
+}
+
+ActivityContent parseActivity(const Json& value, const std::string& path) {
+    ActivityContent result;
+    result.id = requiredString(value, "id", path);
+    result.trigger = requiredString(value, "trigger", path);
+    if (result.trigger != "hour" && result.trigger != "day") {
+        throw std::runtime_error("activity trigger must be hour or day in " + path);
+    }
+    result.hour = value.value("hour", -1);
+    if (result.trigger == "hour" && (result.hour < 0 || result.hour > 23)) {
+        throw std::runtime_error("hour activity needs an authoring hour in " + path);
+    }
+    if (result.trigger == "day" && result.hour != -1) {
+        throw std::runtime_error("day activity cannot set hour in " + path);
+    }
+    result.actor = value.value("actor", "world");
+    result.target = value.value("target", "");
+    result.conditionResource = value.value("condition_resource", "");
+    result.conditionBelow = value.value("condition_below", 0);
+    result.eventType = requiredString(value, "event_type", path);
+    result.detail = value.value("detail", result.id);
+    if (!value.contains("effects") || !value.at("effects").is_array()) {
+        throw std::runtime_error("activity needs an effects array in " + path);
+    }
+    for (const auto& effectValue : value.at("effects")) {
+        EffectContent effect;
+        effect.operation = requiredString(effectValue, "operation", path);
+        if (!MetaActionRegistry::contains(effect.operation)) {
+            throw std::runtime_error("unknown activity effect operation in " + path + ": " + effect.operation);
+        }
+        if (!MetaActionRegistry::isImplemented(effect.operation)) {
+            throw std::runtime_error("activity effect uses an unimplemented meta action in " + path + ": " +
+                                     effect.operation);
+        }
+        effect.resource = requiredString(effectValue, "resource", path);
+        effect.amount = effectValue.value("amount", 0);
+        effect.maximum = effectValue.value("maximum", 100);
+        effect.effectAction = effectValue.value("action", "");
+        effect.targets = effectValue.value("targets", std::vector<std::string>{});
+        if ((effect.operation == "consume_resource" || effect.operation == "produce_resource") &&
+            effect.amount <= 0) {
+            throw std::runtime_error("resource meta action needs a positive amount in " + path);
+        }
+        if (effect.operation == "consume_resource" && !effect.targets.empty()) {
+            throw std::runtime_error("public resource consume does not accept targets in " + path);
+        }
+        result.effects.push_back(std::move(effect));
+    }
     return result;
 }
 
@@ -192,12 +245,26 @@ WorldContentPack ContentPackLoader::load(const std::string& rootPath) {
     const auto initialTime = world.value("initial_time", Json::object());
     pack.startTime = GameTime::fromDayHour(initialTime.value("day", 1), initialTime.value("hour", 6));
     const auto resources = world.value("resources", Json::object());
-    pack.initialVillage.grain = resources.value("grain", 100);
-    pack.initialVillage.boatIntegrity = resources.value("boat_integrity", 72);
-    pack.initialVillage.recordsIntegrity = resources.value("records_integrity", 80);
-    pack.initialVillage.lanternLit = resources.value("lantern_lit", true);
-    pack.initialVillage.reputation = resources.value("reputation", 0);
-    pack.initialVillage.cooperation = resources.value("cooperation", 0);
+    for (auto it = resources.begin(); it != resources.end(); ++it) {
+        if (!it.value().is_object()) {
+            throw std::runtime_error("world resource must define its properties: " + it.key() + " in " + worldPath);
+        }
+        ResourceContent resource;
+        resource.id = it.key();
+        resource.unit = requiredString(it.value(), "unit", worldPath);
+        resource.kind = requiredString(it.value(), "kind", worldPath);
+        resource.owner = it.value().value("owner", "world");
+        resource.location = it.value().value("location", "");
+        resource.initial = it.value().value("initial", 0);
+        resource.minimum = it.value().value("minimum", 0);
+        resource.maximum = it.value().value("maximum", 100);
+        resource.divisible = it.value().value("divisible", true);
+        if (resource.initial < resource.minimum || resource.initial > resource.maximum ||
+            resource.minimum < 0 || resource.maximum < resource.minimum) {
+            throw std::runtime_error("resource initial value or capacity is out of range: " + it.key());
+        }
+        pack.resources[it.key()] = std::move(resource);
+    }
     if (!world.contains("entities") || !world.at("entities").is_array()) {
         throw std::runtime_error("world content must define an 'entities' array: " + worldPath);
     }
@@ -230,6 +297,14 @@ WorldContentPack ContentPackLoader::load(const std::string& rootPath) {
             }
         }
     }
+    const auto activities = world.value("activities", Json::array());
+    if (!activities.is_array()) throw std::runtime_error("activities must be an array: " + worldPath);
+    std::set<std::string> activityIds;
+    for (const auto& activity : activities) {
+        auto parsed = parseActivity(activity, worldPath);
+        if (!activityIds.insert(parsed.id).second) throw std::runtime_error("duplicate activity id: " + parsed.id);
+        pack.activities.push_back(std::move(parsed));
+    }
     const auto dialoguePath = rootPath + "/" + requiredString(manifest, "dialogue", manifestPath);
     const auto beats = readJson(dialoguePath);
     for (const auto& npcPathValue : manifest.at("npcs")) {
@@ -248,6 +323,22 @@ WorldContentPack ContentPackLoader::load(const std::string& rootPath) {
         for (const auto& slot : npc.schedule) {
             if (!spatialIds.contains(slot.location)) {
                 throw std::runtime_error("NPC schedule location is not an authored spatial entity: " + slot.location);
+            }
+        }
+    }
+    for (const auto& activity : pack.activities) {
+        if (!activity.conditionResource.empty() && !pack.resources.contains(activity.conditionResource)) {
+            throw std::runtime_error("activity condition references an unknown resource: " + activity.conditionResource);
+        }
+        if (!activity.actor.empty() && activity.actor != "world" && !npcIds.contains(activity.actor)) {
+            throw std::runtime_error("activity actor is not an authored NPC: " + activity.actor);
+        }
+        for (const auto& effect : activity.effects) {
+            if (!pack.resources.contains(effect.resource)) {
+                throw std::runtime_error("activity effect references an unknown resource: " + effect.resource);
+            }
+            for (const auto& target : effect.targets) {
+                if (!npcIds.contains(target)) throw std::runtime_error("activity effect targets an unknown NPC: " + target);
             }
         }
     }

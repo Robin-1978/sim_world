@@ -1,4 +1,5 @@
 #include "tide_marks.hpp"
+#include "world/meta_actions.hpp"
 
 #if defined(TIDE_MARKS_HAS_BULLET)
 #include "physics/bullet_physics.hpp"
@@ -44,7 +45,7 @@ void offline_progression_changes_village() {
     expect(before != after, "two days change the deterministic world");
     int changed = 0;
     for (const auto& [id, npc] : service.state().npcs) {
-        if (npc.goalStage > 0 || npc.stateVersion > 0 || npc.resource != 0) ++changed;
+        if (npc.goalStage > 0 || npc.stateVersion > 0) ++changed;
     }
     expect(changed >= 2, "at least two NPCs changed while player was away");
     expect(service.state().events.size() >= 9, "life events are recorded");
@@ -106,13 +107,22 @@ void provider_and_action_validation_are_safe() {
            "decision context separates drives, stimuli, and structural constraints");
     const auto turn = service.converse("mira", "Can you spare a ration?", "dialogue-1");
     expect(turn.accepted, "mock provider returns a valid candidate action");
-    expect(service.state().village.grain == 95, "validated ration action changes grain atomically");
+    expect(service.state().resources.at("grain") == 95, "validated ration action changes grain atomically");
     const auto duplicate = service.converse("mira", "again", "dialogue-1");
     expect(!duplicate.accepted && duplicate.error == "duplicate_turn", "duplicate turn is idempotent");
     const auto unknown = service.submit(Command{"bad-command", "unknown", "mira", {}, {}, {}});
     expect(!unknown.accepted && unknown.code == "unknown_command", "unknown command is rejected");
     const auto stale = service.submit(Command{"stale", "advance", "mira", {}, {}, "1", 1, 1});
     expect(!stale.accepted && stale.code == "state_conflict", "stale world revisions are rejected atomically");
+}
+
+void meta_action_registry_distinguishes_design_from_execution() {
+    expect(MetaActionRegistry::contains("reserve_resource"),
+           "reservation remains in the design registry");
+    expect(!MetaActionRegistry::isImplemented("reserve_resource"),
+           "a design-only meta action is not executable content");
+    expect(MetaActionRegistry::isImplemented("consume_resource"),
+           "resource consumption has a runtime executor");
 }
 
 void promises_cover_accept_renegotiate_refuse_and_break() {
@@ -148,7 +158,7 @@ void snapshot_and_replay_are_deterministic() {
     const auto path = std::filesystem::temp_directory_path() / "tide_marks_test_replay.jsonl";
     service.writeReplay(path.string());
     const auto snapshot = service.snapshotJson();
-    expect(snapshot.at("save_schema_version").get<int>() == 3, "snapshot declares its schema version");
+    expect(snapshot.at("save_schema_version").get<int>() == 4, "snapshot declares its schema version");
     expect(snapshot.at("event_sequence").get<std::size_t>() == service.state().events.size(),
            "snapshot records its event-log cutoff");
     const auto replayed = WorldService::replay(path.string());
@@ -308,6 +318,10 @@ void runtime_loads_a_world_without_village_identifiers() {
            "world loads arbitrary authored NPCs without village identifiers");
     expect(service.state().npcs.at("sable").needs.contains("safety"),
            "arbitrary authored NPC needs load from JSON content");
+    const auto initialResources = service.state().resources;
+    expect(initialResources.contains("energy") && initialResources.contains("coolant") &&
+               !initialResources.contains("grain"),
+           "arbitrary world resources load from JSON without village-specific fields");
     const auto workshop = service.entities().record("spatial:workshop");
     const auto serviceLift = service.entities().record("link:service_lift");
     expect(workshop.has_value() && workshop->kind == "zone", "authored spatial kinds remain generic");
@@ -332,6 +346,7 @@ int main() {
     needs_are_data_driven_and_replayable();
     behavior_tree_supports_sequence_timeout_and_interrupt();
     provider_and_action_validation_are_safe();
+    meta_action_registry_distinguishes_design_from_execution();
     promises_cover_accept_renegotiate_refuse_and_break();
     snapshot_and_replay_are_deterministic();
     physics_events_are_deterministic_and_drained();

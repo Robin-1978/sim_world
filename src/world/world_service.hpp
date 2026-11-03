@@ -112,8 +112,12 @@ private:
     void addEvent(std::string type, std::string actor, std::string target,
                   std::string detail, Json data = Json::object());
     void processHourBoundary(int day, int hour);
+    void processActivity(const ActivityContent& activity);
+    [[nodiscard]] bool applyActionEffects(const std::string& npcId, const std::string& actionId);
     void applyNeedRelief(const std::string& npcId, const std::string& actionId);
     [[nodiscard]] const NpcContent* authoredNpc(const std::string& npcId) const;
+    [[nodiscard]] int resourceValue(const std::string& resource) const;
+    void setResource(const std::string& resource, int value);
     void processDayBoundary(int day);
     void reviseNpcStrategies(int day);
     void applyPromiseDeadline();

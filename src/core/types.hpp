@@ -60,7 +60,6 @@ struct NpcState {
     std::string location;
     std::string scheduleLabel;
     int goalStage{0};
-    int resource{0};
     std::map<std::string, NeedState> needs;
     RelationshipAxes playerRelation;
     std::vector<Memory> memories;
@@ -83,15 +82,6 @@ struct Promise {
     GameTime due;
     PromiseStatus status{PromiseStatus::Proposed};
     int version{0};
-};
-
-struct VillageState {
-    int grain{100};
-    int boatIntegrity{72};
-    int recordsIntegrity{80};
-    bool lanternLit{true};
-    int reputation{0};
-    int cooperation{0};
 };
 
 enum class EntityLifecycle { Active, Dormant, Destroyed };
@@ -128,7 +118,7 @@ struct WorldState {
     std::string contentVersion{"village-p0.2"};
     GameTime now;
     std::uint64_t revision{0};
-    VillageState village;
+    std::map<std::string, int> resources;
     // Runtime entity identity and lifecycle are authoritative world facts.
     // Typed components remain projected through EntityRegistry and are only
     // mutated by a transaction/system.
