@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Adaptive world NPC content",
+  "type": "object",
+  "required": ["id", "name", "role", "home", "workplace", "public_goal", "hidden_goal", "boundary", "needs"],
+  "properties": {
+    "id": {"type": "string", "pattern": "^[a-z0-9_-]+$"},
+    "name": {"type": "string"},
+    "role": {"type": "string"},
+    "home": {"type": "string"},
+    "workplace": {"type": "string"},
+    "public_goal": {"type": "string"},
+    "hidden_goal": {"type": "string"},
+    "boundary": {"type": "string"},
+    "voice": {"type": "string"},
+    "initial": {
+      "type": "object",
+      "properties": {
+        "location": {"type": "string"},
+        "schedule_label": {"type": "string"},
+        "goal_stage": {"type": "integer", "minimum": 0},
+        "resource": {"type": "integer"},
+        "strategy": {"type": "string"},
+        "peer_trust": {"type": "object", "additionalProperties": {"type": "number", "minimum": 0, "maximum": 1}}
+      },
+      "additionalProperties": false
+    },
+    "needs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "taxonomy", "initial_deficit", "decay_per_hour", "critical_threshold", "weight", "priority", "satisfiers"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^[a-z0-9_-]+$"},
+          "taxonomy": {"type": "string"},
+          "initial_deficit": {"type": "number", "minimum": 0, "maximum": 1},
+          "decay_per_hour": {"type": "number", "minimum": 0, "maximum": 1},
+          "critical_threshold": {"type": "number", "minimum": 0, "maximum": 1},
+          "weight": {"type": "number", "minimum": 0},
+          "priority": {"type": "number", "minimum": 0},
+          "satisfiers": {"type": "object", "additionalProperties": {"type": "number", "minimum": 0, "maximum": 1}}
+        },
+        "additionalProperties": false
+      }
+    },
+    "schedule": {"type": "object", "additionalProperties": {"type": "string"}}
+  },
+  "additionalProperties": false
+}

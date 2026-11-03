@@ -23,7 +23,7 @@ std::string actionLabel(const DecisionContext& context, const std::string& actio
 }  // namespace
 ProviderResponse MockProvider::decide(const DecisionContext& context, const std::string& playerInput) {
     if (context.candidates.empty()) {
-        return ProviderResponse{false, {}, {}, {}, {}, "no_candidates"};
+        return ProviderResponse{false, {}, {}, "no_candidates"};
     }
     std::string selected = context.candidates.front().actionId;
     const std::string lowered = [&playerInput] {
@@ -46,7 +46,10 @@ ProviderResponse MockProvider::decide(const DecisionContext& context, const std:
     if (context.character.find("Mira") != std::string::npos) name = "Mira";
     if (context.character.find("Lorn") != std::string::npos) name = "Lorn";
     if (context.character.find("Eve") != std::string::npos) name = "Eve";
-    return ProviderResponse{true, selected, "respond", "I need to " + label + " before I can promise more.",
+    return ProviderResponse{true,
+                            IntentProposal{selected, "respond", "The authored candidate best fits the current context.",
+                                           "The selected authored action is attempted and validated by Runtime.", 1.0,
+                                           context.worldRevision, context.npcStateVersion},
                             name + " considers the request and chooses to " + label + ".", {}};
 }
 
@@ -60,11 +63,14 @@ ProviderResponse LlamaCppProvider::decide(const DecisionContext& context, const 
     }
     const Json userContent{{"npc_id", context.npcId}, {"time", context.now.toString()},
                            {"perception", context.perception}, {"memories", context.memories},
-                           {"character", context.character}, {"player_input", playerInput},
+                           {"character", context.character}, {"internal_drives", context.internalDrives},
+                           {"external_stimuli", context.externalStimuli},
+                           {"structural_constraints", context.structuralConstraints},
+                           {"player_input", playerInput},
                            {"candidates", candidates}};
     Json messages = Json::array();
     messages.push_back(Json{{"role", "system"},
-                            {"content", "Return JSON with action_id, intent, motivation, dialogue. Choose only an action_id from the supplied candidates."}});
+                            {"content", "Return JSON with action_id, intent, motivation, expected_outcome, confidence, dialogue. Choose only an action_id from the supplied candidates; confidence must be 0..1."}});
     messages.push_back(Json{{"role", "user"}, {"content", userContent.dump()}});
     Json request{{"model", config_.model}, {"temperature", 0.2}, {"messages", messages},
                  {"response_format", Json{{"type", "json_object"}}}};
@@ -86,7 +92,7 @@ ProviderResponse LlamaCppProvider::decide(const DecisionContext& context, const 
     FILE* pipe = popen(command.c_str(), "r");
     if (pipe == nullptr) {
         std::filesystem::remove(temp);
-        return ProviderResponse{false, {}, {}, {}, {}, "curl_unavailable"};
+        return ProviderResponse{false, {}, {}, "curl_unavailable"};
     }
     std::string response;
     std::array<char, 4096> buffer{};
@@ -96,7 +102,7 @@ ProviderResponse LlamaCppProvider::decide(const DecisionContext& context, const 
     const int result = pclose(pipe);
     std::filesystem::remove(temp);
     if (result != 0 || response.empty()) {
-        return ProviderResponse{false, {}, {}, {}, {}, "provider_request_failed"};
+        return ProviderResponse{false, {}, {}, "provider_request_failed"};
     }
     try {
         const Json outer = Json::parse(response);
@@ -106,12 +112,16 @@ ProviderResponse LlamaCppProvider::decide(const DecisionContext& context, const 
         const auto allowed = std::find_if(context.candidates.begin(), context.candidates.end(),
                                           [&action](const auto& candidate) { return candidate.actionId == action; });
         if (allowed == context.candidates.end()) {
-            return ProviderResponse{false, {}, {}, {}, {}, "unknown_action_id"};
+            return ProviderResponse{false, {}, {}, "unknown_action_id"};
         }
-        return ProviderResponse{true, action, answer.value("intent", "respond"),
-                                answer.value("motivation", ""), answer.value("dialogue", ""), {}};
+        return ProviderResponse{true,
+                                IntentProposal{action, answer.value("intent", "respond"),
+                                               answer.value("motivation", ""), answer.value("expected_outcome", ""),
+                                               std::clamp(answer.value("confidence", 0.0), 0.0, 1.0),
+                                               context.worldRevision, context.npcStateVersion},
+                                answer.value("dialogue", ""), {}};
     } catch (const std::exception& error) {
-        return ProviderResponse{false, {}, {}, {}, {}, std::string("invalid_provider_json:") + error.what()};
+        return ProviderResponse{false, {}, {}, std::string("invalid_provider_json:") + error.what()};
     }
 }
 

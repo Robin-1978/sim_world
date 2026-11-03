@@ -16,15 +16,26 @@ struct ScheduleSlot {
     std::string location;
 };
 
+struct NeedContent {
+    std::string id;
+    std::string taxonomy;
+    double initialDeficit{0.0};
+    double decayPerHour{0.0};
+    double criticalThreshold{0.8};
+    double weight{1.0};
+    double priority{0.0};
+    std::map<std::string, double> satisfiers;
+};
+
 struct NpcContent {
     NpcDefinition definition;
     std::string initialLocation;
     std::string initialScheduleLabel;
     int initialGoalStage{0};
     int initialResource{0};
-    double initialPressure{0.2};
     std::string initialStrategy{"routine"};
     std::map<std::string, double> initialPeerTrust;
+    std::vector<NeedContent> needs;
     std::vector<ScheduleSlot> schedule;
     std::vector<ActionCandidate> actions;
 };

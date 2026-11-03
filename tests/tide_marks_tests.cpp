@@ -30,7 +30,9 @@ void village_has_three_independent_npcs() {
     expect(service.state().npcs.at("mira").definition.hiddenGoal != service.state().npcs.at("lorn").definition.hiddenGoal,
            "NPC hidden goals are distinct");
     expect(service.state().npcs.at("mira").location == "granary", "Mira starts at the granary");
-    const auto ranking = GoalSelector::rank(service.state().npcs.at("mira"), service.state().village, service.state().now);
+    const std::vector<NeedContent> needs{
+        NeedContent{"food_security", "physiological", 0.25, 0.02, 0.7, 1.0, 0.1, {{"offer_ration", 0.2}}}};
+    const auto ranking = GoalSelector::rank(service.state().npcs.at("mira"), needs);
     expect(!ranking.empty() && ranking.front().score >= ranking.back().score, "GoalSelector ranks authored goals");
 }
 
@@ -46,6 +48,33 @@ void offline_progression_changes_village() {
     }
     expect(changed >= 2, "at least two NPCs changed while player was away");
     expect(service.state().events.size() >= 9, "life events are recorded");
+}
+
+void needs_are_data_driven_and_replayable() {
+    auto service = WorldService::load();
+    const auto before = service.state().npcs.at("mira").needs.at("food_security").deficit;
+    service.advanceMinutes(60);
+    const auto after = service.state().npcs.at("mira").needs.at("food_security").deficit;
+    expect(after > before, "need deficit advances from game time");
+    expect(std::any_of(service.state().events.begin(), service.state().events.end(),
+                       [](const auto& event) { return event.type == "need.deprived"; }),
+           "need advancement is recorded as a world event");
+    const auto turn = service.converse("mira", "please offer a ration", "need-relief");
+    expect(turn.accepted, "an authored action can be committed");
+    expect(service.state().npcs.at("mira").needs.at("food_security").deficit < after,
+           "committed action relieves the matching need");
+    expect(std::any_of(service.state().events.begin(), service.state().events.end(),
+                       [](const auto& event) { return event.type == "need.relieved"; }),
+           "need relief is recorded as a world event");
+    service.advanceMinutes(2 * 1440);
+    expect(std::any_of(service.state().events.begin(), service.state().events.end(),
+                       [](const auto& event) { return event.type == "need.critical"; }),
+           "critical need transitions are recorded as a world event");
+    const auto snapshot = service.snapshotJson();
+    const auto restored = WorldService::fromSnapshot(snapshot);
+    expect(restored.state().npcs.at("mira").needs.at("food_security").deficit ==
+               service.state().npcs.at("mira").needs.at("food_security").deficit,
+           "need state survives snapshot restore");
 }
 
 void behavior_tree_supports_sequence_timeout_and_interrupt() {
@@ -71,6 +100,10 @@ void behavior_tree_supports_sequence_timeout_and_interrupt() {
 
 void provider_and_action_validation_are_safe() {
     auto service = WorldService::load(ContentPackLoader::defaultRoot(), std::make_unique<MockProvider>());
+    const auto context = service.decisionContext("mira");
+    expect(!context.internalDrives.empty() && !context.externalStimuli.empty() &&
+               !context.structuralConstraints.empty(),
+           "decision context separates drives, stimuli, and structural constraints");
     const auto turn = service.converse("mira", "Can you spare a ration?", "dialogue-1");
     expect(turn.accepted, "mock provider returns a valid candidate action");
     expect(service.state().village.grain == 95, "validated ration action changes grain atomically");
@@ -115,7 +148,7 @@ void snapshot_and_replay_are_deterministic() {
     const auto path = std::filesystem::temp_directory_path() / "tide_marks_test_replay.jsonl";
     service.writeReplay(path.string());
     const auto snapshot = service.snapshotJson();
-    expect(snapshot.at("save_schema_version").get<int>() == 2, "snapshot declares its schema version");
+    expect(snapshot.at("save_schema_version").get<int>() == 3, "snapshot declares its schema version");
     expect(snapshot.at("event_sequence").get<std::size_t>() == service.state().events.size(),
            "snapshot records its event-log cutoff");
     const auto replayed = WorldService::replay(path.string());
@@ -273,6 +306,8 @@ void runtime_loads_a_world_without_village_identifiers() {
     expect(service.state().now == GameTime::fromDayHour(4, 9), "world clock comes from the content pack");
     expect(service.state().npcs.contains("sable") && !service.state().npcs.contains("mira"),
            "world loads arbitrary authored NPCs without village identifiers");
+    expect(service.state().npcs.at("sable").needs.contains("safety"),
+           "arbitrary authored NPC needs load from JSON content");
     const auto workshop = service.entities().record("spatial:workshop");
     const auto serviceLift = service.entities().record("link:service_lift");
     expect(workshop.has_value() && workshop->kind == "zone", "authored spatial kinds remain generic");
@@ -294,6 +329,7 @@ void runtime_loads_a_world_without_village_identifiers() {
 int main() {
     village_has_three_independent_npcs();
     offline_progression_changes_village();
+    needs_are_data_driven_and_replayable();
     behavior_tree_supports_sequence_timeout_and_interrupt();
     provider_and_action_validation_are_safe();
     promises_cover_accept_renegotiate_refuse_and_break();

@@ -49,13 +49,19 @@ struct NpcDefinition {
     std::string voice;
 };
 
+struct NeedState {
+    double deficit{0.0};
+    GameTime lastUpdated;
+    std::uint64_t lastReliefRevision{0};
+};
+
 struct NpcState {
     NpcDefinition definition;
     std::string location;
     std::string scheduleLabel;
     int goalStage{0};
     int resource{0};
-    double pressure{0.2};
+    std::map<std::string, NeedState> needs;
     RelationshipAxes playerRelation;
     std::vector<Memory> memories;
     std::vector<std::string> openPromises;

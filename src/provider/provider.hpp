@@ -16,16 +16,27 @@ struct DecisionContext {
     std::string perception;
     std::string memories;
     std::string character;
+    std::string internalDrives;
+    std::string externalStimuli;
+    std::string structuralConstraints;
     std::vector<ActionCandidate> candidates;
+    std::uint64_t worldRevision{0};
+    std::uint64_t npcStateVersion{0};
+};
+
+struct IntentProposal {
+    std::string actionId;
+    std::string intent;
+    std::string rationale;
+    std::string expectedOutcome;
+    double confidence{0.0};
     std::uint64_t worldRevision{0};
     std::uint64_t npcStateVersion{0};
 };
 
 struct ProviderResponse {
     bool ok{false};
-    std::string actionId;
-    std::string intent;
-    std::string motivation;
+    IntentProposal proposal;
     std::string dialogue;
     std::string error;
 };

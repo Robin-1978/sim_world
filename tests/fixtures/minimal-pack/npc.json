@@ -7,6 +7,9 @@
   "public_goal": "Keep the lift serviceable",
   "hidden_goal": "Discover who disabled it",
   "boundary": "Will not endanger a passenger",
-  "initial": {"location": "workshop", "resource": 4, "pressure": 0.1, "strategy": "inspect"},
+  "initial": {"location": "workshop", "resource": 4, "strategy": "inspect"},
+  "needs": [
+    {"id": "safety", "taxonomy": "safety", "initial_deficit": 0.10, "decay_per_hour": 0.01, "critical_threshold": 0.80, "weight": 1.0, "priority": 0.1, "satisfiers": {"inspect": 0.2}}
+  ],
   "schedule": {"00:00-00:00": "workshop"}
 }

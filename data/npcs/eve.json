@@ -7,6 +7,11 @@
   "public_goal": "Preserve the village records",
   "hidden_goal": "Find proof of the hidden family line",
   "boundary": "Will not burn a record to win an argument",
-  "initial": {"location": "archive", "resource": 80, "pressure": 0.35, "strategy": "archive_index", "peer_trust": {"mira": 0.20}},
+  "initial": {"location": "archive", "resource": 80, "strategy": "archive_index", "peer_trust": {"mira": 0.20}},
+  "needs": [
+    {"id": "cognition", "taxonomy": "cognition", "initial_deficit": 0.35, "decay_per_hour": 0.02, "critical_threshold": 0.70, "weight": 1.00, "priority": 0.10, "satisfiers": {"share_record": 0.10, "reveal_clue": 0.18, "rest": 0.03}},
+    {"id": "archive_safety", "taxonomy": "safety", "initial_deficit": 0.20, "decay_per_hour": 0.01, "critical_threshold": 0.75, "weight": 0.85, "priority": 0.05, "satisfiers": {"withhold_record": 0.12, "reveal_clue": 0.05}},
+    {"id": "belonging", "taxonomy": "belonging", "initial_deficit": 0.20, "decay_per_hour": 0.01, "critical_threshold": 0.80, "weight": 0.60, "priority": 0.05, "satisfiers": {"share_record": 0.08, "withhold_record": 0.03}}
+  ],
   "schedule": {"08:00-19:00": "archive", "19:00-08:00": "archive_room"}
 }

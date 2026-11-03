@@ -60,6 +60,55 @@ std::vector<ActionCandidate> parseActions(const Json& beats, const std::string& 
     return result;
 }
 
+double boundedNumber(const Json& value, const char* key, const std::string& path,
+                     double minimum, double maximum) {
+    if (!value.contains(key) || !value.at(key).is_number()) {
+        throw std::runtime_error("missing numeric '" + std::string(key) + "' in " + path);
+    }
+    const double result = value.at(key).get<double>();
+    if (result < minimum || result > maximum) {
+        throw std::runtime_error("numeric '" + std::string(key) + "' is out of range in " + path);
+    }
+    return result;
+}
+
+std::vector<NeedContent> parseNeeds(const Json& value, const std::vector<ActionCandidate>& actions,
+                                    const std::string& path) {
+    if (!value.contains("needs") || !value.at("needs").is_array()) {
+        throw std::runtime_error("NPC must define a 'needs' array in " + path);
+    }
+    std::set<std::string> actionIds;
+    for (const auto& action : actions) actionIds.insert(action.actionId);
+    std::set<std::string> needIds;
+    std::vector<NeedContent> result;
+    for (const auto& item : value.at("needs")) {
+        if (!item.is_object()) throw std::runtime_error("invalid need in " + path);
+        NeedContent need;
+        need.id = requiredString(item, "id", path);
+        need.taxonomy = requiredString(item, "taxonomy", path);
+        if (!needIds.insert(need.id).second) throw std::runtime_error("duplicate need id: " + need.id);
+        need.initialDeficit = boundedNumber(item, "initial_deficit", path, 0.0, 1.0);
+        need.decayPerHour = boundedNumber(item, "decay_per_hour", path, 0.0, 1.0);
+        need.criticalThreshold = boundedNumber(item, "critical_threshold", path, 0.0, 1.0);
+        need.weight = boundedNumber(item, "weight", path, 0.0, 100.0);
+        need.priority = boundedNumber(item, "priority", path, 0.0, 100.0);
+        if (!item.contains("satisfiers") || !item.at("satisfiers").is_object()) {
+            throw std::runtime_error("need must define an object 'satisfiers' in " + path);
+        }
+        for (auto it = item.at("satisfiers").begin(); it != item.at("satisfiers").end(); ++it) {
+            if (!it.value().is_number()) throw std::runtime_error("need satisfier must be numeric in " + path);
+            const double relief = it.value().get<double>();
+            if (relief < 0.0 || relief > 1.0) throw std::runtime_error("need satisfier is out of range in " + path);
+            if (!actionIds.contains(it.key())) {
+                throw std::runtime_error("need satisfier references an unauthored action: " + it.key());
+            }
+            need.satisfiers[it.key()] = relief;
+        }
+        result.push_back(std::move(need));
+    }
+    return result;
+}
+
 std::vector<std::string> stringArray(const Json& value, const char* key, const std::string& path) {
     std::vector<std::string> result;
     const auto items = value.value(key, Json::array());
@@ -106,7 +155,6 @@ NpcContent parseNpc(const Json& value, const Json& beats, const std::string& pat
     result.initialScheduleLabel = initial.value("schedule_label", result.initialLocation);
     result.initialGoalStage = initial.value("goal_stage", 0);
     result.initialResource = initial.value("resource", 0);
-    result.initialPressure = initial.value("pressure", 0.2);
     result.initialStrategy = initial.value("strategy", "routine");
     const auto peerTrust = initial.value("peer_trust", Json::object());
     for (auto it = peerTrust.begin(); it != peerTrust.end(); ++it) {
@@ -114,6 +162,7 @@ NpcContent parseNpc(const Json& value, const Json& beats, const std::string& pat
     }
     result.schedule = parseSchedule(value.value("schedule", Json::object()), path);
     result.actions = parseActions(beats, result.definition.id);
+    result.needs = parseNeeds(value, result.actions, path);
     return result;
 }
 

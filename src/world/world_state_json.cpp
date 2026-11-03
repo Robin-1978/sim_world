@@ -27,6 +27,17 @@ Json npcDefinitionJson(const NpcDefinition& definition) {
                 {"boundary", definition.boundary}, {"voice", definition.voice}};
 }
 
+Json needStateJson(const NeedState& state) {
+    return Json{{"deficit", state.deficit}, {"last_updated", state.lastUpdated.minute},
+                {"last_relief_revision", state.lastReliefRevision}};
+}
+
+NeedState needStateFromJson(const Json& json) {
+    return NeedState{jsonValue<double>(json, "deficit", 0.0),
+                     GameTime{jsonValue<std::int64_t>(json, "last_updated", 0)},
+                     jsonValue<std::uint64_t>(json, "last_relief_revision", 0)};
+}
+
 NpcDefinition npcDefinitionFromJson(const Json& json) {
     return NpcDefinition{jsonValue<std::string>(json, "id", ""), jsonValue<std::string>(json, "name", ""),
                          jsonValue<std::string>(json, "role", ""), jsonValue<std::string>(json, "home", ""),
@@ -69,9 +80,11 @@ Json worldStateToJson(const WorldState& state) {
         for (const auto& memory : npc.memories) memories.push_back(memoryJson(memory));
         Json peerTrust = Json::object();
         for (const auto& [peer, trust] : npc.peerTrust) peerTrust[peer] = trust;
+        Json needs = Json::object();
+        for (const auto& [needId, need] : npc.needs) needs[needId] = needStateJson(need);
         npcs[id] = Json{{"definition", npcDefinitionJson(npc.definition)}, {"location", npc.location},
                         {"schedule_label", npc.scheduleLabel}, {"goal_stage", npc.goalStage},
-                        {"resource", npc.resource}, {"pressure", npc.pressure},
+                        {"resource", npc.resource}, {"needs", needs},
                         {"relation", {{"trust", npc.playerRelation.trust}, {"respect", npc.playerRelation.respect},
                                        {"fear", npc.playerRelation.fear}, {"owed", npc.playerRelation.owed}}},
                         {"memories", memories}, {"open_promises", npc.openPromises},
@@ -86,7 +99,7 @@ Json worldStateToJson(const WorldState& state) {
     }
     Json events = Json::array();
     for (const auto& event : state.events) events.push_back(worldEventToJson(event));
-    return Json{{"save_schema_version", 2}, {"simulation_version", "adaptive-runtime-p0.2"},
+    return Json{{"save_schema_version", 3}, {"simulation_version", "adaptive-runtime-p0.3"},
                 {"event_sequence", state.events.size()}, {"world_id", state.worldId},
                 {"content_version", state.contentVersion}, {"now", state.now.minute},
                 {"revision", state.revision},
@@ -135,7 +148,10 @@ WorldState deserializeWorldState(const Json& json) {
         npc.scheduleLabel = jsonValue<std::string>(value, "schedule_label", "");
         npc.goalStage = jsonValue<int>(value, "goal_stage", 0);
         npc.resource = jsonValue<int>(value, "resource", 0);
-        npc.pressure = jsonValue<double>(value, "pressure", 0.2);
+        const auto needs = value.value("needs", Json::object());
+        for (auto need = needs.begin(); need != needs.end(); ++need) {
+            npc.needs[need.key()] = needStateFromJson(need.value());
+        }
         const auto relation = value.value("relation", Json::object());
         npc.playerRelation = RelationshipAxes{jsonValue<double>(relation, "trust", 0.35),
                                               jsonValue<double>(relation, "respect", 0.35),

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "content/content_pack.hpp"
 #include "core/types.hpp"
 
 #include <vector>
@@ -14,9 +15,9 @@ struct GoalChoice {
 
 class GoalSelector {
 public:
-    [[nodiscard]] static std::vector<GoalChoice> rank(const NpcState& npc,
-                                                       const VillageState& village,
-                                                       GameTime now);
+    [[nodiscard]] static std::vector<GoalChoice> rank(
+        const NpcState& npc,
+        const std::vector<NeedContent>& needs);
 };
 
 }  // namespace tide_marks

@@ -1,5 +1,6 @@
 #include "world/world_service.hpp"
 #include "world/world_state_json.hpp"
+#include "npc/drive_system.hpp"
 #include <algorithm>
 #include <fstream>
 #include <sstream>
@@ -91,9 +92,15 @@ WorldService WorldService::fromContent(const WorldContentPack& content,
         service.state_.links[link.id] = RuntimeLinkState{link.link.traversable, link.link.locked};
     }
     for (const auto& authored : content.npcs) {
-        NpcState npc{authored.definition, authored.initialLocation, authored.initialScheduleLabel,
-                     authored.initialGoalStage, authored.initialResource, authored.initialPressure,
-                     RelationshipAxes{}, {}, {}, 0, "working", authored.initialStrategy, authored.initialPeerTrust};
+        NpcState npc;
+        npc.definition = authored.definition;
+        npc.location = authored.initialLocation;
+        npc.scheduleLabel = authored.initialScheduleLabel;
+        npc.goalStage = authored.initialGoalStage;
+        npc.resource = authored.initialResource;
+        npc.strategy = authored.initialStrategy;
+        npc.peerTrust = authored.initialPeerTrust;
+        DriveSystem::initialize(npc, authored.needs, service.state_.now);
         npc.memories.push_back(Memory{"authored", "Initial content pack memory.", service.state_.now, 1.0});
         service.state_.npcs.emplace(authored.definition.id, std::move(npc));
         service.state_.entities["npc:" + authored.definition.id] =
@@ -188,25 +195,44 @@ DecisionContext WorldService::decisionContext(const std::string& npcId) const {
                          std::to_string(state_.village.grain) + ", boat=" +
                          std::to_string(state_.village.boatIntegrity) + ", records=" +
                          std::to_string(state_.village.recordsIntegrity) + ".";
+    context.externalStimuli = "public_resources(grain=" + std::to_string(state_.village.grain) +
+                              ", boat=" + std::to_string(state_.village.boatIntegrity) +
+                              ", records=" + std::to_string(state_.village.recordsIntegrity) +
+                              "), time=" + state_.now.toString();
+    context.structuralConstraints = "Only authored action candidates may be proposed; resources, permissions, "
+                                   "topology and world revision are checked before commit.";
     std::vector<std::string> memories;
     for (const auto& memory : npc.memories) memories.push_back(memory.text);
     context.memories = join(memories, " | ");
     context.character = npc.definition.name + ": " + npc.definition.role + "; public goal=" +
                         npc.definition.publicGoal + "; hidden goal=" + npc.definition.hiddenGoal +
-                        "; boundary=" + npc.definition.boundary + "; pressure=" +
-                        std::to_string(npc.pressure) + "; strategy=" + npc.strategy;
+                        "; boundary=" + npc.definition.boundary + "; strategy=" + npc.strategy;
+    for (const auto& [needId, need] : npc.needs) {
+        context.character += "; need(" + needId + ")=" + std::to_string(need.deficit);
+    }
     for (const auto& [peer, trust] : npc.peerTrust) {
         context.character += "; trust(" + peer + ")=" + std::to_string(trust);
     }
+    std::vector<NeedContent> needs;
     for (const auto& authored : content_.npcs) {
         if (authored.definition.id == npcId) {
             context.candidates = authored.actions;
+            needs = authored.needs;
+            for (const auto& definition : needs) {
+                const auto state = npc.needs.find(definition.id);
+                if (state != npc.needs.end()) {
+                    context.internalDrives += (context.internalDrives.empty() ? "" : "; ") + definition.id +
+                                              " deficit=" + std::to_string(state->second.deficit);
+                    context.character += "; drive(" + definition.id + ")=" +
+                                         std::to_string(DriveSystem::drive(definition, state->second));
+                }
+            }
             break;
         }
     }
     // Utility ranking chooses the long-term intent deterministically. The
     // provider may still choose any authored candidate after seeing this list.
-    const auto ranked = GoalSelector::rank(npc, state_.village, state_.now);
+    const auto ranked = GoalSelector::rank(npc, needs);
     std::vector<ActionCandidate> ordered;
     for (const auto& choice : ranked) {
         const auto candidate = std::find_if(context.candidates.begin(), context.candidates.end(),
@@ -240,6 +266,25 @@ void WorldService::advanceMinutes(std::int64_t minutes) {
 void WorldService::processHourBoundary(int day, int hour) {
     const int minuteOfDay = hour * 60;
     for (auto& [id, npc] : state_.npcs) {
+        if (const auto* authored = authoredNpc(id)) {
+            const GameTime previous{state_.now.minute - 60};
+            const auto changes = DriveSystem::advance(npc, authored->needs, previous, state_.now);
+            Json changed = Json::array();
+            for (const auto& change : changes) {
+                changed.push_back(Json{{"need_id", change.needId}, {"before", change.before}, {"after", change.after}});
+                if (change.becameCritical) {
+                    addEvent("need.critical", id, change.needId, "A need crossed its critical threshold",
+                             Json{{"need_id", change.needId}, {"before", change.before},
+                                  {"deficit", change.after}, {"rule", "drive.time_decay"},
+                                  {"from_minute", previous.minute}, {"to_minute", state_.now.minute}});
+                }
+            }
+            if (!changed.empty()) {
+                addEvent("need.deprived", id, "self", "Need deficits advanced with world time",
+                         Json{{"changes", changed}, {"hours", 1}, {"rule", "drive.time_decay"},
+                              {"from_minute", previous.minute}, {"to_minute", state_.now.minute}});
+            }
+        }
         const auto entity = state_.entities.find("npc:" + id);
         if (entity != state_.entities.end() && entity->second.lifecycle != EntityLifecycle::Active) continue;
         std::string scheduledLocation = npc.definition.home;
@@ -267,12 +312,10 @@ void WorldService::processHourBoundary(int day, int hour) {
     if (hour == 8) {
         const int ration = std::min(5, state_.village.grain);
         state_.village.grain -= ration;
-        if (miraFound != state_.npcs.end()) {
-            miraFound->second.resource = state_.village.grain;
-            miraFound->second.pressure = state_.village.grain < 70 ? 0.8 : 0.3;
-        }
+        if (miraFound != state_.npcs.end()) miraFound->second.resource = state_.village.grain;
         addEvent("life.ration", "mira", "village", "Mira records the morning ration",
                  Json{{"grain_used", ration}, {"grain_remaining", state_.village.grain}, {"day", day}});
+        applyNeedRelief("mira", "offer_ration");
     }
     if (hour == 10 && state_.village.boatIntegrity < 100) {
         if (state_.village.grain >= 5) state_.village.grain -= 5;
@@ -282,13 +325,13 @@ void WorldService::processHourBoundary(int day, int hour) {
         if (miraFound != state_.npcs.end()) {
             previousTrust = miraFound->second.peerTrust["lorn"];
             miraFound->second.peerTrust["lorn"] = std::min(1.0, previousTrust + 0.12);
-            miraFound->second.pressure = std::max(0.0, miraFound->second.pressure - 0.05);
             miraFound->second.memories.push_back(Memory{"relationship", "Lorn spent village grain to keep the ferry running.", state_.now, 0.95});
             ++miraFound->second.stateVersion;
         }
         ++state_.village.cooperation;
         addEvent("life.repair", "lorn", "ferry", "Lorn patches the ferry before the next crossing",
                  Json{{"boat_integrity", state_.village.boatIntegrity}});
+        applyNeedRelief("lorn", "repair_ferry");
         const double nextTrust = miraFound == state_.npcs.end() ? previousTrust : miraFound->second.peerTrust["lorn"];
         addEvent("social.cooperation", "lorn", "mira", "Lorn spends grain and repairs the crossing for the village",
                  Json{{"peer", "lorn"}, {"trust_before", previousTrust}, {"trust_after", nextTrust}});
@@ -298,6 +341,7 @@ void WorldService::processHourBoundary(int day, int hour) {
         if (eveFound != state_.npcs.end()) eveFound->second.resource = state_.village.recordsIntegrity;
         addEvent("life.archive", "eve", "archive", "Eve indexes the tide registry",
                  Json{{"records_integrity", state_.village.recordsIntegrity}});
+        applyNeedRelief("eve", "share_record");
     }
 }
 
@@ -310,22 +354,13 @@ void WorldService::processDayBoundary(int day) {
     if (lornFound != state_.npcs.end()) lornFound->second.resource = state_.village.boatIntegrity;
     if (eveFound != state_.npcs.end()) eveFound->second.resource = state_.village.recordsIntegrity;
     if (state_.village.grain < 85) {
-        if (miraFound != state_.npcs.end()) {
-            miraFound->second.goalStage = std::max(miraFound->second.goalStage, 1);
-            miraFound->second.pressure = std::min(1.0, miraFound->second.pressure + 0.12);
-        }
+        if (miraFound != state_.npcs.end()) miraFound->second.goalStage = std::max(miraFound->second.goalStage, 1);
     }
     if (state_.village.boatIntegrity < 70) {
-        if (lornFound != state_.npcs.end()) {
-            lornFound->second.goalStage = std::max(lornFound->second.goalStage, 1);
-            lornFound->second.pressure = std::min(1.0, lornFound->second.pressure + 0.1);
-        }
+        if (lornFound != state_.npcs.end()) lornFound->second.goalStage = std::max(lornFound->second.goalStage, 1);
     }
     if (state_.village.recordsIntegrity > 80 || day >= 2) {
-        if (eveFound != state_.npcs.end()) {
-            eveFound->second.goalStage = std::max(eveFound->second.goalStage, 1);
-            eveFound->second.pressure = std::min(1.0, eveFound->second.pressure + 0.08);
-        }
+        if (eveFound != state_.npcs.end()) eveFound->second.goalStage = std::max(eveFound->second.goalStage, 1);
     }
     for (auto& [id, npc] : state_.npcs) {
         const auto entity = state_.entities.find("npc:" + id);
@@ -346,7 +381,6 @@ void WorldService::reviseNpcStrategies(int day) {
     if (mira.strategy != "cooperative_transport" && mira.peerTrust["lorn"] >= 0.45) {
         mira.strategy = "cooperative_transport";
         mira.goalStage = std::max(mira.goalStage, 2);
-        mira.pressure = std::max(0.0, mira.pressure - 0.08);
         mira.memories.push_back(Memory{"plan", "Mira trusts Lorn enough to coordinate transport with him.", state_.now, 0.9});
         ++mira.stateVersion;
         addEvent("npc.goal_revised", "mira", "lorn", "Mira changes her next-day plan to cooperative transport",
@@ -363,12 +397,10 @@ void WorldService::applyPromiseDeadline() {
             auto from = state_.npcs.find(promise.from);
             auto to = state_.npcs.find(promise.to);
             if (from != state_.npcs.end()) {
-                from->second.pressure = std::min(1.0, from->second.pressure + 0.2);
                 from->second.playerRelation.trust = std::max(0.0, from->second.playerRelation.trust - 0.08);
                 ++from->second.stateVersion;
             }
             if (to != state_.npcs.end()) {
-                to->second.pressure = std::min(1.0, to->second.pressure + 0.2);
                 to->second.playerRelation.respect = std::max(0.0, to->second.playerRelation.respect - 0.08);
                 ++to->second.stateVersion;
             }
@@ -578,40 +610,74 @@ DialogueTurn WorldService::converse(const std::string& npcId, const std::string&
         result.provider += "+fallback";
         result.error = "provider_fallback:" + providerError;
     }
-    const auto validation = ActionValidator::validate(context, response.actionId);
+    if (response.proposal.worldRevision != context.worldRevision ||
+        response.proposal.npcStateVersion != context.npcStateVersion) {
+        result.error = "stale_intent_proposal";
+        return result;
+    }
+    if (response.proposal.confidence < 0.0 || response.proposal.confidence > 1.0) {
+        result.error = "invalid_intent_confidence";
+        return result;
+    }
+    const auto validation = ActionValidator::validate(context, response.proposal.actionId);
     if (!validation.valid) {
         result.error = validation.code;
         return result;
     }
-    if (response.actionId == "offer_ration") {
+    if (response.proposal.actionId == "offer_ration") {
         if (state_.village.grain < 5) {
             result.error = "insufficient_grain";
             return result;
         }
         state_.village.grain -= 5;
         state_.village.reputation += 1;
-    } else if (response.actionId == "repair_ferry") {
+    } else if (response.proposal.actionId == "repair_ferry") {
         state_.village.boatIntegrity = std::min(100, state_.village.boatIntegrity + 10);
-    } else if (response.actionId == "share_record") {
+    } else if (response.proposal.actionId == "share_record") {
         state_.village.recordsIntegrity = std::max(0, state_.village.recordsIntegrity - 1);
         state_.npcs.at(npcId).goalStage = std::max(1, state_.npcs.at(npcId).goalStage);
-    } else if (response.actionId == "protect_secret" || response.actionId == "reveal_clue") {
+    } else if (response.proposal.actionId == "protect_secret" || response.proposal.actionId == "reveal_clue") {
         state_.npcs.at(npcId).goalStage = std::max(1, state_.npcs.at(npcId).goalStage);
     }
     if (!turnId.empty()) state_.processedTurnIds.insert(turnId);
+    applyNeedRelief(npcId, response.proposal.actionId);
     ++state_.npcs.at(npcId).stateVersion;
     state_.npcs.at(npcId).memories.push_back(Memory{"conversation", playerInput, state_.now, 1.0});
     addEvent("dialogue.turn", npcId, "player", response.dialogue,
-             Json{{"turn_id", turnId}, {"action_id", response.actionId}, {"intent", response.intent},
-                  {"motivation", response.motivation}, {"provider", result.provider}});
+             Json{{"turn_id", turnId}, {"action_id", response.proposal.actionId},
+                  {"intent", response.proposal.intent}, {"motivation", response.proposal.rationale},
+                  {"expected_outcome", response.proposal.expectedOutcome},
+                  {"confidence", response.proposal.confidence}, {"provider", result.provider},
+                  {"context_world_revision", response.proposal.worldRevision},
+                  {"context_npc_state_version", response.proposal.npcStateVersion}});
     result.accepted = true;
-    result.actionId = response.actionId;
-    result.intent = response.intent;
-    result.motivation = response.motivation;
+    result.actionId = response.proposal.actionId;
+    result.intent = response.proposal.intent;
+    result.motivation = response.proposal.rationale;
     result.dialogue = response.dialogue;
     result.event = state_.events.back();
     syncNpcEntityState();
     return result;
+}
+
+const NpcContent* WorldService::authoredNpc(const std::string& npcId) const {
+    const auto found = std::find_if(content_.npcs.begin(), content_.npcs.end(),
+                                    [&npcId](const auto& item) { return item.definition.id == npcId; });
+    return found == content_.npcs.end() ? nullptr : &*found;
+}
+
+void WorldService::applyNeedRelief(const std::string& npcId, const std::string& actionId) {
+    const auto* authored = authoredNpc(npcId);
+    const auto npc = state_.npcs.find(npcId);
+    if (authored == nullptr || npc == state_.npcs.end()) return;
+    const auto changes = DriveSystem::relieve(npc->second, authored->needs, actionId, state_.now);
+    for (const auto& change : changes) {
+        npc->second.needs.at(change.needId).lastReliefRevision = state_.revision + 1;
+        addEvent("need.relieved", npcId, actionId, "A committed action relieved a need",
+                 Json{{"need_id", change.needId}, {"action_id", actionId},
+                      {"before", change.before}, {"after", change.after},
+                      {"rule", "drive.committed_action"}, {"source_revision", state_.revision + 1}});
+    }
 }
 
 void WorldService::addEvent(std::string type, std::string actor, std::string target,
@@ -672,8 +738,15 @@ std::string summarize(const WorldState& state) {
            << "; boat=" << state.village.boatIntegrity << "; records=" << state.village.recordsIntegrity
            << "; revision=" << state.revision;
     for (const auto& [id, npc] : state.npcs) {
-        output << "; " << id << "@" << npc.location << ":stage=" << npc.goalStage
-               << ":pressure=" << npc.pressure;
+        output << "; " << id << "@" << npc.location << ":stage=" << npc.goalStage;
+        const auto highest = std::max_element(npc.needs.begin(), npc.needs.end(),
+                                              [](const auto& left, const auto& right) {
+                                                  if (left.second.deficit == right.second.deficit) {
+                                                      return left.first > right.first;
+                                                  }
+                                                  return left.second.deficit < right.second.deficit;
+                                              });
+        if (highest != npc.needs.end()) output << ":need=" << highest->first << '=' << highest->second.deficit;
     }
     return output.str();
 }
