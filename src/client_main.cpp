@@ -139,6 +139,7 @@ int main() {
 int main() {
     auto village = tide_marks::WorldService::createVillage();
     std::cout << "Tide Marks village client (headless scene preview)\n";
+    std::cout << "Renderer disabled. Reconfigure build with -DTIDE_MARKS_FETCH_RAYLIB=ON for the 3D window.\n";
     std::cout << "camera=slanted-top-down scene=assets/blender/village.glb\n";
     std::cout << tide_marks::summarize(village.state()) << '\n';
     for (const auto& [id, npc] : village.state().npcs) {
