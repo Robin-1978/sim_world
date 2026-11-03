@@ -24,7 +24,7 @@ cmake --build build -j2
 ./build/tide_marks_client
 ```
 
-If GitHub is unreachable, prefix the configure command with `HTTPS_PROXY=http://gfw.gs-robot.cn:6780`. The window uses a slanted 3D camera. **WASD** moves, **E** talks to a nearby NPC, and **Esc** exits. The client loads `assets/blender/village.glb` when started from the repository root.
+If GitHub is unreachable, set `HTTPS_PROXY` to a proxy configured for your environment for the configure command. The window uses a slanted 3D camera. **WASD** moves, **E** talks to a nearby NPC, and **Esc** exits. The client loads `assets/blender/village.glb` when started from the repository root.
 
 To use the running local model in the 3D client, set the provider before launching:
 
