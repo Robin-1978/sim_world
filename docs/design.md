@@ -293,7 +293,7 @@ Profile 的 `decision_policy` 是按 channel 使用的命名策略表。Provider
 }
 ```
 
-环境变量只用于本地诊断和临时实验，例如 `TIDE_MARKS_MAX_TOKENS`、`TIDE_MARKS_ENABLE_THINKING`、`TIDE_MARKS_THINKING_BUDGET` 和 `TIDE_MARKS_TIMEOUT_MS`；正常运行不需要它们。API Key 仍只从配置声明的环境变量读取，不写入内容包、存档或日志。
+Provider 的 thinking、reasoning budget、max tokens 和 timeout 只从版本化 Intelligence Profile 读取；环境变量不再覆盖这些决策参数。API Key 仍只从配置声明的环境变量读取，不写入内容包、存档或日志。
 
 结构化对话可以包含 `say`、`emotion`、`beat_id`、`intent`、`action` 和 `memory_candidates`；`create_promise` 仍然只是命令提案，不能直接完成任务。
 

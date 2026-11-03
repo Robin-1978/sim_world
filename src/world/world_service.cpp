@@ -956,6 +956,16 @@ DialogueTurn WorldService::executeTurn(const std::string& npcId, const std::stri
         result.provider += "+fallback";
         result.error = "provider_fallback:" + providerError;
     }
+    // A model may return a syntactically valid JSON object while omitting the
+    // required action for a channel that permits world changes. Treat that as
+    // a proposal failure, not as a conversation-only turn. The deterministic
+    // provider selects from the same authored candidates and still goes
+    // through the normal validator and transaction path.
+    if (response.ok && context.worldActionAllowed && response.proposal.actionId.empty()) {
+        response = MockProvider{}.decide(context, input);
+        result.provider += "+proposal_fallback";
+        result.error = "provider_fallback:world_action_required";
+    }
     if (response.proposal.worldRevision != context.worldRevision ||
         response.proposal.npcStateVersion != context.npcStateVersion) {
         result.error = "stale_intent_proposal";

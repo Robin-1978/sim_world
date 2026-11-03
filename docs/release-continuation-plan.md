@@ -25,7 +25,7 @@
 | LLM 解释与权衡 | 对话提案已接入引用 Stimulus、tradeoffs、expected relief；高显著性自主审议基础链路已接入，异步 TurnQueue 待实现 | `IntentProposal`, `IProvider`, `WorldService::converse/deliberate` |
 | 长过程执行 | 数据驱动时长、单一活动槽、资源预留、完成/挂起/恢复事件和 Snapshot 恢复均已实现；挂起释放预留，刺激清除且资源可用时按原计划恢复并顺延完成时间；Goal、Process、FSM、BT 是同一活动的四个投影 | `ProcessExecution`, `NpcActivity`, `WorldService::tickProcesses`, `resumeSuspendedProcesses`, `src/npc/state_machine.*` |
 | 通用资源与实例活动 | 基础层已实现，生产/交易语义扩展属于 P1 | `ResourceContent`, `ResourceState(amount,reserved)`, `ActivityContent`, data-driven schedule effects；承诺关系增量与重谈时长已由 `promise_policy` 驱动 |
-| 元动作语义目录 | 已冻结，资源/需求/声明式结构执行器已接入；完整可组合 Behavior DSL 延后到 P1 | `src/world/meta_actions.*`, `relieve_need`, `set_link_state` |
+| 元动作语义目录 | 已冻结；故事动作 ID 由内容包绑定到通用 operator，行为配方在运行时编译为 BT | `src/world/meta_actions.*`, `src/npc/behavior_recipe.*`, `data/behaviors/village.json` |
 | World Intelligence 演化提案 | 结构治理已完成，沙箱/激活待 P2 | `src/evolution/evolution.*`, `data/schemas/evolution-proposal.schema.json`; 校验白名单、禁止 Core mutation、独立审批已覆盖 |
 | 3D 表现和 Blender 场景 | 已有 P0 原型 | 不参与当前平台模型验收 |
 
@@ -40,6 +40,10 @@
 - 运行态 NPC 只保存 `definition_id`；快照引用已删除的内容或不同 `content_version` 时会明确拒绝加载。
 - 第二个最小内容实例（`tests/fixtures/minimal-pack`，NPC `sable`）可以独立加载、保存和查询实体投影，证明 Runtime 不依赖村庄角色。
 - 承诺的关系轴增量和重谈延长时长来自 `promise_policy`，修改内容即可改变结果。
+- 行为树由 `recipes` 自动构造；Mira、Lorn、Eve 与故事动作没有专用 C++ BT。
+- 对话与自驱由 `decision_channels` 声明；通道属性、话语权限、事件/记忆投影和 Provider 策略不再依赖 trigger 字符串分支。
+- 嵌套配方失败只回滚自己的保存点，不会把所在世界时间步一起恢复；快照回滚不复制不可变事件历史。
+- 27 个核心测试当前在本机以约 3 秒完成，单测耗时输出用于防止长期模拟回归。
 
 ## P0 工作顺序
 
@@ -88,14 +92,14 @@ P0-K 的前三项以及模型关闭、过期提案、重复提案、过程恢复
 2. 让内容加载器校验单位、所有权、容量、输入/输出、时间窗口、权限和引用，不接受只有名称没有语义属性的动作。
 3. 完成 P0 元动作注册表：资源消耗/产出/转移/预留、需求满足、关系调整、移动、承诺、记忆、连接状态和实体生命周期。
    - 已完成执行器：`consume_resource`、`produce_resource`、`reserve_resource`、`release_resource`。
-4. ~~把小村庄真实的配给、修船、档案整理和承诺行为组合为 BehaviorRecipe；不再为每个 NPC 添加 C++ 特例。~~ P0 已用内容驱动的 ActionCandidate 与 Activity effects 完成同一因果闭环；Sequence、Selector、补偿步骤等通用 Behavior DSL 延后到 P1，避免在原型验收前扩张语言面。
+4. ~~把小村庄真实的配给、修船、档案整理和承诺行为组合为 BehaviorRecipe；不再为每个 NPC 添加 C++ 特例。~~ 已完成：`data/behaviors/village.json` 定义 meta actions、conditions 和 recipes，Runtime 编译 Sequence/Selector/Condition/Action/Timeout/Interruptible 节点；ActionCandidate 只引用配方，ProcessExecution 在完成时执行同一配方。
 5. 为元动作、复合行为、事务失败和回滚补自动化测试；测试通过前不增加商店、利率或政策规则。
 
 ## 后续工作包
 
-### P1：潮门港与可组合行为
+### P1：潮门港与可组合行为扩展
 
-加入通用 Behavior DSL（Sequence、Selector、Condition、MetaAction、Wait、Timeout、Interrupt、补偿步骤）、港区、交易、资源预留、家庭/组织指标、阵营关系、近远场模拟等级、完整 UI、物理机关和内容迁移。验收仍以可回放的事实链为准。
+在现有 JSON Behavior DSL 上加入 Wait、补偿步骤和更丰富的资源/交易语义，再加入港区、家庭/组织指标、阵营关系、近远场模拟等级、完整 UI、物理机关和内容迁移。验收仍以可回放的事实链为准。
 
 ### P2：World Intelligence 演化和沙箱
 
