@@ -7,11 +7,11 @@
   "public_goal": "Keep grain rationing fair",
   "hidden_goal": "Protect an undocumented family member",
   "boundary": "Never endanger a child to satisfy an official order",
-  "initial": {"location": "granary", "resource": 100, "strategy": "ration_ledger", "peer_trust": {"lorn": 0.35, "eve": 0.30}},
+  "initial": {"location": "granary", "strategy": "ration_ledger", "peer_trust": {"lorn": 0.35, "eve": 0.30}},
   "needs": [
-    {"id": "food_security", "taxonomy": "physiological", "initial_deficit": 0.25, "decay_per_hour": 0.02, "critical_threshold": 0.70, "weight": 1.0, "priority": 0.10, "satisfiers": {"offer_ration": 0.20, "rest": 0.03}},
-    {"id": "autonomy", "taxonomy": "autonomy", "initial_deficit": 0.20, "decay_per_hour": 0.01, "critical_threshold": 0.75, "weight": 0.80, "priority": 0.05, "satisfiers": {"protect_secret": 0.12, "explain_ration": 0.04}},
-    {"id": "belonging", "taxonomy": "belonging", "initial_deficit": 0.30, "decay_per_hour": 0.01, "critical_threshold": 0.80, "weight": 0.70, "priority": 0.05, "satisfiers": {"explain_ration": 0.08, "offer_ration": 0.05}}
+    {"id": "food_security", "domain": "physiological", "dimension": "food", "initial_deficit": 0.25, "decay_per_hour": 0.02, "critical_threshold": 0.70, "weight": 1.0, "priority": 0.10, "satisfiers": {"offer_ration": {"relief": 0.20, "meta_actions": ["consume_resource", "relieve_need"]}, "rest": {"relief": 0.03, "meta_actions": ["relieve_need"]}}},
+    {"id": "autonomy", "domain": "psychological", "dimension": "autonomy", "initial_deficit": 0.20, "decay_per_hour": 0.01, "critical_threshold": 0.75, "weight": 0.80, "priority": 0.05, "satisfiers": {"protect_secret": {"relief": 0.12, "meta_actions": ["relieve_need"]}, "explain_ration": {"relief": 0.04, "meta_actions": ["relieve_need"]}}},
+    {"id": "belonging", "domain": "social", "dimension": "belonging", "initial_deficit": 0.30, "decay_per_hour": 0.01, "critical_threshold": 0.80, "weight": 0.70, "priority": 0.05, "satisfiers": {"explain_ration": {"relief": 0.08, "meta_actions": ["relieve_need"]}, "offer_ration": {"relief": 0.05, "meta_actions": ["consume_resource", "relieve_need"]}}}
   ],
   "schedule": {"06:00-12:00": "granary", "12:00-16:00": "village_square", "16:00-06:00": "mira_home"}
 }

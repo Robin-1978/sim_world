@@ -13,14 +13,18 @@ std::vector<GoalChoice> GoalSelector::rank(const NpcState& npc,
     std::map<std::string, GoalChoice> ranked;
     for (const auto& need : needs) {
         const auto state = npc.needs.find(need.id);
-        const NeedState current = state == npc.needs.end() ? NeedState{need.initialDeficit, GameTime{}, 0}
-                                                           : state->second;
+        NeedState fallback;
+        fallback.deficit = need.initialDeficit;
+        fallback.sensitivity = need.weight;
+        const NeedState current = state == npc.needs.end() ? fallback : state->second;
         const double drive = DriveSystem::drive(need, current);
-        for (const auto& [actionId, relief] : need.satisfiers) {
-            const double score = drive * std::max(0.0, relief);
+        for (const auto& [actionId, satisfier] : need.satisfiers) {
+            const auto learned = current.expectedRelief.find(actionId);
+            const double expected = learned == current.expectedRelief.end() ? satisfier.relief : learned->second;
+            const double score = drive * std::max(0.0, expected);
             auto found = ranked.find(actionId);
             if (found == ranked.end() || score > found->second.score) {
-                ranked[actionId] = GoalChoice{actionId, score, need.taxonomy + ":" + need.id};
+                ranked[actionId] = GoalChoice{actionId, score, need.domain + ":" + need.id};
             }
         }
     }

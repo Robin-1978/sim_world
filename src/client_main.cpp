@@ -175,8 +175,7 @@ int main() {
     std::cout << "camera=slanted-top-down scene=assets/blender/village.glb\n";
     std::cout << tide_marks::summarize(village.state()) << '\n';
     for (const auto& [id, npc] : village.state().npcs) {
-        std::cout << "npc " << npc.definition.name << " role=" << npc.definition.role
-                  << " location=" << npc.location << '\n';
+        std::cout << "npc " << npc.definitionId << " location=" << npc.location << '\n';
     }
     tide_marks::DeterministicPhysicsWorld physics;
     physics.addBody(tide_marks::PhysicsBody{"player", 0.0, 0.0, 0.5, true});

@@ -51,7 +51,7 @@ LLM 提出新的需求类型、驱动力曲线、集体指标、行为配方、�
 
 ## 3. 世界实例与内容边界
 
-Runtime 不认识 Mira、村庄、潮门港或具体剧情。世界内容包用 JSON 声明实体原型、空间拓扑、资源、日程、需求、行为配方、事件条件和对白；Game Instance 组合开局位置、初始关系、剧情入口、视觉资产和玩家体验；World Runtime State 保存当前事实；Intelligence Profile 定义感知投影、记忆策略、Provider、工具白名单和演化策略。
+Runtime 不认识 Mira、村庄、潮门港或具体剧情。世界内容包用 JSON 声明实体原型、空间拓扑、资源、日程、需求、行为配方、事件条件和对白；Game Instance 组合开局位置、初始关系、剧情入口、视觉资产和玩家体验；World Runtime State 保存当前事实；Intelligence Profile 定义感知投影、记忆策略、Provider、工具白名单和演化策略。Content Pack 是可复用的原型、规则和行为定义，Game Instance 是一次具体运行的身份与开局覆盖；运行中的状态永远不回写这两类静态定义。
 
 JSON 是内容和提案的机器边界，C++ 类型是编译期契约，WorldState 是某个实例的当前事实。它们不是两份可写的游戏状态。加载时 JSON 只初始化和校验；运行中只改 WorldState；EntityRegistry/Component 是已提交事实的投影；存档保存实例状态。项目尚未发布，字段变化直接同步修改代码、数据、测试和文档，不保留旧字段别名或兼容解析路径。
 
@@ -80,22 +80,76 @@ JSON 是内容和提案的机器边界，C++ 类型是编译期契约，WorldSta
 
 内驱是主体内部的连续状态；外驱是世界对主体施加的已记录刺激；结构约束不是驱动力，而是定义哪些意图可以落地的边界。LLM 可以把“粮食减少、邻居求助和承诺截止”理解为一组社会情境，但不能把不存在的粮食、权限或道路写进上下文。
 
-### 个体需求与内稳态
+### 内驱：需求域、驱动状态与自动适应
 
-马斯洛只作为作者和调试者的 taxonomy，不是固定五层闸门。可用 taxonomy 包括 physiological、safety、belonging、esteem、autonomy、cognition 和 growth；一个角色可以同时追求安全、关系和真相，低层需求临界时提高行动代价或触发安全约束。
+P0 使用四个可同时激活的需求域。它们用于建模和内容校验，不是严格互斥的心理实体，也不形成一个固定先后顺序：
 
-内容包的 `NeedDefinition` 至少包含：`id`、`taxonomy`、`initial_deficit`、`decay_per_hour`、`critical_threshold`、`weight`、`priority`、`satisfiers`。运行时的 `NeedState` 保存 `deficit`、`last_updated` 和 `last_relief_revision`。缺口范围是 `[0,1]`，0 表示满足，1 表示极端缺失。定义还应记录来源（作者初始模型、学习记忆或已批准演化）、版本和适用范围；运行时状态记录最近一次事实来源，便于解释驱动为什么发生变化。已经批准的定义由 DriveSystem 随游戏时间更新：
+| 需求域 | 典型状态变量 | 村庄中的具体需求示例 | 事实满足路径示例 |
+|---|---|---|---|
+| 生理 / 稳态 | 能量、水分、疲劳、疼痛、健康、体温、睡眠 | 食物安全、休息、船况对自身安全的威胁 | 进食、休息、治疗、修复设施 |
+| 心理 / 自我调节 | 安全、可控性、自主、胜任、尊严、身份连续性 | Mira 的自主性、Eve 的档案安全与身份焦虑 | 获得保护、选择权、完成任务、澄清身份 |
+| 社会 / 关系 | 归属、信任、互惠、承认、公平、地位、共同责任 | 被伙伴接纳、获得协作、兑现承诺、维护声誉 | 交谈、共同工作、交换、承诺、加入组织 |
+| 认知 / 认识 | 确定性、信息充分性、因果一致性、新颖性、掌握 | Eve 对家谱真相的求知、对记录可靠性的怀疑 | 调查、询问、比较证据、实验、学习 |
+
+Maslow 的五层图可以用于角色底稿和玩家可读的叙事提示，但不足以作为第一期 Runtime 的需求模型：其层级证据并不支持固定闸门，不能表示同一主体的并行需求，也不提供外部刺激、满足路径、学习、制度约束和可执行协议。P0 从四个需求域中各定义至少一项具体需求，以验证通用链路；以后可以由内容作者增加需求，或由受治理的演化提案增加确定性可执行的需求类型。
+
+一项具体需求由 `NeedDefinition` 定义，运行时实例由 `NeedState` 保存。Definition 声明 `id`、`domain`、可选 `dimension`、初始缺口、基础变化率、临界阈值、基础权重与优先级、一个或多个满足配方以及来源/版本。State 保存当前缺口、最近更新时间、最近满足来源、有限度敏感度、预期满足和适应版本。这里的“五个驱动属性”是同一驱动状态的五个操作维度，不是五个人类需求：
+
+1. **缺口**：当前状态与目标状态的差异；
+2. **紧迫度**：缺口、临界阈值和时间窗口共同形成的行动压力；
+3. **敏感度/权重**：该需求对当前主体的相对影响，可在声明边界内改变；
+4. **预期满足**：候选行动根据历史结果预期能降低多少缺口；
+5. **证据置信度**：感知、记忆和预测支持上述判断的可信程度。
+
+已经批准的定义由 DriveSystem 随游戏时间更新：
 
 ```text
 deficit(t + Δt) = clamp(deficit(t) + decay_per_hour × Δt - committed_relief, 0, 1)
-drive = priority + weight × urgency(deficit, critical_threshold)
+drive = priority + sensitivity × urgency(deficit, critical_threshold)
+expected_relief(action, need) = learned_expectation × evidence_confidence
 ```
 
-满足只能来自已提交的行为或事件，例如进食、休息、修复、获得安全、完成协作、澄清关系或获得可靠信息。对白、模型自述和未验证的记忆候选不能直接降低缺口。需求跨越临界阈值产生 `need.critical`，时间推进产生 `need.deprived`，已提交满足产生 `need.relieved`；事件记录需求 ID、前后值、行动、规则和 Revision。
+每个具体需求必须绑定一个或多个 `NeedSatisfier`。满足配方说明在什么条件下、通过哪条已注册行为或过程、消费哪些事实、产生多少有证据的满足，以及失败和替代路径。配方最终编译成一个或多个元动作，例如 `consume_resource + relieve_need`、`reserve_resource + produce_resource + relieve_need`、`communicate + adjust_relationship + relieve_need`。一个配方可以满足多个需求，多个配方也可以满足同一需求；没有可执行满足配方的需求不能进入活动内容。满足只能引用已提交的行为、过程或事件。对白、模型自述、未验证记忆和 LLM 自行填写的数字不能直接降低缺口。
 
-当前 P0 采用确定性驱动力内核，确保世界不调用模型也能运行、测试和回放。内驱是主体内部连续状态，外驱是世界对主体施加的已记录刺激，结构约束是意图能否执行的条件。LLM 不替代内稳态计算，而是读取授权的需求、事件、关系和后果，进行语义解释、权衡和候选意图生成；它也可以提出“是否需要新的需求定义”，但提案未通过沙箱和批准前不改变需求模型。
+需求跨越临界阈值产生 `need.critical`，时间推进产生 `need.deprived`，已提交满足产生 `need.relieved` 或 `drive.satisfied`；事件记录需求 ID、前后值、来源行动/事件、配方、规则、内容和 Revision。
 
-习惯化、累积和预测误差属于后续的驱动力扩展，不能让同一刺激永远产生同样反应。例如反复失信可能增加某个主体的安全需求敏感度，成功协作可能降低同类行动的风险估计。扩展参数由内容定义；LLM 只能解释和提案，Runtime 仍负责数值状态、事件和版本。该模型是用于可信模拟的可解释近似，不声称还原真实人类心理。
+自动适应发生在单个主体的状态上，且必须有界、可审计、可回滚。例如行动前预测会缓解 0.2，实际结算为 0.05，DriveSystem 在内容声明的学习率、单次步长和冷却期内校准该需求的预期满足，并产生 `drive.adapted`；外驱习惯化则在校准该类刺激的敏感度。适应参数属于世界规则；LLM 可以解释误差和提出策略提案，但不能直接写权重、阈值或衰减率。个体适应不等于社会规则或 Runtime Core 演化。
+
+当前 P0 采用确定性驱动力内核，确保世界不调用模型也能运行、测试和回放。内驱是主体内部连续状态，外驱是世界对主体施加的已记录刺激，结构约束是意图能否执行的条件。LLM 不替代内稳态计算，但会实际参与高价值决策：读取授权的需求、事件、关系和后果，解释处境，比较满足路径的代价与社会影响，引用它依赖的 Stimulus，生成 `tradeoffs` 和 `expected_relief`，再提出候选意图。C++ 只接受经过版本、权限、资源、可见性和业务规则校验的行动；模型不能直接写缺口、敏感度、资源、关系或事件。LLM 也可以提出新的需求定义、刺激类型、结构规则、行为配方和策略，但提案未通过沙箱和批准前不改变需求模型。
+
+该模型是用于可信模拟的可解释近似，不声称还原真实人类心理。理论依据用于确定状态语义和边界，具体阈值、曲线与满足强度必须由内容或经批准的演化提案定义并通过回放校准。
+
+### 外驱：结构化刺激与自动重评
+
+外驱是平台从已提交事件、可观察环境和结构变化中投射给特定主体的刺激，不是另一份需求，也不是装饰性的长字符串。`StimulusState` 至少记录 `stimulus_id`、来源事实/事件、感知者、相关实体、类型、出现时间、到期时间、可见范围、来源置信度、强度、紧迫度、新颖性、正负效价和基础显著性。内部至少要区分生理变化、环境事件、社会请求/承诺、机会、威胁、制度变化和异常发现；具体类型仍由内容声明。
+
+```text
+salience = clamp(exposure × relevance × intensity × urgency × novelty × source_confidence, 0, 1)
+effective_salience = salience × adapted_sensitivity(source_type, actor)
+```
+
+事件提交后，C++ 的 `StimulusProjector` 依据可见性、距离、关系和规则生成刺激事实；不能感知的主体不会获得该 Stimulus。LLM 读取已授权的 Stimulus 和证据，解释它对自己意味着什么、提出 `IntentProposal` 或记忆候选，但不能改写原始事件。相同来源的重复刺激可以触发内容声明的习惯化，使敏感度在上下限内下降；意外结果、目标失效或关系变化可能重新提高敏感度。适应产生 `stimulus.habituated` 或 `stimulus.reappraised`，并在 Snapshot 中恢复。
+
+外驱的“自动演化”有两层：第一层是在已批准规则内，事件自动生成刺激、到期、聚合、习惯化和重新评价；第二层是新的刺激类型、评价规则或聚合方式，只能通过 `EvolutionProposal` 进入沙箱和版本化激活。后者不能由 LLM 直接登记为活动规则。
+
+### 结构：可执行约束与受治理演化
+
+结构不是内驱或外驱的别名，也不是一块不可变的背景。它是决定谁能感知、持有、移动、交换、协作和改变世界的规则事实，包括空间连接与访问、角色和权限、组织与制度、所有权与容量、生产配方、合同规则、信息可见范围及判定优先级。决策上下文中的 `StructuralConstraint` 必须是结构化条目，包含约束 ID、类型、作用实体/范围、来源规则、硬/软级别、数值边界、有效期和不可用原因。
+
+结构通过两条路径改变。路径一是已声明机制产生的常规变化，例如合同状态转换、门被授权的开启、实体生命周期变化、资源所有权转移和机构规则按时生效；它们在事务中自动执行。路径二是结构本身的演化，例如新增角色规则、行为配方、需求曲线、机构权限或实体原型；提案结构至少包含来源事实、变更 diff、适用范围、预期指标、反事实/回放场景、风险级别、审批策略、目标版本和回滚点。
+
+```text
+StructureObservation
+  -> EvolutionProposal
+  -> Schema / capability / invariant validation
+  -> sealed replay or sandbox simulation
+  -> independent approval policy
+  -> versioned overlay activation
+  -> outcome monitoring
+  -> retain / revise / rollback
+```
+
+批准权属于平台治理策略，而不是提出提案的 LLM。P0 中，新的需求定义、规则、拓扑、能力、行为配方和结构 overlay 由开发者或世界设计者批准；LLM 可以创建提案、补充证据和比较候选，但不得批准自己的提案。低风险且可在沙箱中完整验证的声明式变化以后可以自动批准，核心事务、权限、事件格式、调度、存档和组件存储等 Runtime Core 只能由开发者通过代码、测试、迁移和发布审核演化。任何自动激活都必须记录提案、审批者/策略、内容版本、模拟版本、指标、激活 Revision 和回滚结果。
 
 ### 意图、目标与行动
 
@@ -176,13 +230,15 @@ NPC 由身份、物理状态、需求、长期目标、关系、感知、记忆�
 
 NPC 不每帧调用 LLM。日常移动、进食、休息、工作、资源结算和远端生活由规则推进；玩家交互、重大冲突、反思、社会策略和演化提案才进入串行 TurnQueue。NPC 具有 active、dormant、destroyed 生命周期；休眠不删除身份和历史。
 
+一次有效的 `IntentProposal` 只负责选择并启动一个已登记的行为/过程，不负责逐 tick 指挥。运行时把它固化为 NPC 的 `ProcessExecution`：记录 `process_id`、动作与配方 ID、开始/完成时间、进度、资源预留、上下文 Revision、可中断策略和状态。之后每个游戏时间步只推进过程、重算前置条件和检查中断信号；完成、失败或中断才提交对应事实。只要过程仍有效，不重复询问 LLM；过程结束后或出现高显著性外驱、硬约束变化、资源失效时，GoalSystem 才重新安排意图。一个 NPC 只有一个 `NpcActivity` 槽，它是活动生命周期的唯一所有者；槽中的 `ActivityStatus` 是唯一阶段，Goal 和 ProcessExecution 的状态字段只是该阶段的持久化投影。Goal、ProcessExecution、FSM 和 BT 是同一个活动的四个视角，各自只回答一个问题：Goal 回答“为什么做、是否仍值得做”，ProcessExecution 回答“正在执行哪个过程、进度和预留是什么”，FSM 回答“NPC 当前处于什么运行模式”，BT/BehaviorRecipe 回答“当前过程如何逐步执行”。Goal 的终止状态只能由 `NpcActivity` 的转换函数根据过程结果、中断信号或失效条件统一写入；FSM 模式由同一转换函数投影得到；BT 只返回 `Running/Success/Failure/Interrupted`，不能直接改写 Goal 或过程状态。
+
 角色独特性来自角色底稿、价值观、秘密、底线、玩家历史、关系四轴（trust、respect、fear、owed）、当前需求、已确认事实和世界事件的组合。角色底稿由作者维护，不由模型静默改写。NPC 可以从未相识进入初次接触、试探、关系建立或冲突，再进入压力事件、兑现/失信和新目标；这是内容和规则的推进状态，不是模型自由发明的剧情。
 
 每个重要 NPC 至少有一个公开目标、一个隐藏目标、一条底线、一项可以帮助玩家的能力或资源、一段会随时间推进的个人危机，以及盟友、交易伙伴、敌对者、离开群岛或成为阵营节点等不同关系结果。玩家可以信任某人但不尊重他，也可以尊重某人却害怕他；单一“好感度”不能替代关系轴。
 
 ## 6. 对话、记忆和 LLM 演化
 
-对话输入先映射到询问、谈判、安抚、威胁、撒谎、承诺、交换、调查或结束等作者定义意图。结构化响应包含 `action_id`、`intent`、`motivation`、`dialogue`、`beat_id`、候选记忆和上下文版本。`motivation` 只用于解释和诊断，不参与规则判定；`action_id` 必须属于当前 DecisionContext。
+对话输入先映射到询问、谈判、安抚、威胁、撒谎、承诺、交换、调查或结束等作者定义意图。结构化响应包含 `action_id`、`intent`、`motivation`、`dialogue`、`beat_id`、`cited_stimulus_ids`、`tradeoffs`、`expected_relief`、候选记忆和上下文版本。LLM 用 `cited_stimulus_ids` 指出它实际依据的外驱，用 `tradeoffs` 解释内驱之间或内驱与社会后果之间的权衡，用 `expected_relief` 表达对结果的预测；这些字段用于审计、学习和回放校验，不能直接写入事实。`motivation` 只用于解释和诊断，不参与规则判定；`action_id` 必须属于当前 DecisionContext。
 
 对话动作例如 `create_promise` 不是直接完成任务，而是提交一条待验证命令。只有前置条件通过，承诺才进入世界并获得截止时间；接受、重谈、拒绝、兑现和违约都会留下事件、记忆、关系和后续计划变化。
 
@@ -201,6 +257,8 @@ Observe -> Understand / Evaluate -> Intent or Evolution Proposal
 后续可用同一机制做场景实验：例如“在周边小区开一个小店”“提高利率”“发布一个政策”。LLM 把自然语言转成 `ScenarioProposal`，Validator 检查实体、参数和已注册机制，Sandbox 从快照克隆并运行确定性模拟，Runtime 输出收入、价格、库存、就业、迁移、关系和事件序列；LLM 只把这些已计算结果整理为假设、因果链、敏感参数和不确定性说明。缺少经济或社会机制时必须报告“无法评估”，不能用语言补造数值。这个能力属于后续平台验证，不进入小村庄 P0 的交付范围。
 
 Provider 使用一个共享模型槽位和串行队列；本地 llama.cpp 优先，服务失败时规则台词继续运行。云 Provider 可用于调试或高质量表达，但不改变事实接口。API Key 不写入内容包、存档、日志、Prompt、崩溃报告或版本库。
+
+P0 的结构化 `IntentProposal` 是短输出任务，llama.cpp 默认关闭 thinking，并使用有限的 `max_tokens`；这样模型不会把整段输出预算耗在不可用于事实提交的推理文本上。需要复杂社会权衡时，调用方可显式开启 thinking，并通过顶层 `reasoning_budget_tokens` 限制思考段预算；该预算不等于最终 JSON 的总输出预算。无论是否开启 thinking，Runtime 只解析最终 JSON，`reasoning_content` 永远不进入对白、记忆或世界事实。当前实现支持 `TIDE_MARKS_ENABLE_THINKING`、`TIDE_MARKS_THINKING_BUDGET`、`TIDE_MARKS_MAX_TOKENS` 和 `TIDE_MARKS_TIMEOUT_MS` 环境覆盖；默认配置适合 P0 的短决策，长思考只用于受控诊断或后续高价值审议。
 
 Provider 配置由 JSON 选择，不绑定具体模型：
 
@@ -225,6 +283,8 @@ Provider 配置由 JSON 选择，不绑定具体模型：
 
 `WorldService` 是应用入口，`WorldState` 是事实，`EntityRegistry` 是投影，Domain Systems 执行规则，`WorldScheduler` 是唯一时间入口，`EventLog` 记录提交事实，`EventBus` 只通知已提交事件，View/Renderer 只读。
 
+Runtime Core 只保证实体、组件存储、事务、Revision、事件、调度、持久化、回放和权限；Needs、Drive、Perception、Goal、Behavior、Resource 和 Relationship 是可组合的 World Simulation Framework 能力。P0 可以把这组能力编译在同一进程中，但不能把村庄角色或某一套心理模型写进 Core。这样同一 Runtime 才能加载不同内容实例，且 LLM 只能通过已注册能力提出变化。
+
 ### 实体、组件和拓扑
 
 实体只有稳定身份、通用 kind、元数据和生命周期；不提供 `setRoom()`、`setDoor()` 等游戏特例。空间实体使用 `SpatialComponent`，连接使用 `LinkComponent`，资源、需求、关系、位置、渲染和行为通过可组合组件表示。`WorldState.entities` 是身份和生命周期权威来源，生命周期为 `active -> dormant -> destroyed`；销毁身份保留在存档和历史中但不再进入活动投影。世界创建实体必须引用已登记的 `entity_archetype`，经事务追加 `entity.created` 后提交；LLM 只能提出创建提案。
@@ -242,6 +302,8 @@ Command / IntentProposal / EvolutionProposal
 ```
 
 提交前失败不改变状态、Revision 或事件；提交后订阅者失败只能进入诊断计数，不能回滚事实。跨实体操作使用同一事务和版本检查；命令使用幂等键。
+
+事务只覆盖一次状态转换，不跨越整个长过程。长过程采用“启动事务 → 资源预留与 `ProcessExecution` → 时间推进/中断检查 → 完成或失败事务”的边界。完成时消费本过程拥有的预留并写入效果；被高显著性外驱打断时进入 `ActivityStatus::Suspended`，同一事务释放预留并记录 `npc.process_suspended`，保留目标、进度和计划需求；刺激失效且资源仍可满足时，GoalSystem 按原计划重新预留并恢复，`completesAt` 顺延暂停时长，记录 `npc.process_resumed`。若资源被他人占用或目标已失效，则转为 `Cancelled`/`Failed`，必要时通过声明式补偿步骤处理已经发生的部分结果。这样既保持单次提交原子性，也允许捕鱼、维修、搬运、等待交易和移动持续多个 tick。
 
 ### 原子元动作与复合行为
 
@@ -267,7 +329,7 @@ Runtime 只向内容和模型暴露一组可审计的原子元动作。元动作
 
 村庄复合行为可以由这些元动作自然生成：配给是“检查粮食 → 预留/消耗粮食 → 满足需求 → 记录”；修船是“检查粮食和船况 → 消耗粮食 → 增加船况 → 调整关系 → 追加记忆”；档案整理是“检查档案实体 → 增加记录完整性 → 满足认知需求”；承诺履行是“检查物品和时间 → 转移资源 → 转换承诺状态 → 调整关系与记忆”。这些配方可以从 JSON 组合，不需要为每个故事动作添加新的 C++ 方法。
 
-定时 `Activity` 只负责何时唤醒一个已注册过程或 BehaviorRecipe；它不直接承载资源效果。`ProductionProcess` 描述输入、输出和过程进度，`BehaviorRecipe` 描述条件、顺序、选择、超时、中断、资源预留和补偿步骤，`MetaActionDefinition` 才描述单个事实变更。三者由 ID 引用并分别校验。LLM 可以创造性提出新的行为组合、参数和目标，但必须使用已注册元动作；缺少表达力时生成 CapabilityProposal。整条计划先在暂存事务中汇总成本、预留和效果，不能逐个元动作直接写 WorldState。
+定时 `Activity` 负责在作者定义的时刻唤醒内容动作；P0 的最小配方把该动作的资源和需求效果声明在活动内容中，并由同一个事务执行，完整 Behavior DSL 则把它们组合为条件、顺序、选择、超时、中断、资源预留和补偿步骤。`ProductionProcess` 描述输入、输出和过程进度，`MetaActionDefinition` 描述单个事实变更。三者由 ID 引用并分别校验。LLM 可以创造性提出新的行为组合、参数和目标，但必须使用已注册元动作；缺少表达力时生成 CapabilityProposal。整条计划先在暂存事务中汇总成本、预留和效果，不能逐个元动作直接写 WorldState。
 
 ```text
 IntentProposal + BehaviorRecipe
@@ -309,6 +371,8 @@ Behavior DSL 只组合注册节点、条件和元动作，例如：
   }
 }
 ```
+
+P0 不把这套 DSL 误称为已经完成的通用编程语言。当前小村庄将每个内容动作的时长、可中断策略和已登记元动作效果作为最小行为配方，由 `ActionCandidate` 固化为 `ProcessExecution`；`src/npc/behavior_tree.*` 已提供执行状态返回契约，但尚未让 JSON 任意构造完整树。Sequence、Selector、Wait、补偿步骤和跨过程组合属于 P1，届时仍复用同一个 `NpcActivity` 生命周期，不增加第二套状态机。
 
 演化操作是类型化的，例如 `create_entity_archetype`、`overlay_strategy`、`register_behavior_recipe`、`add_relationship` 和 `schedule_event`；不是任意 JSON Patch。新增 C++ Component、System、权限、调度、事件格式、存档迁移或可执行代码必须由开发者发布。
 
@@ -360,11 +424,11 @@ Behavior DSL 只组合注册节点、条件和元动作，例如：
 }
 ```
 
-交易合同至少记录双方、交换资源、数量/质量、报价或支付物、预留、交付地点和时间、有效期、结算及违约路径。聊天记录至少包含 `speech_act`、发送者、接收者/观察者、渠道、事实引用、来源和置信度、会话轮次、回复期限及预期后果。对话里的“我答应给你粮食”只能提交 `promise.offer` 或合同提案，不能直接增加粮食或关系。运行时把确认后的定义编译成 `consume_resource`、`produce_resource`、`transfer_resource`、`relieve_need`、`adjust_relationship` 等元动作事务；Event 由提交器自动产生。LLM 可以提出新的过程组合，但不能只凭一段文字生成不存在的产量、所有权或承诺结果。
+交易合同至少记录双方、交换资源、数量/质量、报价或支付物、预留、交付地点和时间、有效期、结算及违约路径。承诺状态变化对关系轴的影响由内容包 `promise_policy` 声明，包括违约双方、拒绝方和接受方的 `trust/respect/fear/owed` 增量以及重谈延长时长；Runtime 只负责把增量原子写入事务，不在代码里写死数值。聊天记录至少包含 `speech_act`、发送者、接收者/观察者、渠道、事实引用、来源和置信度、会话轮次、回复期限及预期后果。对话里的“我答应给你粮食”只能提交 `promise.offer` 或合同提案，不能直接增加粮食或关系。运行时把确认后的定义编译成 `consume_resource`、`produce_resource`、`transfer_resource`、`relieve_need`、`adjust_relationship` 等元动作事务；Event 由提交器自动产生。LLM 可以提出新的过程组合，但不能只凭一段文字生成不存在的产量、所有权或承诺结果。
 
 ## 9. 存档、回放和调试
 
-Snapshot 包含 `save_schema_version`、`simulation_version`、`content_version/hash`、`world_id`、`world_revision`、`event_sequence`、游戏时间、实体生命周期、需求状态、幂等键和需要的 RNG 状态。`event_sequence` 是快照截断点，后续 EventLog 从其后追加。当前未发布，不保留旧存档兼容路径；schema 改变时同步更新存档读写、测试和文档。
+Snapshot 包含 `save_schema_version`、`simulation_version`、`content_version/hash`、`world_id`、`instance_id`、`world_revision`、`event_sequence`、游戏时间、实体生命周期、需求状态、进行中的 `ProcessExecution`、幂等键和需要的 RNG 状态。运行态 NPC 只保存 `definition_id`，不复制内容包里的角色定义；角色名、角色、公开/隐藏目标等静态数据在加载时从当前内容包解析。`instance_id` 与 `content_version` 共同锁定这次运行所使用的 Game Instance 和 Content Pack，任何一个不匹配都直接拒绝恢复。`event_sequence` 是快照截断点，后续 EventLog 从其后追加。加载时校验 `definition_id` 可解析且 `content_version`、`instance_id` 与当前内容一致，任一不满足直接拒绝并报出差异，不回退到旧字段或静默重置。当前未发布，不保留旧存档兼容路径；schema 改变时同步更新存档读写、测试和文档。当前快照 schema 为 10，模拟版本为 `adaptive-runtime-p0.10`。
 
 P0 承诺检查点恢复：读取已提交 Snapshot 和记录的结构化响应，不调用 LLM。未来确定性模拟回放还要重跑命令、Provider 响应、上下文版本、RNG 和规则版本；不能把检查点恢复宣传成完整确定性重算。Bullet 只承诺固定环境下尽量复现，规则层和远端 LifeEvent 才是跨平台确定性目标。
 
@@ -405,6 +469,8 @@ P0 必须支持：任意最小内容包启动；NPC 无玩家继续运行；需�
 - *The hierarchy of needs empirical examination of Maslow’s theory and lessons for development*, 2023, DOI: 10.1016/j.worlddev.2023.106185。
 - *Linking homeostasis to reinforcement learning: internal state control of motivated behavior*, 2025, DOI: 10.1016/j.cobeha.2025.101611。
 - Ryan & Deci, *Self-Determination Theory and the Facilitation of Intrinsic Motivation, Social Development, and Well-Being*, 2000, DOI: 10.1207/S15327965PLI1104_01。
+- Baumeister & Leary, *The need to belong: Desire for interpersonal attachments as a fundamental human motivation*, 1995, DOI: 10.1037/0033-2909.117.3.497。
+- Cacioppo & Petty, *The need for cognition*, 1982；Kruglanski & Webster, *Motivated closing of the mind: “Seizing” and “freezing”*, 1996。用于认知需求、信息闭合和证据不足时的动机语义；不把它们直接当作普遍通用的人类常数。
 - Park et al., *Generative Agents: Interactive Simulacra of Human Behavior*, 2023, DOI: 10.1145/3586183.3606763。
 - Wang et al., *A survey on large language model based autonomous agents*, 2024, DOI: 10.1007/s11704-024-40231-1。
 - *Understanding the planning of LLM agents: A survey*, 2024, DOI: 10.48550/arXiv.2402.02716。

@@ -22,31 +22,116 @@ Memory memoryFromJson(const Json& json) {
                   jsonValue<double>(json, "confidence", 1.0)};
 }
 
-Json npcDefinitionJson(const NpcDefinition& definition) {
-    return Json{{"id", definition.id}, {"name", definition.name}, {"role", definition.role},
-                {"home", definition.home}, {"workplace", definition.workplace},
-                {"public_goal", definition.publicGoal}, {"hidden_goal", definition.hiddenGoal},
-                {"boundary", definition.boundary}, {"voice", definition.voice}};
+Json stimulusJson(const ExternalStimulus& stimulus) {
+    return Json{{"id", stimulus.id}, {"source_event", stimulus.sourceEvent},
+                {"source_sequence", stimulus.sourceSequence}, {"category", stimulus.category},
+                {"actor", stimulus.actor}, {"target", stimulus.target},
+                {"observed_at", stimulus.observedAt.minute}, {"expires_at", stimulus.expiresAt.minute},
+                {"visibility_scope", stimulus.visibilityScope},
+                {"source_confidence", stimulus.sourceConfidence}, {"relevance", stimulus.relevance},
+                {"intensity", stimulus.intensity}, {"urgency", stimulus.urgency},
+                {"novelty", stimulus.novelty}, {"valence", stimulus.valence},
+                {"salience", stimulus.salience}, {"effective_salience", stimulus.effectiveSalience},
+                {"active", stimulus.active}};
+}
+
+Json processJson(const ProcessExecution& process) {
+    Json reserved = Json::object();
+    for (const auto& [resource, amount] : process.reservedResources) reserved[resource] = amount;
+    return Json{{"id", process.id}, {"goal_id", process.goalId}, {"action_id", process.actionId}, {"plan_id", process.planId},
+                {"trigger", process.trigger}, {"started_at", process.startedAt.minute},
+                {"completes_at", process.completesAt.minute}, {"suspended_at", process.suspendedAt.minute},
+                {"progress", process.progress},
+                {"status", toString(process.status)}, {"interruption_reason", process.interruptionReason},
+                {"behavior_node_id", process.behaviorNodeId}, {"behavior_step", process.behaviorStep},
+                {"behavior_status", process.behaviorStatus},
+                {"interruptible", process.interruptible},
+                {"interrupt_salience_threshold", process.interruptSalienceThreshold},
+                {"reserved_resources", reserved},
+                {"required_resources", [&process] { Json required = Json::object(); for (const auto& [resource, amount] : process.requiredResources) required[resource] = amount; return required; }()},
+                {"proposal_world_revision", process.proposalWorldRevision},
+                {"proposal_npc_state_version", process.proposalNpcStateVersion}};
+}
+
+ProcessExecution processFromJson(const Json& json) {
+    ProcessExecution process;
+    process.id = jsonValue<std::string>(json, "id", "");
+    process.goalId = jsonValue<std::string>(json, "goal_id", "");
+    process.actionId = jsonValue<std::string>(json, "action_id", "");
+    process.planId = jsonValue<std::string>(json, "plan_id", "");
+    process.trigger = jsonValue<std::string>(json, "trigger", "");
+    process.startedAt = GameTime{jsonValue<std::int64_t>(json, "started_at", 0)};
+    process.completesAt = GameTime{jsonValue<std::int64_t>(json, "completes_at", 0)};
+    process.suspendedAt = GameTime{jsonValue<std::int64_t>(json, "suspended_at", -1)};
+    process.progress = jsonValue<double>(json, "progress", 0.0);
+    process.status = processStatusFromString(jsonValue<std::string>(json, "status", "running"));
+    process.interruptionReason = jsonValue<std::string>(json, "interruption_reason", "");
+    process.behaviorNodeId = jsonValue<std::string>(json, "behavior_node_id", process.planId);
+    process.behaviorStep = jsonValue<std::size_t>(json, "behavior_step", 0);
+    process.behaviorStatus = jsonValue<std::string>(json, "behavior_status", "running");
+    process.interruptible = jsonValue<bool>(json, "interruptible", true);
+    process.interruptSalienceThreshold = jsonValue<double>(json, "interrupt_salience_threshold", 1.0);
+    const auto reserved = json.value("reserved_resources", Json::object());
+    for (auto it = reserved.begin(); it != reserved.end(); ++it) {
+        process.reservedResources[it.key()] = it.value().get<int>();
+    }
+    const auto required = json.value("required_resources", Json::object());
+    for (auto it = required.begin(); it != required.end(); ++it) {
+        process.requiredResources[it.key()] = it.value().get<int>();
+    }
+    process.proposalWorldRevision = jsonValue<std::uint64_t>(json, "proposal_world_revision", 0);
+    process.proposalNpcStateVersion = jsonValue<std::uint64_t>(json, "proposal_npc_state_version", 0);
+    return process;
+}
+
+ExternalStimulus stimulusFromJson(const Json& json) {
+    ExternalStimulus stimulus;
+    stimulus.id = jsonValue<std::string>(json, "id", "");
+    stimulus.sourceEvent = jsonValue<std::string>(json, "source_event", "");
+    stimulus.sourceSequence = jsonValue<std::uint64_t>(json, "source_sequence", 0);
+    stimulus.category = jsonValue<std::string>(json, "category", "");
+    stimulus.actor = jsonValue<std::string>(json, "actor", "");
+    stimulus.target = jsonValue<std::string>(json, "target", "");
+    stimulus.observedAt = GameTime{jsonValue<std::int64_t>(json, "observed_at", 0)};
+    stimulus.expiresAt = GameTime{jsonValue<std::int64_t>(json, "expires_at", 0)};
+    stimulus.visibilityScope = jsonValue<std::string>(json, "visibility_scope", "world");
+    stimulus.sourceConfidence = jsonValue<double>(json, "source_confidence", 1.0);
+    stimulus.relevance = jsonValue<double>(json, "relevance", 1.0);
+    stimulus.intensity = jsonValue<double>(json, "intensity", 1.0);
+    stimulus.urgency = jsonValue<double>(json, "urgency", 1.0);
+    stimulus.novelty = jsonValue<double>(json, "novelty", 1.0);
+    stimulus.valence = jsonValue<double>(json, "valence", 0.0);
+    stimulus.salience = jsonValue<double>(json, "salience", 0.0);
+    stimulus.effectiveSalience = jsonValue<double>(json, "effective_salience", 0.0);
+    stimulus.active = jsonValue<bool>(json, "active", true);
+    return stimulus;
 }
 
 Json needStateJson(const NeedState& state) {
+    Json expectations = Json::object();
+    for (const auto& [actionId, relief] : state.expectedRelief) expectations[actionId] = relief;
     return Json{{"deficit", state.deficit}, {"last_updated", state.lastUpdated.minute},
-                {"last_relief_revision", state.lastReliefRevision}};
+                {"last_relief_revision", state.lastReliefRevision},
+                {"sensitivity", state.sensitivity}, {"expected_relief", expectations},
+                {"evidence_confidence", state.evidenceConfidence},
+                {"adaptation_version", state.adaptationVersion},
+                {"last_adapted", state.lastAdapted.minute}};
 }
 
 NeedState needStateFromJson(const Json& json) {
-    return NeedState{jsonValue<double>(json, "deficit", 0.0),
-                     GameTime{jsonValue<std::int64_t>(json, "last_updated", 0)},
-                     jsonValue<std::uint64_t>(json, "last_relief_revision", 0)};
-}
-
-NpcDefinition npcDefinitionFromJson(const Json& json) {
-    return NpcDefinition{jsonValue<std::string>(json, "id", ""), jsonValue<std::string>(json, "name", ""),
-                         jsonValue<std::string>(json, "role", ""), jsonValue<std::string>(json, "home", ""),
-                         jsonValue<std::string>(json, "workplace", ""),
-                         jsonValue<std::string>(json, "public_goal", ""),
-                         jsonValue<std::string>(json, "hidden_goal", ""),
-                         jsonValue<std::string>(json, "boundary", ""), jsonValue<std::string>(json, "voice", "")};
+    NeedState state;
+    state.deficit = jsonValue<double>(json, "deficit", 0.0);
+    state.lastUpdated = GameTime{jsonValue<std::int64_t>(json, "last_updated", 0)};
+    state.lastReliefRevision = jsonValue<std::uint64_t>(json, "last_relief_revision", 0);
+    state.sensitivity = jsonValue<double>(json, "sensitivity", 1.0);
+    state.evidenceConfidence = jsonValue<double>(json, "evidence_confidence", 1.0);
+    state.adaptationVersion = jsonValue<std::uint64_t>(json, "adaptation_version", 0);
+    state.lastAdapted = GameTime{jsonValue<std::int64_t>(json, "last_adapted", 0)};
+    const auto expectations = json.value("expected_relief", Json::object());
+    for (auto it = expectations.begin(); it != expectations.end(); ++it) {
+        state.expectedRelief[it.key()] = it.value().get<double>();
+    }
+    return state;
 }
 
 WorldEvent worldEventFromJson(const Json& json) {
@@ -84,14 +169,37 @@ Json worldStateToJson(const WorldState& state) {
         for (const auto& [peer, trust] : npc.peerTrust) peerTrust[peer] = trust;
         Json needs = Json::object();
         for (const auto& [needId, need] : npc.needs) needs[needId] = needStateJson(need);
-        npcs[id] = Json{{"definition", npcDefinitionJson(npc.definition)}, {"location", npc.location},
+        Json stimulusSensitivity = Json::object();
+        for (const auto& [category, sensitivity] : npc.stimulusSensitivity) {
+            stimulusSensitivity[category] = sensitivity;
+        }
+        Json stimuli = Json::array();
+        for (const auto& stimulus : npc.stimuli) stimuli.push_back(stimulusJson(stimulus));
+        Json activity = nullptr;
+        if (npc.activity.goal || npc.activity.process) {
+            Json goal = nullptr;
+            if (npc.activity.goal) {
+                goal = Json{{"id", npc.activity.goal->id}, {"intent", npc.activity.goal->intent},
+                            {"target", npc.activity.goal->target}, {"priority", npc.activity.goal->priority},
+                            {"status", toString(npc.activity.goal->status)},
+                            {"created_at", npc.activity.goal->createdAt.minute},
+                            {"deadline", npc.activity.goal->deadline.minute},
+                            {"reason", npc.activity.goal->reason}};
+            }
+            Json process = nullptr;
+            if (npc.activity.process) process = processJson(*npc.activity.process);
+            activity = Json{{"status", toString(npc.activity.status)}, {"goal", goal}, {"process", process}};
+        }
+        npcs[id] = Json{{"definition_id", npc.definitionId}, {"location", npc.location},
                         {"schedule_label", npc.scheduleLabel}, {"goal_stage", npc.goalStage},
                         {"needs", needs},
                         {"relation", {{"trust", npc.playerRelation.trust}, {"respect", npc.playerRelation.respect},
                                        {"fear", npc.playerRelation.fear}, {"owed", npc.playerRelation.owed}}},
                         {"memories", memories}, {"open_promises", npc.openPromises},
                         {"state_version", npc.stateVersion}, {"mode", npc.mode}, {"strategy", npc.strategy},
-                        {"peer_trust", peerTrust}};
+                        {"peer_trust", peerTrust}, {"stimulus_sensitivity", stimulusSensitivity},
+                        {"stimuli", stimuli}, {"last_autonomous_turn", npc.lastAutonomousTurn.minute},
+                        {"activity", activity}};
     }
     Json promises = Json::object();
     for (const auto& [id, promise] : state.promises) {
@@ -103,8 +211,9 @@ Json worldStateToJson(const WorldState& state) {
     for (const auto& event : state.events) events.push_back(worldEventToJson(event));
     Json resources = Json::object();
     for (const auto& [id, value] : state.resources) resources[id] = Json{{"amount", value.amount}, {"reserved", value.reserved}};
-    return Json{{"save_schema_version", 5}, {"simulation_version", "adaptive-runtime-p0.5"},
+    return Json{{"save_schema_version", 10}, {"simulation_version", "adaptive-runtime-p0.10"},
                 {"event_sequence", state.events.size()}, {"world_id", state.worldId},
+                {"instance_id", state.instanceId},
                 {"content_version", state.contentVersion}, {"now", state.now.minute},
                 {"revision", state.revision},
                 {"resources", resources},
@@ -114,8 +223,9 @@ Json worldStateToJson(const WorldState& state) {
 
 WorldState deserializeWorldState(const Json& json) {
     WorldState state;
-    state.worldId = jsonValue<std::string>(json, "world_id", "world");
-    state.contentVersion = jsonValue<std::string>(json, "content_version", "adaptive-runtime-p0.4");
+    state.worldId = jsonValue<std::string>(json, "world_id", "");
+    state.instanceId = jsonValue<std::string>(json, "instance_id", "");
+    state.contentVersion = jsonValue<std::string>(json, "content_version", "");
     state.now = GameTime{jsonValue<std::int64_t>(json, "now", 0)};
     state.revision = jsonValue<std::uint64_t>(json, "revision", 0);
     const auto resources = json.value("resources", Json::object());
@@ -141,7 +251,9 @@ WorldState deserializeWorldState(const Json& json) {
     for (auto it = npcs.begin(); it != npcs.end(); ++it) {
         const auto value = it.value();
         NpcState npc;
-        npc.definition = npcDefinitionFromJson(value.value("definition", Json::object()));
+        // Snapshots written before definition references existed are rejected by
+        // WorldService::fromSnapshot; the loader does not guess from the map key.
+        npc.definitionId = jsonValue<std::string>(value, "definition_id", "");
         npc.location = jsonValue<std::string>(value, "location", "");
         npc.scheduleLabel = jsonValue<std::string>(value, "schedule_label", "");
         npc.goalStage = jsonValue<int>(value, "goal_stage", 0);
@@ -162,6 +274,33 @@ WorldState deserializeWorldState(const Json& json) {
         const auto peerTrust = value.value("peer_trust", Json::object());
         for (auto peer = peerTrust.begin(); peer != peerTrust.end(); ++peer) {
             npc.peerTrust[peer.key()] = peer.value().get<double>();
+        }
+        const auto stimulusSensitivity = value.value("stimulus_sensitivity", Json::object());
+        for (auto sensitivity = stimulusSensitivity.begin(); sensitivity != stimulusSensitivity.end(); ++sensitivity) {
+            npc.stimulusSensitivity[sensitivity.key()] = sensitivity.value().get<double>();
+        }
+        for (const auto& stimulus : value.value("stimuli", Json::array())) {
+            npc.stimuli.push_back(stimulusFromJson(stimulus));
+        }
+        npc.lastAutonomousTurn = GameTime{jsonValue<std::int64_t>(value, "last_autonomous_turn", -1)};
+        const auto activity = value.value("activity", Json::object());
+        if (activity.is_object() && activity.contains("goal") && activity.at("goal").is_object()) {
+            const auto& goal = activity.at("goal");
+            npc.activity.goal = GoalState{jsonValue<std::string>(goal, "id", ""),
+                                      jsonValue<std::string>(goal, "intent", ""),
+                                      jsonValue<std::string>(goal, "target", ""),
+                                      jsonValue<double>(goal, "priority", 0.0),
+                                      goalStatusFromString(jsonValue<std::string>(goal, "status", "proposed")),
+                                      GameTime{jsonValue<std::int64_t>(goal, "created_at", 0)},
+                                      GameTime{jsonValue<std::int64_t>(goal, "deadline", 0)},
+                                      jsonValue<std::string>(goal, "reason", "")};
+        }
+        if (activity.is_object() && activity.contains("process") && activity.at("process").is_object()) {
+            npc.activity.process = processFromJson(activity.at("process"));
+        }
+        if (activity.is_object()) {
+            npc.activity.status = activityStatusFromString(jsonValue<std::string>(activity, "status", "proposed"));
+            if (npc.activity.goal || npc.activity.process) setActivityStatus(npc.activity, npc.activity.status);
         }
         state.npcs[it.key()] = std::move(npc);
     }

@@ -45,6 +45,24 @@ void printLook(const WorldService& service) {
     for (const auto& [id, npc] : service.state().npcs) {
         std::cout << "  " << id << " mode=" << npc.mode << " goal_stage=" << npc.goalStage
                   << " memory=" << npc.memories.size() << " promises=" << npc.openPromises.size() << "\n";
+        const auto context = service.decisionContext(id);
+        for (const auto& drive : context.drives) {
+            std::cout << "    drive " << drive.domain << "/" << drive.dimension << ":" << drive.id
+                      << " deficit=" << drive.deficit << " pressure=" << drive.drive
+                      << " sensitivity=" << drive.sensitivity << " confidence=" << drive.evidenceConfidence
+                      << (drive.critical ? " CRITICAL" : "") << "\n";
+        }
+        const std::size_t visibleStimuli = std::min<std::size_t>(3, context.stimuli.size());
+        for (std::size_t index = 0; index < visibleStimuli; ++index) {
+            const auto& stimulus = context.stimuli[index];
+            std::cout << "    stimulus " << stimulus.category << " from " << stimulus.sourceEvent
+                      << " seq=" << stimulus.sourceSequence << " salience=" << stimulus.effectiveSalience
+                      << " expires=" << stimulus.expiresAt.toString() << "\n";
+        }
+        for (const auto& constraint : context.constraints) {
+            std::cout << "    constraint " << constraint.category << ":" << constraint.id
+                      << " - " << constraint.reason << "\n";
+        }
     }
 }
 
@@ -123,10 +141,10 @@ bool execute(WorldService& service, const std::string& line) {
     } else if (command == "advance" || command == "wait") {
         std::int64_t minutes = 0;
         input >> minutes;
-        service.advanceMinutes(command == "wait" ? minutes * 60 : minutes);
+        service.advanceMinutes(command == "wait" ? minutes * kMinutesPerHour : minutes);
         printLook(service);
     } else if (command == "day") {
-        service.advanceMinutes(1440);
+        service.advanceMinutes(kMinutesPerDay);
         printLook(service);
     } else if (command == "events") {
         std::size_t count = 12;

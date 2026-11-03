@@ -5,6 +5,7 @@
 #include "world/components.hpp"
 
 #include <map>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -16,18 +17,61 @@ struct ScheduleSlot {
     std::string location;
 };
 
+struct NeedSatisfier {
+    double relief{0.0};
+    std::vector<std::string> metaActions;
+};
+
 struct NeedContent {
     std::string id;
-    std::string taxonomy;
+    std::string domain;
+    std::string dimension;
     double initialDeficit{0.0};
     double decayPerHour{0.0};
     double criticalThreshold{0.8};
     double weight{1.0};
     double priority{0.0};
-    std::map<std::string, double> satisfiers;
+    std::map<std::string, NeedSatisfier> satisfiers;
     std::string sourceKind{"authored"};
     std::string sourceId;
     std::string sourceVersion;
+};
+
+struct DriveAdaptationPolicy {
+    bool enabled{true};
+    double expectationLearningRate{0.0};
+    double maxExpectationStep{0.0};
+    int cooldownMinutes{0};
+};
+
+struct StimulusPolicy {
+    std::size_t maxActivePerNpc{32};
+    double noveltyDecay{0.5};
+    double habituationStep{0.1};
+    double minSensitivity{0.25};
+    double maxSensitivity{1.0};
+    int repeatWindowMinutes{720};
+};
+
+struct StimulusRule {
+    std::string id;
+    std::string eventPrefix;
+    std::string category;
+    std::string visibility;
+    double relevance{1.0};
+    double intensity{1.0};
+    double urgency{1.0};
+    double valence{0.0};
+    double sourceConfidence{1.0};
+    int ttlMinutes{720};
+};
+
+struct NpcDeliberationPolicy {
+    bool enabled{true};
+    double minStimulusSalience{0.5};
+    double minDrivePressure{0.5};
+    double minInterruptSalience{0.85};
+    int cooldownMinutes{360};
 };
 
 struct NpcContent {
@@ -82,6 +126,9 @@ struct EffectContent {
     int maximum{100};
     std::string effectAction;
     std::vector<std::string> targets;
+    std::string linkId;
+    bool traversable{true};
+    bool locked{false};
 };
 
 struct ActivityContent {
@@ -97,18 +144,75 @@ struct ActivityContent {
     std::vector<EffectContent> effects;
 };
 
+struct StrategyRuleContent {
+    std::string id;
+    std::string npcId;
+    std::string peerId;
+    double minPeerTrust{0.0};
+    std::string strategy;
+    int goalStage{0};
+    std::string memory;
+    std::string eventType;
+};
+
+struct RelationshipDelta {
+    double trust{0.0};
+    double respect{0.0};
+    double fear{0.0};
+    double owed{0.0};
+};
+
+// Promise outcomes change relationship axes through authored policy, not
+// hard-coded constants inside the runtime.
+struct PromisePolicy {
+    int renegotiationExtensionMinutes{static_cast<int>(kMinutesPerDay)};
+    RelationshipDelta brokenPromiser;
+    RelationshipDelta brokenPromisee;
+    RelationshipDelta refusedActor;
+    RelationshipDelta acceptedActor;
+};
+
+struct NpcInstanceContent {
+    std::string location;
+    std::string scheduleLabel;
+    int goalStage{0};
+    std::string strategy;
+    std::map<std::string, double> peerTrust;
+};
+
+// A Game Instance selects a content pack and supplies one concrete opening
+// state. Content files keep archetype defaults; the instance is what makes a
+// particular run reproducible and replaceable.
+struct GameInstanceContent {
+    std::string id;
+    std::string displayName;
+    std::string contentPackId;
+    std::string contentVersion;
+    std::string worldId;
+    std::optional<GameTime> startTime;
+    std::map<std::string, int> resourceInitial;
+    std::map<std::string, NpcInstanceContent> npcs;
+};
+
 struct WorldContentPack {
     std::string id;
     std::string version;
     std::string contentVersion;
     std::string worldId;
     GameTime startTime;
+    DriveAdaptationPolicy driveAdaptation;
+    StimulusPolicy stimulusPolicy;
+    NpcDeliberationPolicy npcDeliberation;
+    PromisePolicy promisePolicy;
+    std::vector<StimulusRule> stimulusRules;
     std::map<std::string, ResourceContent> resources;
     std::vector<NpcContent> npcs;
     std::vector<ActivityContent> activities;
+    std::vector<StrategyRuleContent> strategyRules;
     std::vector<SpatialContent> spatialEntities;
     std::vector<LinkContent> links;
     std::vector<EntityArchetypeContent> entityArchetypes;
+    std::optional<GameInstanceContent> instance;
 };
 
 class ContentPackLoader {

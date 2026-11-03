@@ -1,5 +1,6 @@
 {
   "kind": "world",
+  "kind": "world",
   "content_version": "fixture-1.0.0",
   "id": "fixture_world",
   "display_name": "Fixture World",
@@ -7,6 +8,39 @@
     "day": 4,
     "hour": 9
   },
+  "drive_adaptation": {
+    "enabled": true,
+    "expectation_learning_rate": 0.25,
+    "max_expectation_step": 0.05,
+    "cooldown_minutes": 60
+  },
+  "stimulus_policy": {
+    "max_active_per_npc": 8,
+    "novelty_decay": 0.5,
+    "habituation_step": 0.1,
+    "min_sensitivity": 0.5,
+    "max_sensitivity": 1.0,
+    "repeat_window_minutes": 240
+  },
+  "npc_deliberation": {
+    "enabled": true,
+    "min_stimulus_salience": 0.65,
+    "min_drive_pressure": 0.75,
+    "min_interrupt_salience": 0.85,
+    "cooldown_minutes": 240
+  },
+  "promise_policy": {
+    "renegotiation_extension_minutes": 1440,
+    "broken": {
+      "promiser": {"trust": -0.08},
+      "promisee": {"respect": -0.08}
+    },
+    "refused": {"actor": {"trust": -0.04}},
+    "accepted": {"actor": {"trust": 0.03}}
+  },
+  "stimulus_rules": [
+    {"id": "inspection", "event_prefix": "fixture.inspection", "category": "work_event", "visibility": "world", "relevance": 0.8, "intensity": 0.6, "urgency": 0.4, "valence": 0.2, "source_confidence": 1.0, "ttl_minutes": 120}
+  ],
   "resources": {
     "energy": {
       "kind": "fuel",
@@ -25,6 +59,20 @@
       "maximum": 10
     }
   },
+  "activities": [
+    {
+      "id": "inspect_lift",
+      "trigger": "hour",
+      "hour": 10,
+      "actor": "sable",
+      "target": "workshop",
+      "event_type": "fixture.inspection",
+      "detail": "Sable inspects the service lift",
+      "effects": [
+        {"operation": "relieve_need", "action": "inspect"}
+      ]
+    }
+  ],
   "entity_archetypes": [
     {
       "id": "fixture_object",

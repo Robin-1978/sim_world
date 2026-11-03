@@ -59,6 +59,7 @@ public:
                                      std::unique_ptr<IProvider> provider = std::make_unique<MockProvider>());
 
     [[nodiscard]] const WorldState& state() const { return state_; }
+    [[nodiscard]] const WorldContentPack& content() const { return content_; }
     [[nodiscard]] std::string providerName() const { return provider_->name(); }
     [[nodiscard]] EventBus& eventBus() { return eventBus_; }
     [[nodiscard]] const EntityRegistry& entities() const { return entities_; }
@@ -69,6 +70,8 @@ public:
     CommandResult submit(const Command& command);
     DialogueTurn converse(const std::string& npcId, const std::string& playerInput,
                           const std::string& turnId);
+    DialogueTurn deliberate(const std::string& npcId, const std::string& trigger,
+                            const std::string& turnId = {});
 
     CommandResult createPromise(const std::string& from, const std::string& to,
                                 const std::string& description, int dueInDays,
@@ -111,9 +114,23 @@ private:
     void syncNpcEntityState();
     void addEvent(std::string type, std::string actor, std::string target,
                   std::string detail, Json data = Json::object());
+    void projectStimuli(const WorldEvent& event);
+    void expireStimuli();
+    void processAutonomousTurns();
+    DialogueTurn executeTurn(const std::string& npcId, const std::string& input,
+                             const std::string& turnId, const std::string& trigger,
+                             const std::string& eventType);
     void processHourBoundary(int day, int hour);
     void processActivity(const ActivityContent& activity);
     [[nodiscard]] bool applyActionEffects(const std::string& npcId, const std::string& actionId);
+    [[nodiscard]] bool applyActionEffects(const std::string& npcId, const std::string& actionId,
+                                           const std::map<std::string, int>* reservedResources);
+    void tickProcesses();
+    void resumeSuspendedProcesses();
+    void completeProcess(const std::string& npcId, ProcessExecution process);
+    void suspendProcess(const std::string& npcId, ProcessExecution& process, const std::string& reason);
+    void cancelProcess(const std::string& npcId, ProcessExecution& process, const std::string& reason);
+    void releaseReservations(ProcessExecution& process);
     void applyNeedRelief(const std::string& npcId, const std::string& actionId);
     [[nodiscard]] const NpcContent* authoredNpc(const std::string& npcId) const;
     [[nodiscard]] int resourceValue(const std::string& resource) const;

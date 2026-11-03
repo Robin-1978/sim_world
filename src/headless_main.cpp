@@ -53,7 +53,7 @@ int main(int argc, char** argv) {
     const auto dialogue = service.converse("mira", "Can you spare a ration?", "turn-opening-mira");
     std::cout << "dialogue: " << (dialogue.accepted ? dialogue.dialogue : dialogue.error)
               << " provider=" << dialogue.provider << (dialogue.error.empty() ? "" : " error=" + dialogue.error) << '\n';
-    service.advanceMinutes(static_cast<std::int64_t>(days) * 1440);
+    service.advanceMinutes(static_cast<std::int64_t>(days) * kMinutesPerDay);
     std::cout << "after " << days << " day(s): " << summarize(service.state()) << '\n';
     if (!replayPath.empty()) {
         service.writeReplay(replayPath);

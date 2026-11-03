@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <iostream>
 
 namespace tide_marks {
 
@@ -20,6 +21,19 @@ std::string actionLabel(const DecisionContext& context, const std::string& actio
     for (const auto& candidate : context.candidates) if (candidate.actionId == actionId) return candidate.label;
     return actionId;
 }
+bool containsKeyword(const DecisionContext& context, const std::string& actionId,
+                     const std::string& loweredInput) {
+    for (const auto& candidate : context.candidates) {
+        if (candidate.actionId != actionId) continue;
+        for (const auto& keyword : candidate.keywords) {
+            std::string loweredKeyword = keyword;
+            std::transform(loweredKeyword.begin(), loweredKeyword.end(), loweredKeyword.begin(),
+                           [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+            if (!loweredKeyword.empty() && loweredInput.find(loweredKeyword) != std::string::npos) return true;
+        }
+    }
+    return false;
+}
 }  // namespace
 ProviderResponse MockProvider::decide(const DecisionContext& context, const std::string& playerInput) {
     if (context.candidates.empty()) {
@@ -33,47 +47,139 @@ ProviderResponse MockProvider::decide(const DecisionContext& context, const std:
         return value;
     }();
     for (const auto& candidate : context.candidates) {
-        if ((lowered.find("ration") != std::string::npos && candidate.actionId == "offer_ration") ||
-            (lowered.find("ferry") != std::string::npos && candidate.actionId == "repair_ferry") ||
-            (lowered.find("record") != std::string::npos && candidate.actionId == "share_record") ||
-            (lowered.find("secret") != std::string::npos && candidate.actionId == "protect_secret")) {
+        if (containsKeyword(context, candidate.actionId, lowered)) {
             selected = candidate.actionId;
             break;
         }
     }
     const auto label = actionLabel(context, selected);
-    std::string name = context.npcId;
-    if (context.character.find("Mira") != std::string::npos) name = "Mira";
-    if (context.character.find("Lorn") != std::string::npos) name = "Lorn";
-    if (context.character.find("Eve") != std::string::npos) name = "Eve";
-    return ProviderResponse{true,
-                            IntentProposal{selected, "respond", "The authored candidate best fits the current context.",
-                                           "The selected authored action is attempted and validated by Runtime.", 1.0,
-                                           context.worldRevision, context.npcStateVersion},
+    const std::string name = context.npcName.empty() ? context.npcId : context.npcName;
+    IntentProposal proposal;
+    proposal.actionId = selected;
+    proposal.intent = "respond";
+    proposal.rationale = "The authored candidate best fits the current context.";
+    proposal.expectedOutcome = "The selected authored action is attempted and validated by Runtime.";
+    proposal.confidence = 1.0;
+    proposal.worldRevision = context.worldRevision;
+    proposal.npcStateVersion = context.npcStateVersion;
+    if (!context.stimuli.empty()) proposal.citedStimulusIds.push_back(context.stimuli.front().id);
+    proposal.tradeoffs.push_back("Chose the strongest authored satisfier after comparing drive pressure and constraints.");
+    for (const auto& drive : context.drives) {
+        const auto expected = drive.expectedRelief.find(selected);
+        if (expected != drive.expectedRelief.end()) proposal.expectedRelief[drive.id] = expected->second;
+    }
+    return ProviderResponse{true, std::move(proposal),
                             name + " considers the request and chooses to " + label + ".", {}};
 }
 
-LlamaCppProvider::LlamaCppProvider(LlamaCppConfig config) : config_(std::move(config)) {}
+LlamaCppProvider::LlamaCppProvider(LlamaCppConfig config) : config_(std::move(config)) {
+    if (const char* timeout = std::getenv("TIDE_MARKS_TIMEOUT_MS"); timeout != nullptr) {
+        const int parsed = std::atoi(timeout);
+        if (parsed > 0) config_.timeoutMs = parsed;
+    }
+    if (const char* maxTokens = std::getenv("TIDE_MARKS_MAX_TOKENS"); maxTokens != nullptr) {
+        const int parsed = std::atoi(maxTokens);
+        if (parsed > 0) config_.maxTokens = parsed;
+    }
+    if (const char* thinkingBudget = std::getenv("TIDE_MARKS_THINKING_BUDGET"); thinkingBudget != nullptr) {
+        const int parsed = std::atoi(thinkingBudget);
+        if (parsed > 0) config_.thinkingBudget = parsed;
+    }
+    if (const char* enableThinking = std::getenv("TIDE_MARKS_ENABLE_THINKING"); enableThinking != nullptr) {
+        const std::string value(enableThinking);
+        config_.enableThinking = value == "1" || value == "true" || value == "on";
+    }
+}
 
 ProviderResponse LlamaCppProvider::decide(const DecisionContext& context, const std::string& playerInput) {
     Json candidates = Json::array();
     for (const auto& candidate : context.candidates) {
         candidates.push_back(Json{{"action_id", candidate.actionId}, {"plan_id", candidate.planId},
-                                  {"label", candidate.label}});
+                                  {"label", candidate.label}, {"duration_minutes", candidate.durationMinutes},
+                                  {"interruptible", candidate.interruptible},
+                                  {"interrupt_salience_threshold", candidate.interruptSalienceThreshold}});
+    }
+    Json stimuli = Json::array();
+    for (const auto& stimulus : context.stimuli) {
+        stimuli.push_back(Json{{"id", stimulus.id}, {"source_event", stimulus.sourceEvent},
+                               {"source_sequence", stimulus.sourceSequence}, {"category", stimulus.category},
+                               {"actor", stimulus.actor}, {"target", stimulus.target},
+                               {"observed_minute", stimulus.observedAt.minute},
+                               {"expires_minute", stimulus.expiresAt.minute},
+                               {"visibility", stimulus.visibilityScope}, {"confidence", stimulus.sourceConfidence},
+                               {"relevance", stimulus.relevance}, {"intensity", stimulus.intensity},
+                               {"urgency", stimulus.urgency}, {"novelty", stimulus.novelty},
+                               {"valence", stimulus.valence}, {"salience", stimulus.effectiveSalience}});
+    }
+    Json constraints = Json::array();
+    for (const auto& constraint : context.constraints) {
+        constraints.push_back(Json{{"id", constraint.id}, {"category", constraint.category},
+                                   {"scope", constraint.scope}, {"source", constraint.source},
+                                   {"hard", constraint.hard}, {"reason", constraint.reason}});
+    }
+    Json drives = Json::array();
+    for (const auto& drive : context.drives) {
+        drives.push_back(Json{{"id", drive.id}, {"domain", drive.domain}, {"dimension", drive.dimension},
+                              {"deficit", drive.deficit}, {"drive", drive.drive},
+                              {"sensitivity", drive.sensitivity}, {"evidence_confidence", drive.evidenceConfidence},
+                              {"critical", drive.critical}, {"expected_relief", drive.expectedRelief}});
     }
     const Json userContent{{"npc_id", context.npcId}, {"time", context.now.toString()},
                            {"perception", context.perception}, {"memories", context.memories},
                            {"character", context.character}, {"internal_drives", context.internalDrives},
+                           {"drives", drives},
                            {"external_stimuli", context.externalStimuli},
+                           {"stimuli", stimuli},
                            {"structural_constraints", context.structuralConstraints},
+                           {"constraints", constraints},
                            {"player_input", playerInput},
                            {"candidates", candidates}};
+    std::vector<std::string> stimulusIds;
+    stimulusIds.reserve(context.stimuli.size());
+    for (const auto& stimulus : context.stimuli) stimulusIds.push_back(stimulus.id);
+    std::vector<std::string> needIds;
+    needIds.reserve(context.drives.size());
+    for (const auto& drive : context.drives) needIds.push_back(drive.id);
+    const std::string systemPrompt =
+        "Return one JSON object only. Choose exactly one action_id from the supplied candidates. "
+        "cited_stimulus_ids may contain only IDs from the supplied stimuli array; the valid stimulus IDs for this request are " +
+        Json(stimulusIds).dump() + ". If that list is empty, cited_stimulus_ids MUST be []. Never use a drive or need ID as a stimulus ID. "
+        "expected_relief may contain only need IDs from the supplied drives array; the valid need IDs for this request are " +
+        Json(needIds).dump() + ". Use empty arrays/objects when none are supplied. "
+        "confidence and expected_relief values must be numbers from 0 to 1. dialogue must be one or two natural first-person sentences spoken by the NPC, never a dump of context fields. "
+        "motivation and tradeoffs explain the decision; they are not actions. Do not use markdown or add explanation outside the JSON object.";
     Json messages = Json::array();
-    messages.push_back(Json{{"role", "system"},
-                            {"content", "Return JSON with action_id, intent, motivation, expected_outcome, confidence, dialogue. Choose only an action_id from the supplied candidates; confidence must be 0..1."}});
+    messages.push_back(Json{{"role", "system"}, {"content", systemPrompt}});
     messages.push_back(Json{{"role", "user"}, {"content", userContent.dump()}});
-    Json request{{"model", config_.model}, {"temperature", 0.2}, {"messages", messages},
-                 {"response_format", Json{{"type", "json_object"}}}};
+    const Json responseSchema{
+        {"type", "object"}, {"additionalProperties", false},
+        {"required", Json::array({"action_id", "intent", "motivation", "expected_outcome", "confidence",
+                                   "dialogue", "cited_stimulus_ids", "tradeoffs", "expected_relief"})},
+        {"properties", Json{{"action_id", Json{{"type", "string"}}},
+                             {"intent", Json{{"type", "string"}}},
+                             {"motivation", Json{{"type", "string"}}},
+                             {"expected_outcome", Json{{"type", "string"}}},
+                             {"confidence", Json{{"type", "number"}, {"minimum", 0.0}, {"maximum", 1.0}}},
+                             {"dialogue", Json{{"type", "string"}}},
+                             {"cited_stimulus_ids", Json{{"type", "array"}, {"items", Json{{"type", "string"}}}}},
+                             {"tradeoffs", Json{{"type", "array"}, {"items", Json{{"type", "string"}}}}},
+                             {"expected_relief", Json{{"type", "object"},
+                                                       {"additionalProperties", Json{{"type", "number"}, {"minimum", 0.0}, {"maximum", 1.0}}}}}}}};
+    Json request{{"model", config_.model}, {"temperature", 0.2}, {"max_tokens", config_.maxTokens},
+                 {"messages", messages},
+                 {"response_format", Json{{"type", "json_schema"},
+                                           {"json_schema", Json{{"name", "tide_marks_intent_proposal"},
+                                                                  {"strict", true}, {"schema", responseSchema}}}}}};
+    request["chat_template_kwargs"] = Json{{"enable_thinking", config_.enableThinking}};
+    if (config_.enableThinking) {
+        // llama.cpp applies this sampler budget only through the top-level
+        // reasoning_budget_tokens field.  A template-only thinking_budget is
+        // ignored by current servers and can therefore consume max_tokens.
+        request["reasoning_budget_tokens"] = config_.thinkingBudget;
+    } else {
+        // Be explicit for servers whose model defaults enable reasoning.
+        request["reasoning_effort"] = "none";
+    }
     const auto temp = std::filesystem::temp_directory_path() /
                       ("tide_marks_llm_" + std::to_string(static_cast<long long>(std::rand())) + ".json");
     {
@@ -106,7 +212,18 @@ ProviderResponse LlamaCppProvider::decide(const DecisionContext& context, const 
     }
     try {
         const Json outer = Json::parse(response);
-        std::string content = outer.at("choices").at(0).at("message").at("content").get<std::string>();
+        const auto& choice = outer.at("choices").at(0);
+        if (const char* debug = std::getenv("TIDE_MARKS_DEBUG_PROVIDER");
+            debug != nullptr && *debug != '\0' && std::string(debug) != "0") {
+            std::cerr << "provider_debug finish_reason=" << choice.value("finish_reason", "")
+                      << " usage=" << outer.value("usage", Json::object()).dump()
+                      << " content=" << choice.at("message").value("content", "")
+                      << "\n";
+        }
+        if (choice.value("finish_reason", "") == "length") {
+            return ProviderResponse{false, {}, {}, "provider_truncated"};
+        }
+        std::string content = choice.at("message").at("content").get<std::string>();
         const Json answer = Json::parse(content);
         const std::string action = answer.value("action_id", "");
         const auto allowed = std::find_if(context.candidates.begin(), context.candidates.end(),
@@ -114,12 +231,23 @@ ProviderResponse LlamaCppProvider::decide(const DecisionContext& context, const 
         if (allowed == context.candidates.end()) {
             return ProviderResponse{false, {}, {}, "unknown_action_id"};
         }
-        return ProviderResponse{true,
-                                IntentProposal{action, answer.value("intent", "respond"),
-                                               answer.value("motivation", ""), answer.value("expected_outcome", ""),
-                                               std::clamp(answer.value("confidence", 0.0), 0.0, 1.0),
-                                               context.worldRevision, context.npcStateVersion},
-                                answer.value("dialogue", ""), {}};
+        IntentProposal proposal;
+        proposal.actionId = action;
+        proposal.intent = answer.value("intent", "respond");
+        proposal.rationale = answer.value("motivation", "");
+        proposal.expectedOutcome = answer.value("expected_outcome", "");
+        proposal.confidence = std::clamp(answer.value("confidence", 0.0), 0.0, 1.0);
+        proposal.worldRevision = context.worldRevision;
+        proposal.npcStateVersion = context.npcStateVersion;
+        proposal.citedStimulusIds = answer.value("cited_stimulus_ids", std::vector<std::string>{});
+        proposal.tradeoffs = answer.value("tradeoffs", std::vector<std::string>{});
+        const auto expectedRelief = answer.value("expected_relief", Json::object());
+        if (!expectedRelief.is_object()) return ProviderResponse{false, {}, {}, "invalid_expected_relief"};
+        for (auto item = expectedRelief.begin(); item != expectedRelief.end(); ++item) {
+            if (!item.value().is_number()) return ProviderResponse{false, {}, {}, "invalid_expected_relief"};
+            proposal.expectedRelief[item.key()] = std::clamp(item.value().get<double>(), 0.0, 1.0);
+        }
+        return ProviderResponse{true, std::move(proposal), answer.value("dialogue", ""), {}};
     } catch (const std::exception& error) {
         return ProviderResponse{false, {}, {}, std::string("invalid_provider_json:") + error.what()};
     }

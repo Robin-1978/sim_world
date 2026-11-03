@@ -1,0 +1,15 @@
+{
+  "kind": "game_instance",
+  "schema_version": 1,
+  "id": "tide_marks.village.instance",
+  "display_name": "Tidemark Village",
+  "content_pack": "tide_marks.village",
+  "content_version": "village-p0.2",
+  "world_id": "village_tidemark",
+  "initial_time": {"day": 1, "hour": 6, "minute": 0},
+  "npcs": {
+    "mira": {"location": "granary", "schedule_label": "granary", "goal_stage": 0, "strategy": "routine"},
+    "lorn": {"location": "ferry_dock", "schedule_label": "ferry_dock", "goal_stage": 0, "strategy": "routine"},
+    "eve": {"location": "archive", "schedule_label": "archive", "goal_stage": 0, "strategy": "routine"}
+  }
+}

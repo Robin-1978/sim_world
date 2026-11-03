@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Adaptive World Game Instance",
+  "type": "object",
+  "required": ["kind", "schema_version", "id", "content_pack", "content_version", "world_id", "initial_time", "npcs"],
+  "properties": {
+    "kind": {"const": "game_instance"},
+    "schema_version": {"type": "integer", "const": 1},
+    "id": {"type": "string", "pattern": "^[a-z0-9_.-]+$"},
+    "display_name": {"type": "string"},
+    "content_pack": {"type": "string", "minLength": 1},
+    "content_version": {"type": "string", "minLength": 1},
+    "world_id": {"type": "string", "minLength": 1},
+    "initial_time": {
+      "type": "object",
+      "required": ["day", "hour", "minute"],
+      "properties": {
+        "day": {"type": "integer", "minimum": 1},
+        "hour": {"type": "integer", "minimum": 0, "maximum": 23},
+        "minute": {"type": "integer", "minimum": 0, "maximum": 59}
+      },
+      "additionalProperties": false
+    },
+    "resources": {"type": "object", "additionalProperties": {"type": "integer"}},
+    "npcs": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "location": {"type": "string"},
+          "schedule_label": {"type": "string"},
+          "goal_stage": {"type": "integer", "minimum": 0},
+          "strategy": {"type": "string"},
+          "peer_trust": {"type": "object", "additionalProperties": {"type": "number", "minimum": 0, "maximum": 1}}
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

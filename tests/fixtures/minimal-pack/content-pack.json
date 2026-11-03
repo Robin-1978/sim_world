@@ -4,6 +4,9 @@
   "id": "fixture.minimal",
   "version": "1.0.0",
   "world": "world.json",
-  "npcs": ["npc.json"],
-  "dialogue": "dialogue.json"
+  "npcs": [
+    "npc.json"
+  ],
+  "dialogue": "dialogue.json",
+  "instance": "instance.json"
 }

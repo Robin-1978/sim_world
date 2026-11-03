@@ -6,6 +6,7 @@ std::string toString(NpcMode mode) {
     switch (mode) {
     case NpcMode::AtHome: return "at_home";
     case NpcMode::Working: return "working";
+    case NpcMode::Executing: return "executing";
     case NpcMode::Traveling: return "traveling";
     case NpcMode::InConversation: return "in_conversation";
     case NpcMode::Interrupted: return "interrupted";
@@ -16,6 +17,7 @@ std::string toString(NpcMode mode) {
 
 NpcMode npcModeFromString(const std::string& value) {
     if (value == "at_home") return NpcMode::AtHome;
+    if (value == "executing") return NpcMode::Executing;
     if (value == "traveling") return NpcMode::Traveling;
     if (value == "in_conversation") return NpcMode::InConversation;
     if (value == "interrupted") return NpcMode::Interrupted;
@@ -25,8 +27,11 @@ NpcMode npcModeFromString(const std::string& value) {
 
 NpcMode transition(NpcMode current, NpcSignal signal) {
     if (signal == NpcSignal::Disable) return NpcMode::Unavailable;
+    if (signal == NpcSignal::StartProcess && current != NpcMode::Unavailable) return NpcMode::Executing;
+    if (signal == NpcSignal::FinishProcess && current == NpcMode::Executing) return NpcMode::Working;
     if (signal == NpcSignal::StartConversation && current != NpcMode::Unavailable) return NpcMode::InConversation;
     if (signal == NpcSignal::Interrupt && current != NpcMode::Unavailable) return NpcMode::Interrupted;
+    if (signal == NpcSignal::CancelProcess && current == NpcMode::Executing) return NpcMode::Interrupted;
     if (signal == NpcSignal::StartTravel && current != NpcMode::Unavailable) return NpcMode::Traveling;
     if (signal == NpcSignal::AtHome && current != NpcMode::InConversation) return NpcMode::AtHome;
     if (signal == NpcSignal::AtWork && current != NpcMode::InConversation) return NpcMode::Working;

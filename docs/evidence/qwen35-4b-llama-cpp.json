@@ -1,5 +1,5 @@
 {
-  "date": "2026-11-02",
+  "date": "2026-11-03",
   "endpoint": "http://127.0.0.1:8192",
   "health": "ok",
   "server": "llama.cpp",
@@ -8,8 +8,8 @@
   "context_length": 24576,
   "slots": 1,
   "request_mode": "OpenAI-compatible /v1/chat/completions",
-  "temperature": 0.4,
-  "max_tokens": 96,
+  "temperature": 0.2,
+  "max_tokens": 512,
   "thinking": false,
   "structured_output": "JSON Schema",
   "turns": [
@@ -17,5 +17,13 @@
     {"label": "turn2", "ttft_s": 0.282, "total_s": 0.648, "predicted_tokens": 20},
     {"label": "turn3", "ttft_s": 0.297, "total_s": 0.608, "predicted_tokens": 18}
   ],
-  "result": "three serial requests returned valid NPC JSON"
+  "result": "P0 village IntentProposal returned valid JSON, cited_stimulus_ids was empty when no stimuli were supplied, and Runtime accepted the authored action",
+  "thinking_budget_probe": {
+    "enabled": true,
+    "reasoning_budget_tokens": 256,
+    "max_tokens": 1024,
+    "completion_tokens": 426,
+    "finish_reason": "stop",
+    "runtime_result": "accepted"
+  }
 }

@@ -8,10 +8,40 @@ struct ActionCandidate {
     std::string actionId;
     std::string planId;
     std::string label;
+    // A candidate may start a long-running, data-authored process.  Zero means
+    // that the candidate is an instantaneous interaction.
+    int durationMinutes{0};
+    bool interruptible{true};
+    double interruptSalienceThreshold{1.0};
+    // Optional content-authored words used only by the offline MockProvider's
+    // natural-language spotter. Runtime validation never depends on them.
+    std::vector<std::string> keywords;
+};
+
+struct StructuralConstraintView {
+    std::string id;
+    std::string category;
+    std::string scope;
+    std::string source;
+    std::string reason;
+    bool hard{true};
+};
+
+struct DriveView {
+    std::string id;
+    std::string domain;
+    std::string dimension;
+    double deficit{0.0};
+    double drive{0.0};
+    double sensitivity{1.0};
+    double evidenceConfidence{1.0};
+    bool critical{false};
+    std::map<std::string, double> expectedRelief;
 };
 
 struct DecisionContext {
     std::string npcId;
+    std::string npcName;
     GameTime now;
     std::string perception;
     std::string memories;
@@ -19,6 +49,9 @@ struct DecisionContext {
     std::string internalDrives;
     std::string externalStimuli;
     std::string structuralConstraints;
+    std::vector<ExternalStimulus> stimuli;
+    std::vector<StructuralConstraintView> constraints;
+    std::vector<DriveView> drives;
     std::vector<ActionCandidate> candidates;
     std::uint64_t worldRevision{0};
     std::uint64_t npcStateVersion{0};
@@ -32,6 +65,9 @@ struct IntentProposal {
     double confidence{0.0};
     std::uint64_t worldRevision{0};
     std::uint64_t npcStateVersion{0};
+    std::vector<std::string> citedStimulusIds;
+    std::vector<std::string> tradeoffs;
+    std::map<std::string, double> expectedRelief;
 };
 
 struct ProviderResponse {
@@ -60,7 +96,13 @@ struct LlamaCppConfig {
     std::string baseUrl{"http://127.0.0.1:8192/v1"};
     std::string model{"local"};
     std::string apiKeyEnv;
-    int timeoutMs{15000};
+    int timeoutMs{120000};
+    // IntentProposal is a short, schema-constrained runtime decision.  Keep
+    // thinking off by default; callers can opt into a bounded reasoning pass
+    // for genuinely ambiguous tasks.
+    int maxTokens{512};
+    bool enableThinking{false};
+    int thinkingBudget{512};
 };
 
 class LlamaCppProvider final : public IProvider {

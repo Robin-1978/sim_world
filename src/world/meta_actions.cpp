@@ -11,7 +11,7 @@ const std::vector<MetaActionSpec>& MetaActionRegistry::all() {
         {"transfer_resource", "resource", "Move a resource between entity inventories.", false},
         {"reserve_resource", "resource", "Reserve a resource for a pending plan.", true},
         {"release_resource", "resource", "Release a previous reservation.", true},
-        {"relieve_need", "need", "Apply a committed action's authored need relief.", false},
+        {"relieve_need", "need", "Apply a committed action's authored need relief.", true},
         {"adjust_relationship", "relationship", "Adjust one relationship axis with a recorded reason.", false},
         {"move_entity", "movement", "Create a validated movement intent.", false},
         {"arrive_entity", "movement", "Commit an arrival result.", false},
@@ -19,7 +19,7 @@ const std::vector<MetaActionSpec>& MetaActionRegistry::all() {
         {"transition_promise", "promise", "Transition a promise through its allowed states.", false},
         {"append_memory", "knowledge", "Append a sourced memory projection.", false},
         {"assert_known_fact", "knowledge", "Record a fact within an observation scope.", false},
-        {"set_link_state", "topology", "Change authored link traversal state.", false},
+        {"set_link_state", "topology", "Change authored link traversal state.", true},
         {"create_entity", "entity", "Create an entity from a registered archetype.", false},
         {"set_entity_lifecycle", "entity", "Change active, dormant, or destroyed lifecycle.", false},
     };

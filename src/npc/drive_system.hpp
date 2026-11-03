@@ -13,6 +13,13 @@ struct NeedChange {
     double before{0.0};
     double after{0.0};
     bool becameCritical{false};
+    double expectedRelief{0.0};
+    double actualRelief{0.0};
+    double expectationBefore{0.0};
+    double expectationAfter{0.0};
+    double sensitivityBefore{1.0};
+    double sensitivityAfter{1.0};
+    bool adapted{false};
 };
 
 class DriveSystem {
@@ -27,7 +34,8 @@ public:
         NpcState& npc,
         const std::vector<NeedContent>& definitions,
         const std::string& actionId,
-        GameTime now);
+        GameTime now,
+        const DriveAdaptationPolicy& policy);
     [[nodiscard]] static double drive(const NeedContent& definition, const NeedState& state);
 };
 

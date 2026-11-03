@@ -1,7 +1,10 @@
 #include "world/world_service.hpp"
 #include "world/world_state_json.hpp"
 #include "npc/drive_system.hpp"
+#include "npc/state_machine.hpp"
+#include "world/ids.hpp"
 #include <algorithm>
+#include <cmath>
 #include <fstream>
 #include <sstream>
 #include <stdexcept>
@@ -11,6 +14,19 @@
 #include <set>
 
 namespace tide_marks {
+
+namespace {
+void applyRelationshipDelta(RelationshipAxes& axes, const RelationshipDelta& delta) {
+    axes.trust = std::clamp(axes.trust + delta.trust, 0.0, 1.0);
+    axes.respect = std::clamp(axes.respect + delta.respect, 0.0, 1.0);
+    axes.fear = std::clamp(axes.fear + delta.fear, 0.0, 1.0);
+    axes.owed = std::clamp(axes.owed + delta.owed, 0.0, 1.0);
+}
+
+void applyNpcSignal(NpcState& npc, NpcSignal signal) {
+    npc.mode = toString(transition(npcModeFromString(npc.mode), signal));
+}
+}
 
 class WorldService::TransactionScope {
 public:
@@ -78,60 +94,78 @@ WorldService WorldService::fromContent(const WorldContentPack& content,
                                        std::unique_ptr<IProvider> provider) {
     WorldService service(std::move(provider));
     service.content_ = content;
-    service.state_.worldId = content.worldId;
+    const auto* instance = content.instance ? &*content.instance : nullptr;
+    service.state_.worldId = instance != nullptr && !instance->worldId.empty() ? instance->worldId : content.worldId;
+    service.state_.instanceId = instance != nullptr ? instance->id : "default";
     service.state_.contentVersion = content.contentVersion;
-    service.state_.now = content.startTime;
+    service.state_.now = instance != nullptr && instance->startTime ? *instance->startTime : content.startTime;
     for (const auto& [id, resource] : content.resources) {
-        service.state_.resources[id] = ResourceState{resource.initial, 0};
+        int initial = resource.initial;
+        if (instance != nullptr) {
+            if (const auto override = instance->resourceInitial.find(id); override != instance->resourceInitial.end()) {
+                initial = override->second;
+            }
+        }
+        service.state_.resources[id] = ResourceState{initial, 0};
     }
-    service.state_.entities["player"] = WorldEntityState{"player", "actor", EntityLifecycle::Active, Json::object()};
+    service.state_.entities[kPlayerId] = WorldEntityState{kPlayerId, "actor", EntityLifecycle::Active, Json::object()};
     for (const auto& spatial : content.spatialEntities) {
-        service.state_.entities["spatial:" + spatial.id] =
-            WorldEntityState{"spatial:" + spatial.id, spatial.kind, EntityLifecycle::Active, Json::object()};
+        service.state_.entities[spatialEntityId(spatial.id)] =
+            WorldEntityState{spatialEntityId(spatial.id), spatial.kind, EntityLifecycle::Active, Json::object()};
     }
     for (const auto& link : content.links) {
-        service.state_.entities["link:" + link.id] =
-            WorldEntityState{"link:" + link.id, link.kind, EntityLifecycle::Active, Json::object()};
+        service.state_.entities[linkEntityId(link.id)] =
+            WorldEntityState{linkEntityId(link.id), link.kind, EntityLifecycle::Active, Json::object()};
         service.state_.links[link.id] = RuntimeLinkState{link.link.traversable, link.link.locked};
     }
     for (const auto& authored : content.npcs) {
         NpcState npc;
-        npc.definition = authored.definition;
+        npc.definitionId = authored.definition.id;
         npc.location = authored.initialLocation;
         npc.scheduleLabel = authored.initialScheduleLabel;
         npc.goalStage = authored.initialGoalStage;
         npc.strategy = authored.initialStrategy;
         npc.peerTrust = authored.initialPeerTrust;
+        if (instance != nullptr) {
+            if (const auto override = instance->npcs.find(authored.definition.id); override != instance->npcs.end()) {
+                if (!override->second.location.empty()) npc.location = override->second.location;
+                if (!override->second.scheduleLabel.empty()) npc.scheduleLabel = override->second.scheduleLabel;
+                npc.goalStage = override->second.goalStage;
+                if (!override->second.strategy.empty()) npc.strategy = override->second.strategy;
+                if (!override->second.peerTrust.empty()) npc.peerTrust = override->second.peerTrust;
+            }
+        }
         DriveSystem::initialize(npc, authored.needs, service.state_.now);
         npc.memories.push_back(Memory{"authored", "Initial content pack memory.", service.state_.now, 1.0});
         service.state_.npcs.emplace(authored.definition.id, std::move(npc));
-        service.state_.entities["npc:" + authored.definition.id] =
-            WorldEntityState{"npc:" + authored.definition.id, "npc", EntityLifecycle::Active, Json::object()};
+        service.state_.entities[npcEntityId(authored.definition.id)] =
+            WorldEntityState{npcEntityId(authored.definition.id), "npc", EntityLifecycle::Active, Json::object()};
     }
     service.rebuildEntityRegistry();
     Json ids = Json::array();
     for (const auto& authored : content.npcs) ids.push_back(authored.definition.id);
-    service.addEvent("world.initialized", "world", content.id, "World content pack loaded",
-                     Json{{"content_pack", content.id}, {"content_version", content.version}, {"npcs", ids}});
+    service.addEvent("world.initialized", kWorldActor, content.id, "World content pack loaded",
+                     Json{{"content_pack", content.id}, {"content_version", content.version},
+                          {"instance", instance != nullptr ? instance->id : "default"}, {"npcs", ids}});
     return service;
 }
 
 void WorldService::rebuildEntityRegistry() {
     entities_ = EntityRegistry{};
-    const auto playerState = state_.entities.find("player");
+    const auto playerState = state_.entities.find(kPlayerId);
     if (playerState == state_.entities.end() || playerState->second.lifecycle != EntityLifecycle::Destroyed) {
-        entities_.create(EntityRecord{"player", "player", playerState == state_.entities.end() ||
+        entities_.create(EntityRecord{kPlayerId, kPlayerId, playerState == state_.entities.end() ||
                                                    playerState->second.lifecycle == EntityLifecycle::Active});
     }
-    if (entities_.contains("player")) entities_.set<TransformComponent>("player", TransformComponent{0.0, 0.0, 0.0, 0.0});
+    if (entities_.contains(kPlayerId)) entities_.set<TransformComponent>(kPlayerId, TransformComponent{0.0, 0.0, 0.0, 0.0});
     const auto defaultLocation = content_.spatialEntities.empty() ? std::string{} : content_.spatialEntities.front().id;
     const auto regionId = state_.worldId.empty() ? content_.worldId : state_.worldId;
-    if (entities_.contains("player")) {
-        entities_.set<LocationComponent>("player", LocationComponent{defaultLocation, regionId});
-        entities_.set<InventoryComponent>("player", InventoryComponent{});
+    if (entities_.contains(kPlayerId)) {
+        entities_.set<LocationComponent>(kPlayerId, LocationComponent{defaultLocation, regionId});
+        entities_.set<InventoryComponent>(kPlayerId, InventoryComponent{});
     }
     for (const auto& authored : content_.spatialEntities) {
-        const auto entity = "spatial:" + authored.id;
+        const auto entity = spatialEntityId(authored.id);
         const auto stateEntity = state_.entities.find(entity);
         if (stateEntity != state_.entities.end() && stateEntity->second.lifecycle == EntityLifecycle::Destroyed) continue;
         const bool active = stateEntity == state_.entities.end() || stateEntity->second.lifecycle == EntityLifecycle::Active;
@@ -140,7 +174,7 @@ void WorldService::rebuildEntityRegistry() {
         entities_.set<LocationComponent>(entity, LocationComponent{authored.id, regionId});
     }
     for (const auto& authored : content_.links) {
-        const auto entity = "link:" + authored.id;
+        const auto entity = linkEntityId(authored.id);
         const auto stateEntity = state_.entities.find(entity);
         if (stateEntity != state_.entities.end() && stateEntity->second.lifecycle == EntityLifecycle::Destroyed) continue;
         const bool active = stateEntity == state_.entities.end() || stateEntity->second.lifecycle == EntityLifecycle::Active;
@@ -153,7 +187,7 @@ void WorldService::rebuildEntityRegistry() {
         entities_.set<LinkComponent>(entity, std::move(link));
     }
     for (const auto& [id, npc] : state_.npcs) {
-        const auto entity = "npc:" + id;
+        const auto entity = npcEntityId(id);
         const auto stateEntity = state_.entities.find(entity);
         if (stateEntity != state_.entities.end() && stateEntity->second.lifecycle == EntityLifecycle::Destroyed) continue;
         const bool active = stateEntity == state_.entities.end() || stateEntity->second.lifecycle == EntityLifecycle::Active;
@@ -171,7 +205,7 @@ void WorldService::rebuildEntityRegistry() {
 
 void WorldService::syncNpcEntityState() {
     for (const auto& [id, npc] : state_.npcs) {
-        const auto entity = "npc:" + id;
+        const auto entity = npcEntityId(id);
         entities_.set<NpcComponent>(entity, NpcComponent{id, npc.mode});
         entities_.set<LocationComponent>(entity, LocationComponent{npc.location, state_.worldId});
     }
@@ -179,7 +213,7 @@ void WorldService::syncNpcEntityState() {
 
 bool WorldService::hasNpc(const std::string& npcId) const {
     if (state_.npcs.find(npcId) == state_.npcs.end()) return false;
-    const auto entity = state_.entities.find("npc:" + npcId);
+    const auto entity = state_.entities.find(npcEntityId(npcId));
     return entity == state_.entities.end() || entity->second.lifecycle == EntityLifecycle::Active;
 }
 
@@ -188,26 +222,65 @@ DecisionContext WorldService::decisionContext(const std::string& npcId) const {
     const auto found = state_.npcs.find(npcId);
     if (found == state_.npcs.end()) return {};
     const auto& npc = found->second;
+    const auto* authoredContent = authoredNpc(npcId);
+    if (authoredContent == nullptr) return {};
+    const auto& authoredDefinition = authoredContent->definition;
     DecisionContext context;
     context.npcId = npcId;
+    context.npcName = authoredDefinition.name;
     context.now = state_.now;
     context.worldRevision = state_.revision;
     context.npcStateVersion = npc.stateVersion;
     std::ostringstream resources;
-    for (const auto& [id, definition] : content_.resources) {
-        resources << id << '=' << resourceValue(id) << ' ' << definition.unit << ';';
+    for (const auto& [id, resourceDefinition] : content_.resources) {
+        resources << id << '=' << resourceValue(id) << ' ' << resourceDefinition.unit << ';';
     }
     context.perception = "At " + npc.location + ", it is " + state_.now.toString() +
                          ". Public resources: " + resources.str();
-    context.externalStimuli = "public_resources(" + resources.str() + "), time=" + state_.now.toString();
-    context.structuralConstraints = "Only authored action candidates may be proposed; resources, permissions, "
-                                   "topology and world revision are checked before commit.";
+    for (const auto& stimulus : npc.stimuli) {
+        if (!stimulus.active || state_.now.minute >= stimulus.expiresAt.minute) continue;
+        context.stimuli.push_back(stimulus);
+    }
+    std::sort(context.stimuli.begin(), context.stimuli.end(), [](const auto& left, const auto& right) {
+        if (left.effectiveSalience == right.effectiveSalience) return left.id < right.id;
+        return left.effectiveSalience > right.effectiveSalience;
+    });
+    std::ostringstream stimuli;
+    for (const auto& stimulus : context.stimuli) {
+        stimuli << stimulus.category << " from " << stimulus.sourceEvent << " by " << stimulus.actor
+                << " salience=" << stimulus.effectiveSalience << " valence=" << stimulus.valence
+                << " sequence=" << stimulus.sourceSequence << ';';
+    }
+    if (stimuli.str().empty()) stimuli << "none beyond the current public state;";
+    context.externalStimuli = stimuli.str();
+    for (const auto& [resourceId, resource] : state_.resources) {
+        if (resource.amount - resource.reserved > 0) continue;
+        context.constraints.push_back(StructuralConstraintView{
+            "resource:" + resourceId + ":unavailable", "resource", resourceId,
+            "world_resource_rule", "No unreserved units are available.", true});
+    }
+    for (const auto& link : content_.links) {
+        const auto runtime = state_.links.find(link.id);
+        if (runtime == state_.links.end() || (runtime->second.traversable && !runtime->second.locked)) continue;
+        context.constraints.push_back(StructuralConstraintView{
+            linkEntityId(link.id) + ":blocked", "topology", join(link.link.endpoints, ","),
+            "authored_link_state", runtime->second.locked ? "The link is locked." : "The link is closed.", true});
+    }
+    context.constraints.push_back(StructuralConstraintView{
+        "actions:authored_vocabulary", "capability", npcId, "content_action_whitelist",
+        "Only the supplied authored action ids may be proposed.", true});
+    std::ostringstream constraints;
+    for (const auto& constraint : context.constraints) {
+        constraints << constraint.id << " [" << (constraint.hard ? "hard" : "soft") << "] "
+                    << constraint.reason << ';';
+    }
+    context.structuralConstraints = constraints.str();
     std::vector<std::string> memories;
     for (const auto& memory : npc.memories) memories.push_back(memory.text);
     context.memories = join(memories, " | ");
-    context.character = npc.definition.name + ": " + npc.definition.role + "; public goal=" +
-                        npc.definition.publicGoal + "; hidden goal=" + npc.definition.hiddenGoal +
-                        "; boundary=" + npc.definition.boundary + "; strategy=" + npc.strategy;
+    context.character = authoredDefinition.name + ": " + authoredDefinition.role + "; public goal=" +
+                        authoredDefinition.publicGoal + "; hidden goal=" + authoredDefinition.hiddenGoal +
+                        "; boundary=" + authoredDefinition.boundary + "; strategy=" + npc.strategy;
     for (const auto& [needId, need] : npc.needs) {
         context.character += "; need(" + needId + ")=" + std::to_string(need.deficit);
     }
@@ -215,21 +288,26 @@ DecisionContext WorldService::decisionContext(const std::string& npcId) const {
         context.character += "; trust(" + peer + ")=" + std::to_string(trust);
     }
     std::vector<NeedContent> needs;
-    for (const auto& authored : content_.npcs) {
-        if (authored.definition.id == npcId) {
-            context.candidates = authored.actions;
-            needs = authored.needs;
-            for (const auto& definition : needs) {
-                const auto state = npc.needs.find(definition.id);
+    {
+            context.candidates = authoredContent->actions;
+            needs = authoredContent->needs;
+            for (const auto& needDefinition : needs) {
+                const auto state = npc.needs.find(needDefinition.id);
                 if (state != npc.needs.end()) {
-                    context.internalDrives += (context.internalDrives.empty() ? "" : "; ") + definition.id +
-                                              " deficit=" + std::to_string(state->second.deficit);
-                    context.character += "; drive(" + definition.id + ")=" +
-                                         std::to_string(DriveSystem::drive(definition, state->second));
+                    const double currentDrive = DriveSystem::drive(needDefinition, state->second);
+                    context.internalDrives += (context.internalDrives.empty() ? "" : "; ") + needDefinition.id +
+                                              "[" + needDefinition.domain + "] deficit=" +
+                                              std::to_string(state->second.deficit) + " drive=" +
+                                              std::to_string(currentDrive);
+                    context.character += "; drive(" + needDefinition.id + ")=" +
+                                         std::to_string(currentDrive);
+                    context.drives.push_back(DriveView{needDefinition.id, needDefinition.domain, needDefinition.dimension,
+                                                       state->second.deficit, currentDrive,
+                                                       state->second.sensitivity, state->second.evidenceConfidence,
+                                                       state->second.deficit >= needDefinition.criticalThreshold,
+                                                       state->second.expectedRelief});
                 }
             }
-            break;
-        }
     }
     // Utility ranking chooses the long-term intent deterministically. The
     // provider may still choose any authored candidate after seeing this list.
@@ -253,12 +331,19 @@ DecisionContext WorldService::decisionContext(const std::string& npcId) const {
 
 void WorldService::advanceMinutes(std::int64_t minutes) {
     if (minutes <= 0) return;
-    TransactionScope transaction(*this);
     const auto target = state_.now.minute + minutes;
     while (state_.now.minute < target) {
+        // A time step is one state transition. A long offline jump is a
+        // sequence of committed steps, not one unbounded transaction; this
+        // keeps event publication and observation aligned with the step that
+        // produced the fact.
+        TransactionScope transaction(*this);
         ++state_.now.minute;
-        if (state_.now.minute % 60 == 0) processHourBoundary(state_.now.day(), state_.now.hour());
-        if (state_.now.minute % 1440 == 0) processDayBoundary(state_.now.day());
+        expireStimuli();
+        resumeSuspendedProcesses();
+        tickProcesses();
+        if (state_.now.minute % kMinutesPerHour == 0) processHourBoundary(state_.now.day(), state_.now.hour());
+        if (state_.now.minute % kMinutesPerDay == 0) processDayBoundary(state_.now.day());
         applyPromiseDeadline();
     }
     syncNpcEntityState();
@@ -266,10 +351,11 @@ void WorldService::advanceMinutes(std::int64_t minutes) {
 
 void WorldService::processHourBoundary(int day, int hour) {
     (void)day;
-    const int minuteOfDay = hour * 60;
+    const int minuteOfDay = hour * static_cast<int>(kMinutesPerHour);
     for (auto& [id, npc] : state_.npcs) {
-        if (const auto* authored = authoredNpc(id)) {
-            const GameTime previous{state_.now.minute - 60};
+        const auto* authored = authoredNpc(id);
+        if (authored != nullptr) {
+            const GameTime previous{state_.now.minute - kMinutesPerHour};
             const auto changes = DriveSystem::advance(npc, authored->needs, previous, state_.now);
             Json changed = Json::array();
             for (const auto& change : changes) {
@@ -287,12 +373,11 @@ void WorldService::processHourBoundary(int day, int hour) {
                               {"from_minute", previous.minute}, {"to_minute", state_.now.minute}});
             }
         }
-        const auto entity = state_.entities.find("npc:" + id);
+        const auto entity = state_.entities.find(npcEntityId(id));
         if (entity != state_.entities.end() && entity->second.lifecycle != EntityLifecycle::Active) continue;
-        std::string scheduledLocation = npc.definition.home;
-        for (const auto& authored : content_.npcs) {
-            if (authored.definition.id != npc.definition.id) continue;
-            for (const auto& slot : authored.schedule) {
+        std::string scheduledLocation = authored != nullptr ? authored->definition.home : npc.location;
+        if (authored != nullptr) {
+            for (const auto& slot : authored->schedule) {
                 const bool within = slot.startMinute < slot.endMinute
                                         ? minuteOfDay >= slot.startMinute && minuteOfDay < slot.endMinute
                                         : (slot.startMinute == slot.endMinute || minuteOfDay >= slot.startMinute || minuteOfDay < slot.endMinute);
@@ -301,18 +386,21 @@ void WorldService::processHourBoundary(int day, int hour) {
                     break;
                 }
             }
-            break;
         }
         if (npc.location != scheduledLocation) ++npc.stateVersion;
         npc.location = scheduledLocation;
         npc.scheduleLabel = scheduledLocation;
-        npc.mode = npc.location == npc.definition.home ? "at_home" : "working";
+        if (!npc.activity.process || npc.activity.process->status != ProcessStatus::Running) {
+            const bool atHome = authored != nullptr && npc.location == authored->definition.home;
+            applyNpcSignal(npc, atHome ? NpcSignal::AtHome : NpcSignal::AtWork);
+        }
     }
     for (const auto& activity : content_.activities) {
         if (activity.trigger != "hour" || activity.hour != hour) continue;
         if (!activity.conditionResource.empty() && resourceValue(activity.conditionResource) >= activity.conditionBelow) continue;
         processActivity(activity);
     }
+    processAutonomousTurns();
 }
 
 void WorldService::processActivity(const ActivityContent& activity) {
@@ -327,30 +415,192 @@ void WorldService::processActivity(const ActivityContent& activity) {
     }
 
     Json changes = Json::object();
-    std::set<std::string> relievedActions;
     for (const auto& effect : activity.effects) {
+        if (effect.operation == "relieve_need") {
+            if (activity.actor != kWorldActor) applyNeedRelief(activity.actor, effect.effectAction);
+            continue;
+        }
+        if (effect.operation == "set_link_state") {
+            state_.links[effect.linkId] = RuntimeLinkState{effect.traversable, effect.locked};
+            changes[effect.linkId] = Json{{"traversable", effect.traversable}, {"locked", effect.locked}};
+            continue;
+        }
         const int before = resourceValue(effect.resource);
-        const int reservedBefore = state_.resources.at(effect.resource).reserved;
-        if (effect.operation == "consume_resource") {
-            setResource(effect.resource, before - effect.amount);
-        } else if (effect.operation == "produce_resource") {
-            setResource(effect.resource, before + effect.amount);
-        } else if (effect.operation == "reserve_resource") {
-            state_.resources[effect.resource].reserved += effect.amount;
-        } else if (effect.operation == "release_resource") {
+        if (effect.operation == "consume_resource") setResource(effect.resource, before - effect.amount);
+        if (effect.operation == "produce_resource") setResource(effect.resource, before + effect.amount);
+        if (effect.operation == "reserve_resource") state_.resources[effect.resource].reserved += effect.amount;
+        if (effect.operation == "release_resource") {
             auto& resource = state_.resources[effect.resource];
             resource.reserved = std::max(0, resource.reserved - effect.amount);
         }
         if (effect.operation != "release_resource") {
             changes[effect.resource] = Json{{"before", before}, {"after", resourceValue(effect.resource)}};
         }
-        if (!effect.effectAction.empty() && relievedActions.insert(effect.effectAction).second &&
-            activity.actor != "world") {
-            applyNeedRelief(activity.actor, effect.effectAction);
-        }
     }
     addEvent(activity.eventType, activity.actor, activity.target, activity.detail,
              Json{{"activity_id", activity.id}, {"changes", changes}});
+}
+
+void WorldService::tickProcesses() {
+    for (auto& [npcId, npc] : state_.npcs) {
+        if (npc.activity.status != ActivityStatus::Active ||
+            !npc.activity.process || npc.activity.process->status != ProcessStatus::Running) {
+            continue;
+        }
+        auto& process = *npc.activity.process;
+        const auto duration = std::max<std::int64_t>(1, process.completesAt.minute - process.startedAt.minute);
+        process.progress = std::clamp(static_cast<double>(state_.now.minute - process.startedAt.minute) /
+                                          static_cast<double>(duration),
+                                      0.0, 1.0);
+        double interruptSalience = 0.0;
+        for (const auto& stimulus : npc.stimuli) {
+            if (!stimulus.active || stimulus.observedAt.minute <= process.startedAt.minute) continue;
+            interruptSalience = std::max(interruptSalience, stimulus.effectiveSalience);
+        }
+        if (process.interruptible &&
+            interruptSalience >= std::max(process.interruptSalienceThreshold,
+                                          content_.npcDeliberation.minInterruptSalience)) {
+            suspendProcess(npcId, process, "new_high_salience_stimulus");
+            continue;
+        }
+        if (state_.now.minute < process.completesAt.minute) continue;
+        const auto completed = *npc.activity.process;
+        completeProcess(npcId, completed);
+    }
+}
+
+void WorldService::resumeSuspendedProcesses() {
+    for (auto& [npcId, npc] : state_.npcs) {
+        if (npc.activity.status != ActivityStatus::Suspended || !npc.activity.process) continue;
+        auto& process = *npc.activity.process;
+        double highestSalience = 0.0;
+        for (const auto& stimulus : npc.stimuli) {
+            if (stimulus.active && state_.now.minute < stimulus.expiresAt.minute) {
+                highestSalience = std::max(highestSalience, stimulus.effectiveSalience);
+            }
+        }
+        if (highestSalience >= std::max(process.interruptSalienceThreshold,
+                                        content_.npcDeliberation.minInterruptSalience)) continue;
+        bool resourcesAvailable = true;
+        for (const auto& [resource, amount] : process.requiredResources) {
+            if (availableResourceValue(resource) < amount) {
+                resourcesAvailable = false;
+                break;
+            }
+        }
+        if (!resourcesAvailable) continue;
+        for (const auto& [resource, amount] : process.requiredResources) {
+            state_.resources[resource].reserved += amount;
+            process.reservedResources[resource] = amount;
+        }
+        if (process.suspendedAt.minute >= 0) {
+            process.completesAt.minute += state_.now.minute - process.suspendedAt.minute;
+        }
+        process.suspendedAt = GameTime{-1};
+        process.interruptionReason.clear();
+        process.behaviorStatus = "running";
+        setActivityStatus(npc.activity, ActivityStatus::Active);
+        applyNpcSignal(npc, NpcSignal::StartProcess);
+        addEvent("npc.process_resumed", npcId, process.actionId,
+                 "A suspended process resumed after its interruption cleared",
+                 Json{{"process_id", process.id}, {"action_id", process.actionId},
+                      {"completes_at", process.completesAt.minute}});
+    }
+}
+
+void WorldService::releaseReservations(ProcessExecution& process) {
+    for (const auto& [resource, amount] : process.reservedResources) {
+        auto found = state_.resources.find(resource);
+        if (found != state_.resources.end()) found->second.reserved = std::max(0, found->second.reserved - amount);
+    }
+    process.reservedResources.clear();
+}
+
+void WorldService::suspendProcess(const std::string& npcId, ProcessExecution& process,
+                                  const std::string& reason) {
+    releaseReservations(process);
+    process.status = ProcessStatus::Suspended;
+    process.behaviorStatus = "suspended";
+    process.suspendedAt = state_.now;
+    process.interruptionReason = reason;
+    if (auto found = state_.npcs.find(npcId); found != state_.npcs.end() &&
+        found->second.activity.goal && found->second.activity.goal->id == process.goalId) {
+        setActivityStatus(found->second.activity, ActivityStatus::Suspended);
+        applyNpcSignal(found->second, NpcSignal::CancelProcess);
+    }
+    addEvent("npc.process_suspended", npcId, process.actionId,
+             "A process was suspended by a high-salience stimulus",
+             Json{{"process_id", process.id}, {"action_id", process.actionId},
+                  {"reason", reason}, {"progress", process.progress}});
+}
+
+void WorldService::cancelProcess(const std::string& npcId, ProcessExecution& process,
+                                 const std::string& reason) {
+    releaseReservations(process);
+    process.behaviorStatus = "cancelled";
+    process.status = ProcessStatus::Cancelled;
+    process.interruptionReason = reason;
+    if (auto found = state_.npcs.find(npcId); found != state_.npcs.end() && found->second.activity.goal &&
+        found->second.activity.goal->id == process.goalId) {
+        setActivityStatus(found->second.activity, ActivityStatus::Cancelled);
+        applyNpcSignal(found->second, NpcSignal::CancelProcess);
+    }
+    addEvent("npc.process_interrupted", npcId, process.actionId,
+             "A committed process was interrupted before completion",
+             Json{{"process_id", process.id}, {"action_id", process.actionId},
+                  {"reason", reason}, {"progress", process.progress}, {"status", toString(process.status)}});
+}
+
+void WorldService::completeProcess(const std::string& npcId, ProcessExecution process) {
+    auto found = state_.npcs.find(npcId);
+    if (found == state_.npcs.end()) return;
+    const bool applied = applyActionEffects(npcId, process.actionId, &process.reservedResources);
+    process.progress = 1.0;
+    process.status = applied ? ProcessStatus::Completed : ProcessStatus::Failed;
+    process.behaviorStatus = applied ? "success" : "failure";
+    if (!applied) releaseReservations(process);
+    addEvent(applied ? "npc.process_completed" : "npc.process_failed", npcId, process.actionId,
+             applied ? "A committed process completed and its effects were applied"
+                     : "A committed process could not satisfy its completion preconditions",
+             Json{{"process_id", process.id}, {"action_id", process.actionId},
+                  {"started_at", process.startedAt.minute}, {"completed_at", state_.now.minute},
+                  {"progress", process.progress}, {"status", toString(process.status)}});
+    if (found->second.activity.process && found->second.activity.process->id == process.id) {
+        found->second.activity.process = process;
+        setActivityStatus(found->second.activity,
+                          applied ? ActivityStatus::Completed : ActivityStatus::Failed);
+    }
+    applyNpcSignal(found->second, NpcSignal::FinishProcess);
+    const auto* authored = authoredNpc(npcId);
+    applyNpcSignal(found->second, authored != nullptr && found->second.location == authored->definition.home
+                                      ? NpcSignal::AtHome
+                                      : NpcSignal::AtWork);
+    found->second.activity = NpcActivity{};
+    ++found->second.stateVersion;
+}
+
+void WorldService::processAutonomousTurns() {
+    if (!content_.npcDeliberation.enabled) return;
+    for (auto& [npcId, npc] : state_.npcs) {
+        if (!hasNpc(npcId) || npc.activity.status == ActivityStatus::Active) continue;
+        if (npc.lastAutonomousTurn.minute >= 0 &&
+            state_.now.minute - npc.lastAutonomousTurn.minute < content_.npcDeliberation.cooldownMinutes) {
+            continue;
+        }
+        const auto context = decisionContext(npcId);
+        double highestStimulus = 0.0;
+        for (const auto& stimulus : context.stimuli) {
+            highestStimulus = std::max(highestStimulus, stimulus.effectiveSalience);
+        }
+        double highestDrive = 0.0;
+        for (const auto& drive : context.drives) highestDrive = std::max(highestDrive, drive.drive);
+        if (highestStimulus < content_.npcDeliberation.minStimulusSalience &&
+            highestDrive < content_.npcDeliberation.minDrivePressure) {
+            continue;
+        }
+        const auto turn = deliberate(npcId, "high_salience_context");
+        if (turn.accepted) npc.lastAutonomousTurn = state_.now;
+    }
 }
 
 void WorldService::processDayBoundary(int day) {
@@ -360,7 +610,7 @@ void WorldService::processDayBoundary(int day) {
         processActivity(activity);
     }
     for (auto& [id, npc] : state_.npcs) {
-        const auto entity = state_.entities.find("npc:" + id);
+        const auto entity = state_.entities.find(npcEntityId(id));
         if (entity != state_.entities.end() && entity->second.lifecycle != EntityLifecycle::Active) continue;
         ++npc.stateVersion;
         npc.memories.push_back(Memory{"episode", "A day passed while the world kept working.", state_.now, 1.0});
@@ -370,21 +620,23 @@ void WorldService::processDayBoundary(int day) {
     for (const auto& [id, resource] : state_.resources) {
         resources[id] = Json{{"amount", resource.amount}, {"reserved", resource.reserved}};
     }
-    addEvent("life.day", "world", "instance", "The world completes another day",
+    addEvent("life.day", kWorldActor, "instance", "The world completes another day",
              Json{{"day", day}, {"resources", resources}});
 }
 
 void WorldService::reviseNpcStrategies(int day) {
-    auto found = state_.npcs.find("mira");
-    if (found == state_.npcs.end()) return;
-    auto& mira = found->second;
-    if (mira.strategy != "cooperative_transport" && mira.peerTrust["lorn"] >= 0.45) {
-        mira.strategy = "cooperative_transport";
-        mira.goalStage = std::max(mira.goalStage, 2);
-        mira.memories.push_back(Memory{"plan", "Mira trusts Lorn enough to coordinate transport with him.", state_.now, 0.9});
-        ++mira.stateVersion;
-        addEvent("npc.goal_revised", "mira", "lorn", "Mira changes her next-day plan to cooperative transport",
-                 Json{{"strategy", mira.strategy}, {"reason", "repeated_cooperation"}, {"day", day}});
+    for (const auto& rule : content_.strategyRules) {
+        auto found = state_.npcs.find(rule.npcId);
+        if (found == state_.npcs.end() || found->second.strategy == rule.strategy) continue;
+        const auto trust = found->second.peerTrust.find(rule.peerId);
+        if (trust == found->second.peerTrust.end() || trust->second < rule.minPeerTrust) continue;
+        auto& npc = found->second;
+        npc.strategy = rule.strategy;
+        npc.goalStage = std::max(npc.goalStage, rule.goalStage);
+        npc.memories.push_back(Memory{"plan", rule.memory, state_.now, trust->second});
+        ++npc.stateVersion;
+        addEvent(rule.eventType, rule.npcId, rule.peerId, rule.memory,
+                 Json{{"strategy", npc.strategy}, {"rule", rule.id}, {"peer_trust", trust->second}, {"day", day}});
     }
 }
 
@@ -397,11 +649,11 @@ void WorldService::applyPromiseDeadline() {
             auto from = state_.npcs.find(promise.from);
             auto to = state_.npcs.find(promise.to);
             if (from != state_.npcs.end()) {
-                from->second.playerRelation.trust = std::max(0.0, from->second.playerRelation.trust - 0.08);
+                applyRelationshipDelta(from->second.playerRelation, content_.promisePolicy.brokenPromiser);
                 ++from->second.stateVersion;
             }
             if (to != state_.npcs.end()) {
-                to->second.playerRelation.respect = std::max(0.0, to->second.playerRelation.respect - 0.08);
+                applyRelationshipDelta(to->second.playerRelation, content_.promisePolicy.brokenPromisee);
                 ++to->second.stateVersion;
             }
             addEvent("promise.broken", promise.from, promise.to, "A promise reached its deadline", Json{{"promise_id", id}});
@@ -414,7 +666,6 @@ CommandResult WorldService::reject(std::string code, std::string message) const 
 }
 
 CommandResult WorldService::submit(const Command& command) {
-    TransactionScope transaction(*this);
     if (command.expectedWorldRevision != 0 && command.expectedWorldRevision != state_.revision) {
         return reject("state_conflict", "The world changed before this command was committed.");
     }
@@ -426,13 +677,18 @@ CommandResult WorldService::submit(const Command& command) {
         return reject("duplicate_turn", "The turn was already applied.");
     }
     if (command.kind == "advance") {
+        std::int64_t minutes = 0;
         try {
-            const auto minutes = std::stoll(command.detail);
-            advanceMinutes(minutes);
+            minutes = std::stoll(command.detail);
         } catch (...) {
             return reject("invalid_duration", "Advance duration must be minutes.");
         }
-        if (!command.turnId.empty()) state_.processedTurnIds.insert(command.turnId);
+        if (minutes <= 0) return reject("invalid_duration", "Advance duration must be positive minutes.");
+        advanceMinutes(minutes);
+        if (!command.turnId.empty()) {
+            TransactionScope transaction(*this);
+            state_.processedTurnIds.insert(command.turnId);
+        }
         return CommandResult{true, "ok", "World advanced.", std::nullopt};
     }
     if (command.kind == "promise_accept" || command.kind == "promise_refuse" ||
@@ -470,13 +726,13 @@ CommandResult WorldService::createPromise(const std::string& from, const std::st
                                            const std::string& description, int dueInDays,
                                            const std::string& turnId) {
     TransactionScope transaction(*this);
-    const bool validFrom = from == "player" || hasNpc(from);
-    const bool validTo = to == "player" || hasNpc(to);
+    const bool validFrom = from == kPlayerId || hasNpc(from);
+    const bool validTo = to == kPlayerId || hasNpc(to);
     if (!validFrom || !validTo || from == to) return reject("unknown_actor", "Both promise parties must be distinct.");
     if (!turnId.empty() && state_.processedTurnIds.contains(turnId)) return reject("duplicate_turn", "The turn was already applied.");
     const std::string id = "promise-" + std::to_string(state_.promises.size() + 1);
     Promise promise{id, from, to, description,
-                    GameTime{state_.now.minute + static_cast<std::int64_t>(std::max(1, dueInDays)) * 1440},
+                    GameTime{state_.now.minute + static_cast<std::int64_t>(std::max(1, dueInDays)) * kMinutesPerDay},
                     PromiseStatus::Proposed, 0};
     state_.promises.emplace(id, promise);
     if (hasNpc(from)) state_.npcs.at(from).openPromises.push_back(id);
@@ -494,14 +750,14 @@ CommandResult WorldService::decidePromise(const std::string& promiseId, PromiseS
     auto found = state_.promises.find(promiseId);
     if (found == state_.promises.end()) return reject("unknown_promise", "That promise does not exist.");
     auto& promise = found->second;
-    if (actor != "player" && actor != promise.from && actor != promise.to) {
+    if (actor != kPlayerId && actor != promise.from && actor != promise.to) {
         return reject("unauthorized", "Only a promise party can change it.");
     }
     if (promise.status == PromiseStatus::Broken || promise.status == PromiseStatus::Refused || promise.status == PromiseStatus::Fulfilled) {
         return reject("stale_promise", "That promise is already closed.");
     }
     if (decision == PromiseStatus::Renegotiated) {
-        promise.due.minute += 1440;
+        promise.due.minute += content_.promisePolicy.renegotiationExtensionMinutes;
         promise.status = PromiseStatus::Renegotiated;
     } else {
         promise.status = decision;
@@ -512,9 +768,9 @@ CommandResult WorldService::decidePromise(const std::string& promiseId, PromiseS
         ++npc->second.stateVersion;
         npc->second.memories.push_back(Memory{"promise", detail.empty() ? "A promise changed status." : detail, state_.now, 1.0});
         if (decision == PromiseStatus::Refused || decision == PromiseStatus::Broken) {
-            npc->second.playerRelation.trust = std::max(0.0, npc->second.playerRelation.trust - 0.04);
+            applyRelationshipDelta(npc->second.playerRelation, content_.promisePolicy.refusedActor);
         } else {
-            npc->second.playerRelation.trust = std::min(1.0, npc->second.playerRelation.trust + 0.03);
+            applyRelationshipDelta(npc->second.playerRelation, content_.promisePolicy.acceptedActor);
         }
     }
     addEvent("promise." + toString(decision), actor, promiseId, detail.empty() ? "Promise status changed" : detail,
@@ -535,7 +791,7 @@ CommandResult WorldService::createEntity(const std::string& id, const std::strin
     for (auto it = metadata.begin(); it != metadata.end(); ++it) merged[it.key()] = it.value();
     state_.entities.emplace(id, WorldEntityState{id, archetype->kind, EntityLifecycle::Active, std::move(merged)});
     if (!turnId.empty()) state_.processedTurnIds.insert(turnId);
-    addEvent("entity.created", "world", id, "Runtime entity created",
+    addEvent("entity.created", kWorldActor, id, "Runtime entity created",
              Json{{"entity_id", id}, {"archetype", archetypeId}, {"kind", archetype->kind},
                   {"metadata", state_.entities.at(id).metadata}});
     return CommandResult{true, "ok", id, state_.events.back()};
@@ -550,7 +806,7 @@ CommandResult WorldService::setEntityLifecycle(const std::string& id, EntityLife
     if (!turnId.empty() && state_.processedTurnIds.contains(turnId)) return reject("duplicate_turn", "The turn was already applied.");
     found->second.lifecycle = lifecycle;
     if (!turnId.empty()) state_.processedTurnIds.insert(turnId);
-    addEvent("entity.lifecycle", "world", id, "Runtime entity lifecycle changed",
+    addEvent("entity.lifecycle", kWorldActor, id, "Runtime entity lifecycle changed",
              Json{{"entity_id", id}, {"lifecycle", toString(lifecycle)}});
     return CommandResult{true, "ok", toString(lifecycle), state_.events.back()};
 }
@@ -558,13 +814,13 @@ CommandResult WorldService::setEntityLifecycle(const std::string& id, EntityLife
 CommandResult WorldService::setLinkState(const std::string& linkId, bool traversable, bool locked,
                                          const std::string& turnId) {
     TransactionScope transaction(*this);
-    const auto entity = state_.entities.find("link:" + linkId);
+    const auto entity = state_.entities.find(linkEntityId(linkId));
     if (entity == state_.entities.end()) return reject("unknown_link", "That link does not exist.");
     if (entity->second.lifecycle != EntityLifecycle::Active) return reject("inactive_link", "The link is not active.");
     if (!turnId.empty() && state_.processedTurnIds.contains(turnId)) return reject("duplicate_turn", "The turn was already applied.");
     state_.links[linkId] = RuntimeLinkState{traversable, locked};
     if (!turnId.empty()) state_.processedTurnIds.insert(turnId);
-    addEvent("link.state", "world", "link:" + linkId, "Traversal link state changed",
+    addEvent("link.state", kWorldActor, linkEntityId(linkId), "Traversal link state changed",
              Json{{"link_id", linkId}, {"traversable", traversable}, {"locked", locked}});
     return CommandResult{true, "ok", linkId, state_.events.back()};
 }
@@ -574,7 +830,7 @@ std::optional<std::vector<std::string>> WorldService::planRoute(const std::strin
     GlobalPlanner planner;
     for (const auto& spatial : content_.spatialEntities) planner.addNode(spatial.id);
     for (const auto& authored : content_.links) {
-        const auto entity = state_.entities.find("link:" + authored.id);
+        const auto entity = state_.entities.find(linkEntityId(authored.id));
         const auto runtime = state_.links.find(authored.id);
         if (entity != state_.entities.end() && entity->second.lifecycle != EntityLifecycle::Active) continue;
         if (runtime != state_.links.end() && (!runtime->second.traversable || runtime->second.locked)) continue;
@@ -589,6 +845,17 @@ std::optional<std::vector<std::string>> WorldService::planRoute(const std::strin
 
 DialogueTurn WorldService::converse(const std::string& npcId, const std::string& playerInput,
                                     const std::string& turnId) {
+    return executeTurn(npcId, playerInput, turnId, "player_dialogue", "dialogue.turn");
+}
+
+DialogueTurn WorldService::deliberate(const std::string& npcId, const std::string& trigger,
+                                      const std::string& turnId) {
+    return executeTurn(npcId, {}, turnId, trigger, "npc.autonomous_intent");
+}
+
+DialogueTurn WorldService::executeTurn(const std::string& npcId, const std::string& input,
+                                       const std::string& turnId, const std::string& trigger,
+                                       const std::string& eventType) {
     TransactionScope transaction(*this);
     DialogueTurn result;
     result.npcId = npcId;
@@ -602,11 +869,11 @@ DialogueTurn WorldService::converse(const std::string& npcId, const std::string&
         return result;
     }
     const auto context = decisionContext(npcId);
-    auto response = provider_->decide(context, playerInput);
+    auto response = provider_->decide(context, input);
     if (!response.ok) {
         // Rule fallback keeps the world playable when the local server is down.
         const std::string providerError = response.error;
-        response = MockProvider{}.decide(context, playerInput);
+        response = MockProvider{}.decide(context, input);
         result.provider += "+fallback";
         result.error = "provider_fallback:" + providerError;
     }
@@ -619,23 +886,109 @@ DialogueTurn WorldService::converse(const std::string& npcId, const std::string&
         result.error = "invalid_intent_confidence";
         return result;
     }
+    for (const auto& stimulusId : response.proposal.citedStimulusIds) {
+        const auto foundStimulus = std::find_if(context.stimuli.begin(), context.stimuli.end(),
+                                                [&stimulusId](const auto& stimulus) { return stimulus.id == stimulusId; });
+        if (foundStimulus == context.stimuli.end()) {
+            result.error = "unknown_stimulus_citation";
+            return result;
+        }
+    }
+    for (const auto& [needId, expected] : response.proposal.expectedRelief) {
+        if (expected < 0.0 || expected > 1.0 || !state_.npcs.at(npcId).needs.contains(needId)) {
+            result.error = "invalid_expected_relief";
+            return result;
+        }
+    }
     const auto validation = ActionValidator::validate(context, response.proposal.actionId);
     if (!validation.valid) {
         result.error = validation.code;
         return result;
     }
-    if (!applyActionEffects(npcId, response.proposal.actionId)) {
+    const auto candidate = std::find_if(context.candidates.begin(), context.candidates.end(),
+                                        [&response](const auto& item) {
+                                            return item.actionId == response.proposal.actionId;
+                                        });
+    if (candidate == context.candidates.end()) {
+        result.error = "unknown_action_id";
+        return result;
+    }
+    auto& npc = state_.npcs.at(npcId);
+    if (npc.activity.process) {
+        double incomingSalience = trigger == "player_dialogue" ? 1.0 : 0.0;
+        for (const auto& stimulus : context.stimuli) {
+            incomingSalience = std::max(incomingSalience, stimulus.effectiveSalience);
+        }
+        if (!npc.activity.process->interruptible ||
+            incomingSalience < npc.activity.process->interruptSalienceThreshold) {
+            result.error = "npc_busy";
+            return result;
+        }
+        cancelProcess(npcId, *npc.activity.process, trigger);
+        npc.activity = NpcActivity{};
+    }
+    std::map<std::string, int> reservations;
+    if (candidate->durationMinutes > 0) {
+        for (const auto& activity : content_.activities) {
+            for (const auto& effect : activity.effects) {
+                if (effect.effectAction == candidate->actionId && effect.operation == "consume_resource") {
+                    reservations[effect.resource] += effect.amount;
+                }
+            }
+        }
+        for (const auto& [resource, amount] : reservations) {
+            if (availableResourceValue(resource) < amount) {
+                result.error = "insufficient_resource";
+                return result;
+            }
+        }
+    }
+    const std::string processId =
+        "process:" + npcId + ":" + (turnId.empty() ? std::to_string(state_.events.size() + 1) : turnId);
+    if (candidate->durationMinutes <= 0 && !applyActionEffects(npcId, candidate->actionId)) {
         result.error = "insufficient_resource";
         return result;
     }
     result.accepted = true;
     if (!turnId.empty()) state_.processedTurnIds.insert(turnId);
-    ++state_.npcs.at(npcId).stateVersion;
-    state_.npcs.at(npcId).memories.push_back(Memory{"conversation", playerInput, state_.now, 1.0});
-    addEvent("dialogue.turn", npcId, "player", response.dialogue,
-             Json{{"turn_id", turnId}, {"action_id", response.proposal.actionId},
+    ++npc.stateVersion;
+    if (candidate->durationMinutes > 0) {
+        for (const auto& [resource, amount] : reservations) state_.resources[resource].reserved += amount;
+        const std::string goalId = "goal:" + npcId + ":" + processId.substr(processId.find(':') + 1);
+        npc.activity.goal = GoalState{goalId, response.proposal.intent, candidate->actionId,
+                                  response.proposal.confidence, GoalStatus::Active, state_.now,
+                                  GameTime{state_.now.minute + candidate->durationMinutes},
+                                  response.proposal.rationale};
+        ProcessExecution process;
+        process.id = processId;
+        process.goalId = goalId;
+        process.actionId = candidate->actionId;
+        process.planId = candidate->planId;
+        process.trigger = trigger;
+        process.startedAt = state_.now;
+        process.completesAt = GameTime{state_.now.minute + candidate->durationMinutes};
+        process.behaviorNodeId = candidate->planId;
+        process.interruptible = candidate->interruptible;
+        process.interruptSalienceThreshold = candidate->interruptSalienceThreshold;
+        process.reservedResources = reservations;
+        process.requiredResources = reservations;
+        process.proposalWorldRevision = response.proposal.worldRevision;
+        process.proposalNpcStateVersion = response.proposal.npcStateVersion;
+        npc.activity.process = std::move(process);
+        setActivityStatus(npc.activity, ActivityStatus::Active);
+        applyNpcSignal(npc, NpcSignal::StartProcess);
+    }
+    npc.memories.push_back(Memory{trigger == "player_dialogue" ? "conversation" : "intent",
+                                  input.empty() ? response.proposal.intent : input, state_.now, 1.0});
+    addEvent(eventType, npcId, trigger == "player_dialogue" ? kPlayerId : "self", response.dialogue,
+             Json{{"turn_id", turnId}, {"process_id", processId}, {"action_id", response.proposal.actionId},
+                  {"trigger", trigger}, {"duration_minutes", candidate->durationMinutes},
+                  {"process_status", candidate->durationMinutes > 0 ? "running" : "completed"},
                   {"intent", response.proposal.intent}, {"motivation", response.proposal.rationale},
                   {"expected_outcome", response.proposal.expectedOutcome},
+                  {"cited_stimulus_ids", response.proposal.citedStimulusIds},
+                  {"tradeoffs", response.proposal.tradeoffs},
+                  {"expected_relief", response.proposal.expectedRelief},
                   {"confidence", response.proposal.confidence}, {"provider", result.provider},
                   {"context_world_revision", response.proposal.worldRevision},
                   {"context_npc_state_version", response.proposal.npcStateVersion}});
@@ -673,6 +1026,11 @@ const NpcContent* WorldService::authoredNpc(const std::string& npcId) const {
 }
 
 bool WorldService::applyActionEffects(const std::string& npcId, const std::string& actionId) {
+    return applyActionEffects(npcId, actionId, nullptr);
+}
+
+bool WorldService::applyActionEffects(const std::string& npcId, const std::string& actionId,
+                                      const std::map<std::string, int>* reservedResources) {
     std::map<std::string, int> required;
     for (const auto& activity : content_.activities) {
         for (const auto& effect : activity.effects) {
@@ -683,13 +1041,35 @@ bool WorldService::applyActionEffects(const std::string& npcId, const std::strin
         }
     }
     for (const auto& [resource, amount] : required) {
-        if (availableResourceValue(resource) < amount) return false;
+        if (reservedResources != nullptr) {
+            const auto reserved = reservedResources->find(resource);
+            if (reserved == reservedResources->end() || reserved->second < amount) return false;
+        } else if (availableResourceValue(resource) < amount) {
+            return false;
+        }
     }
     for (const auto& activity : content_.activities) {
         for (const auto& effect : activity.effects) {
             if (effect.effectAction != actionId) continue;
+            if (effect.operation == "relieve_need") {
+                applyNeedRelief(npcId, actionId);
+                continue;
+            }
+            if (effect.operation == "set_link_state") {
+                state_.links[effect.linkId] = RuntimeLinkState{effect.traversable, effect.locked};
+                addEvent("action.structure", npcId, effect.linkId, "Authored action changed a traversal link",
+                         Json{{"action_id", actionId}, {"link_id", effect.linkId},
+                              {"traversable", effect.traversable}, {"locked", effect.locked}});
+                continue;
+            }
             const int before = resourceValue(effect.resource);
-            if (effect.operation == "consume_resource") setResource(effect.resource, before - effect.amount);
+            if (effect.operation == "consume_resource") {
+                setResource(effect.resource, before - effect.amount);
+                if (reservedResources != nullptr) {
+                    auto& reserved = state_.resources[effect.resource].reserved;
+                    reserved = std::max(0, reserved - effect.amount);
+                }
+            }
             if (effect.operation == "produce_resource") setResource(effect.resource, before + effect.amount);
             if (effect.operation == "reserve_resource") state_.resources[effect.resource].reserved += effect.amount;
             if (effect.operation == "release_resource") {
@@ -703,7 +1083,6 @@ bool WorldService::applyActionEffects(const std::string& npcId, const std::strin
             }
         }
     }
-    applyNeedRelief(npcId, actionId);
     return true;
 }
 
@@ -711,13 +1090,112 @@ void WorldService::applyNeedRelief(const std::string& npcId, const std::string& 
     const auto* authored = authoredNpc(npcId);
     const auto npc = state_.npcs.find(npcId);
     if (authored == nullptr || npc == state_.npcs.end()) return;
-    const auto changes = DriveSystem::relieve(npc->second, authored->needs, actionId, state_.now);
+    const auto changes = DriveSystem::relieve(npc->second, authored->needs, actionId, state_.now,
+                                              content_.driveAdaptation);
     for (const auto& change : changes) {
         npc->second.needs.at(change.needId).lastReliefRevision = state_.revision + 1;
         addEvent("need.relieved", npcId, actionId, "A committed action relieved a need",
                  Json{{"need_id", change.needId}, {"action_id", actionId},
                       {"before", change.before}, {"after", change.after},
+                      {"expected_relief", change.expectedRelief}, {"actual_relief", change.actualRelief},
                       {"rule", "drive.committed_action"}, {"source_revision", state_.revision + 1}});
+        if (change.adapted) {
+            addEvent("drive.adapted", npcId, change.needId, "Predicted need relief was calibrated from its outcome",
+                     Json{{"need_id", change.needId}, {"action_id", actionId},
+                          {"expectation_before", change.expectationBefore},
+                          {"expectation_after", change.expectationAfter},
+                          {"actual_relief", change.actualRelief},
+                          {"adaptation_version", npc->second.needs.at(change.needId).adaptationVersion},
+                          {"rule", "drive.bounded_expectation_adaptation"}});
+        }
+    }
+}
+
+void WorldService::projectStimuli(const WorldEvent& event) {
+    const WorldEvent source = event;
+    const auto rule = std::find_if(content_.stimulusRules.begin(), content_.stimulusRules.end(),
+                                   [&source](const auto& candidate) {
+                                       return source.type.starts_with(candidate.eventPrefix);
+                                   });
+    if (rule == content_.stimulusRules.end()) return;
+    for (auto& [npcId, npc] : state_.npcs) {
+        const auto entity = state_.entities.find(npcEntityId(npcId));
+        if (entity != state_.entities.end() && entity->second.lifecycle != EntityLifecycle::Active) continue;
+        const bool participant = source.actor == npcId || source.target == npcId;
+        const bool visible = rule->visibility == "world" ||
+                             (rule->visibility == "participants" && participant) ||
+                             (rule->visibility == "actor" && source.actor == npcId) ||
+                             (rule->visibility == "target" && source.target == npcId);
+        if (!visible) continue;
+        auto sensitivity = npc.stimulusSensitivity.find(rule->category);
+        if (sensitivity == npc.stimulusSensitivity.end()) {
+            sensitivity = npc.stimulusSensitivity.emplace(rule->category, content_.stimulusPolicy.maxSensitivity).first;
+        }
+        const std::int64_t windowStart = state_.now.minute - content_.stimulusPolicy.repeatWindowMinutes;
+        const int repetitions = static_cast<int>(std::count_if(
+            npc.stimuli.begin(), npc.stimuli.end(), [&](const auto& prior) {
+                return prior.active && prior.category == rule->category && prior.actor == source.actor &&
+                       prior.observedAt.minute >= windowStart;
+            }));
+        std::erase_if(npc.stimuli, [this](const auto& stimulus) {
+            return !stimulus.active && state_.now.minute - stimulus.expiresAt.minute > 0;
+        });
+        while (npc.stimuli.size() >= content_.stimulusPolicy.maxActivePerNpc) {
+            auto oldest = std::min_element(npc.stimuli.begin(), npc.stimuli.end(),
+                                           [](const auto& left, const auto& right) {
+                                               if (left.effectiveSalience == right.effectiveSalience) {
+                                                   return left.observedAt.minute < right.observedAt.minute;
+                                               }
+                                               return left.effectiveSalience < right.effectiveSalience;
+                                           });
+            if (oldest == npc.stimuli.end()) break;
+            npc.stimuli.erase(oldest);
+        }
+        const double novelty = std::pow(content_.stimulusPolicy.noveltyDecay,
+                                        std::max(0, repetitions));
+        const double sensitivityBefore = sensitivity->second;
+        if (repetitions > 0) {
+            sensitivity->second = std::clamp(
+                sensitivityBefore - content_.stimulusPolicy.habituationStep * repetitions,
+                content_.stimulusPolicy.minSensitivity, content_.stimulusPolicy.maxSensitivity);
+            if (std::abs(sensitivity->second - sensitivityBefore) >= 0.000001) {
+                addEvent("stimulus.habituated", npcId, rule->category,
+                         "Repeated stimuli reduced this character's sensitivity",
+                         Json{{"category", rule->category}, {"source_type", source.type},
+                              {"repetitions", repetitions}, {"before", sensitivityBefore},
+                              {"after", sensitivity->second}, {"rule", rule->id}});
+            }
+        }
+        const double salience = std::clamp(rule->relevance * rule->intensity * rule->urgency *
+                                               novelty * rule->sourceConfidence, 0.0, 1.0);
+        ExternalStimulus stimulus;
+        stimulus.id = "stimulus:" + std::to_string(source.sequence) + ":" + npcId;
+        stimulus.sourceEvent = source.type;
+        stimulus.sourceSequence = source.sequence;
+        stimulus.category = rule->category;
+        stimulus.actor = source.actor;
+        stimulus.target = source.target;
+        stimulus.observedAt = state_.now;
+        stimulus.expiresAt = GameTime{state_.now.minute + rule->ttlMinutes};
+        stimulus.visibilityScope = rule->visibility;
+        stimulus.sourceConfidence = rule->sourceConfidence;
+        stimulus.relevance = rule->relevance;
+        stimulus.intensity = rule->intensity;
+        stimulus.urgency = rule->urgency;
+        stimulus.novelty = novelty;
+        stimulus.valence = rule->valence;
+        stimulus.salience = salience;
+        stimulus.effectiveSalience = salience * sensitivity->second;
+        npc.stimuli.push_back(std::move(stimulus));
+    }
+}
+
+void WorldService::expireStimuli() {
+    for (auto& [id, npc] : state_.npcs) {
+        (void)id;
+        for (auto& stimulus : npc.stimuli) {
+            if (stimulus.active && state_.now.minute >= stimulus.expiresAt.minute) stimulus.active = false;
+        }
     }
 }
 
@@ -726,10 +1204,13 @@ void WorldService::addEvent(std::string type, std::string actor, std::string tar
     ++state_.revision;
     state_.events.push_back(WorldEvent{1, state_.events.size() + 1, state_.now, std::move(type), std::move(actor),
                                        std::move(target), std::move(detail), state_.revision, std::move(data)});
+    const WorldEvent committed = state_.events.back();
     if (transactionDepth_ > 0) {
-        deferredEvents_.push_back(state_.events.back());
+        deferredEvents_.push_back(committed);
+        projectStimuli(committed);
     } else {
-        eventBus_.publish(state_.events.back());
+        projectStimuli(committed);
+        eventBus_.publish(committed);
         eventBus_.dispatch();
     }
 }
@@ -753,7 +1234,39 @@ WorldService WorldService::fromSnapshot(const Json& json, std::string contentRoo
                                         std::unique_ptr<IProvider> provider) {
     WorldService service(std::move(provider));
     service.content_ = ContentPackLoader::load(contentRoot);
-    service.state_ = deserializeWorldState(json.contains("state") ? json.at("state") : json);
+    const auto& snapshot = json.contains("state") ? json.at("state") : json;
+    if (!snapshot.is_object() || !snapshot.contains("save_schema_version") ||
+        !snapshot.at("save_schema_version").is_number_integer() ||
+        snapshot.at("save_schema_version").get<int>() != 10) {
+        throw std::runtime_error("unsupported snapshot schema; expected save_schema_version=10");
+    }
+    if (!snapshot.contains("simulation_version") || !snapshot.at("simulation_version").is_string() ||
+        snapshot.at("simulation_version") != "adaptive-runtime-p0.10") {
+        throw std::runtime_error("unsupported snapshot simulation version; expected adaptive-runtime-p0.10");
+    }
+    service.state_ = deserializeWorldState(snapshot);
+    for (const auto& [id, npc] : service.state_.npcs) {
+        if (npc.definitionId.empty() || service.authoredNpc(npc.definitionId) == nullptr) {
+            throw std::runtime_error("snapshot references unknown npc definition: " + npc.definitionId);
+        }
+    }
+    const std::string expectedInstanceId = service.content_.instance ? service.content_.instance->id : "default";
+    if (service.state_.instanceId.empty() || service.state_.instanceId != expectedInstanceId) {
+        throw std::runtime_error("snapshot instance " + service.state_.instanceId +
+                                 " does not match loaded instance " + expectedInstanceId);
+    }
+    const std::string expectedWorldId = service.content_.instance && !service.content_.instance->worldId.empty()
+                                            ? service.content_.instance->worldId
+                                            : service.content_.worldId;
+    if (service.state_.worldId.empty() || service.state_.worldId != expectedWorldId) {
+        throw std::runtime_error("snapshot world " + service.state_.worldId +
+                                 " does not match loaded world " + expectedWorldId);
+    }
+    if (service.state_.contentVersion.empty() ||
+        service.state_.contentVersion != service.content_.contentVersion) {
+        throw std::runtime_error("snapshot content version " + service.state_.contentVersion +
+                                 " does not match loaded content " + service.content_.contentVersion);
+    }
     service.rebuildEntityRegistry();
     return service;
 }

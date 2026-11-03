@@ -3,12 +3,16 @@
 #include <nlohmann/json.hpp>
 #include <cstdint>
 #include <map>
+#include <optional>
 #include <set>
 #include <string>
 #include <vector>
 
 namespace tide_marks {
 using Json = nlohmann::json;
+
+inline constexpr std::int64_t kMinutesPerHour = 60;
+inline constexpr std::int64_t kMinutesPerDay = 1440;
 
 struct GameTime {
     std::int64_t minute{0};
@@ -53,10 +57,106 @@ struct NeedState {
     double deficit{0.0};
     GameTime lastUpdated;
     std::uint64_t lastReliefRevision{0};
+    double sensitivity{1.0};
+    std::map<std::string, double> expectedRelief;
+    double evidenceConfidence{1.0};
+    std::uint64_t adaptationVersion{0};
+    GameTime lastAdapted;
 };
 
+struct ExternalStimulus {
+    std::string id;
+    std::string sourceEvent;
+    std::uint64_t sourceSequence{0};
+    std::string category;
+    std::string actor;
+    std::string target;
+    GameTime observedAt;
+    GameTime expiresAt;
+    std::string visibilityScope;
+    double sourceConfidence{1.0};
+    double relevance{1.0};
+    double intensity{1.0};
+    double urgency{1.0};
+    double novelty{1.0};
+    double valence{0.0};
+    double salience{0.0};
+    double effectiveSalience{0.0};
+    bool active{true};
+};
+
+enum class ProcessStatus { Running, Suspended, Completed, Failed, Cancelled };
+
+std::string toString(ProcessStatus status);
+ProcessStatus processStatusFromString(const std::string& value);
+
+enum class GoalStatus { Proposed, Active, Suspended, Completed, Failed, Cancelled };
+
+std::string toString(GoalStatus status);
+GoalStatus goalStatusFromString(const std::string& value);
+
+// Goal and ProcessExecution are views over one activity lifecycle. The
+// NpcActivity phase below is the only lifecycle authority.
+struct GoalState {
+    std::string id;
+    std::string intent;
+    std::string target;
+    double priority{0.0};
+    GoalStatus status{GoalStatus::Proposed};
+    GameTime createdAt;
+    GameTime deadline;
+    std::string reason;
+};
+
+// A process is the durable execution state of an accepted intent.  It is
+// deliberately separate from a transaction: each start, progress, interrupt,
+// and completion is a short transaction; the process spans game time.
+struct ProcessExecution {
+    std::string id;
+    std::string goalId;
+    std::string actionId;
+    std::string planId;
+    std::string trigger;
+    GameTime startedAt;
+    GameTime completesAt;
+    GameTime suspendedAt{-1};
+    double progress{0.0};
+    ProcessStatus status{ProcessStatus::Running};
+    std::string behaviorNodeId;
+    std::size_t behaviorStep{0};
+    std::string behaviorStatus{"running"};
+    std::string interruptionReason;
+    bool interruptible{true};
+    double interruptSalienceThreshold{1.0};
+    std::map<std::string, int> reservedResources;
+    std::map<std::string, int> requiredResources;
+    std::uint64_t proposalWorldRevision{0};
+    std::uint64_t proposalNpcStateVersion{0};
+};
+
+enum class ActivityStatus { Proposed, Active, Suspended, Completed, Failed, Cancelled };
+
+std::string toString(ActivityStatus status);
+ActivityStatus activityStatusFromString(const std::string& value);
+
+// One activity slot per NPC. ActivityStatus is the lifecycle authority; Goal and
+// ProcessExecution carry the reason and timed work, while FSM mode and BT status
+// are projections derived from this slot by WorldService.
+struct NpcActivity {
+    ActivityStatus status{ActivityStatus::Proposed};
+    std::optional<GoalState> goal;
+    std::optional<ProcessExecution> process;
+};
+
+// The only operation that changes the lifecycle phase. It keeps Goal and
+// ProcessExecution status fields as projections of the same activity phase.
+void setActivityStatus(NpcActivity& activity, ActivityStatus status);
+
 struct NpcState {
-    NpcDefinition definition;
+    // Only the content-pack reference lives in runtime state. Static authored
+    // data is resolved through WorldContentPack, so content updates are never
+    // shadowed by a stale copy inside a save.
+    std::string definitionId;
     std::string location;
     std::string scheduleLabel;
     int goalStage{0};
@@ -68,6 +168,10 @@ struct NpcState {
     std::string mode{"working"};
     std::string strategy{"routine"};
     std::map<std::string, double> peerTrust;
+    std::map<std::string, double> stimulusSensitivity;
+    std::vector<ExternalStimulus> stimuli;
+    GameTime lastAutonomousTurn{-1};
+    NpcActivity activity;
 };
 
 enum class PromiseStatus { Proposed, Accepted, Renegotiated, Refused, Fulfilled, Broken };
@@ -120,7 +224,10 @@ struct WorldEvent {
 
 struct WorldState {
     std::string worldId{"world"};
-    std::string contentVersion{"village-p0.2"};
+    // The concrete Game Instance is part of runtime identity.  A snapshot may
+    // only be resumed with the same instance definition and content version.
+    std::string instanceId{"default"};
+    std::string contentVersion;
     GameTime now;
     std::uint64_t revision{0};
     std::map<std::string, ResourceState> resources;

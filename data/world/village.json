@@ -1,6 +1,48 @@
 {
+  "kind": "world",
   "content_version": "village-p0.2",
   "initial_time": {"day": 1, "hour": 6},
+  "drive_adaptation": {
+    "enabled": true,
+    "expectation_learning_rate": 0.25,
+    "max_expectation_step": 0.05,
+    "cooldown_minutes": 60
+  },
+  "stimulus_policy": {
+    "max_active_per_npc": 32,
+    "novelty_decay": 0.55,
+    "habituation_step": 0.08,
+    "min_sensitivity": 0.40,
+    "max_sensitivity": 1.20,
+    "repeat_window_minutes": 720
+  },
+  "npc_deliberation": {
+    "enabled": true,
+    "min_stimulus_salience": 0.65,
+    "min_drive_pressure": 0.75,
+    "min_interrupt_salience": 0.85,
+    "cooldown_minutes": 360
+  },
+  "promise_policy": {
+    "renegotiation_extension_minutes": 1440,
+    "broken": {
+      "promiser": {"trust": -0.08},
+      "promisee": {"respect": -0.08}
+    },
+    "refused": {"actor": {"trust": -0.04}},
+    "accepted": {"actor": {"trust": 0.03}}
+  },
+  "stimulus_rules": [
+    {"id": "dialogue", "event_prefix": "dialogue.", "category": "social_exchange", "visibility": "participants", "relevance": 0.95, "intensity": 0.65, "urgency": 0.55, "valence": 0.15, "source_confidence": 1.0, "ttl_minutes": 720},
+    {"id": "promise_broken", "event_prefix": "promise.broken", "category": "social_threat", "visibility": "participants", "relevance": 1.0, "intensity": 0.95, "urgency": 0.95, "valence": -0.9, "source_confidence": 1.0, "ttl_minutes": 2880},
+    {"id": "promise", "event_prefix": "promise.", "category": "social_obligation", "visibility": "participants", "relevance": 0.95, "intensity": 0.75, "urgency": 0.70, "valence": 0.25, "source_confidence": 1.0, "ttl_minutes": 1440},
+    {"id": "ration", "event_prefix": "life.ration", "category": "resource_change", "visibility": "world", "relevance": 0.80, "intensity": 0.75, "urgency": 0.55, "valence": -0.10, "source_confidence": 1.0, "ttl_minutes": 720},
+    {"id": "repair", "event_prefix": "life.repair", "category": "environment_repair", "visibility": "world", "relevance": 0.70, "intensity": 0.65, "urgency": 0.40, "valence": 0.60, "source_confidence": 1.0, "ttl_minutes": 720},
+    {"id": "clue", "event_prefix": "life.clue", "category": "epistemic_opportunity", "visibility": "world", "relevance": 0.85, "intensity": 0.70, "urgency": 0.45, "valence": 0.45, "source_confidence": 1.0, "ttl_minutes": 1440},
+    {"id": "life", "event_prefix": "life.", "category": "environment_event", "visibility": "world", "relevance": 0.60, "intensity": 0.50, "urgency": 0.35, "valence": 0.0, "source_confidence": 1.0, "ttl_minutes": 360},
+    {"id": "structure", "event_prefix": "link.", "category": "structural_change", "visibility": "world", "relevance": 0.75, "intensity": 0.70, "urgency": 0.55, "valence": 0.0, "source_confidence": 1.0, "ttl_minutes": 720},
+    {"id": "entity", "event_prefix": "entity.", "category": "structural_change", "visibility": "world", "relevance": 0.70, "intensity": 0.60, "urgency": 0.35, "valence": 0.0, "source_confidence": 1.0, "ttl_minutes": 720}
+  ],
   "id": "village_tidemark",
   "display_name": "Tidemark Village",
   "locations": ["granary", "village_square", "ferry_dock", "archive", "mira_home", "lorn_house", "archive_room"],
@@ -21,7 +63,8 @@
       "event_type": "life.ration",
       "detail": "Mira records the morning ration",
       "effects": [
-        {"operation": "consume_resource", "resource": "grain", "amount": 5, "action": "offer_ration"}
+        {"operation": "consume_resource", "resource": "grain", "amount": 5, "action": "offer_ration"},
+        {"operation": "relieve_need", "action": "offer_ration"}
       ]
     },
     {
@@ -37,7 +80,8 @@
       "effects": [
         {"operation": "consume_resource", "resource": "grain", "amount": 5, "action": "repair_ferry"},
         {"operation": "produce_resource", "resource": "boat_integrity", "amount": 8, "action": "repair_ferry"},
-        {"operation": "produce_resource", "resource": "cooperation", "amount": 1}
+        {"operation": "produce_resource", "resource": "cooperation", "amount": 1},
+        {"operation": "relieve_need", "action": "repair_ferry"}
       ]
     },
     {
@@ -49,7 +93,140 @@
       "event_type": "life.archive",
       "detail": "Eve indexes the tide registry",
       "effects": [
-        {"operation": "produce_resource", "resource": "records_integrity", "amount": 2, "action": "share_record"}
+        {"operation": "produce_resource", "resource": "records_integrity", "amount": 2, "action": "share_record"},
+        {"operation": "relieve_need", "action": "share_record"}
+      ]
+    },
+    {
+      "id": "mira_private_record",
+      "trigger": "hour",
+      "hour": 9,
+      "actor": "mira",
+      "target": "self",
+      "event_type": "life.protect_secret",
+      "detail": "Mira protects the undocumented family record",
+      "effects": [
+        {"operation": "relieve_need", "action": "protect_secret"}
+      ]
+    },
+    {
+      "id": "mira_explains_ration",
+      "trigger": "hour",
+      "hour": 9,
+      "actor": "mira",
+      "target": "village",
+      "event_type": "life.explain_ration",
+      "detail": "Mira explains the ration decision to the village",
+      "effects": [
+        {"operation": "relieve_need", "action": "explain_ration"}
+      ]
+    },
+    {
+      "id": "lorn_offers_crossing",
+      "trigger": "hour",
+      "hour": 11,
+      "actor": "lorn",
+      "target": "village",
+      "event_type": "life.crossing",
+      "detail": "Lorn keeps the crossing open",
+      "effects": [
+        {"operation": "relieve_need", "action": "offer_crossing"}
+      ]
+    },
+    {
+      "id": "lorn_asks_debt",
+      "trigger": "hour",
+      "hour": 12,
+      "actor": "lorn",
+      "target": "village",
+      "event_type": "life.debt",
+      "detail": "Lorn asks the village to settle its ferry debt",
+      "effects": [
+        {"operation": "relieve_need", "action": "ask_debt"}
+      ]
+    },
+    {
+      "id": "eve_withholds_record",
+      "trigger": "hour",
+      "hour": 15,
+      "actor": "eve",
+      "target": "archive",
+      "event_type": "life.withhold",
+      "detail": "Eve keeps a fragile record out of circulation",
+      "effects": [
+        {"operation": "relieve_need", "action": "withhold_record"}
+      ]
+    },
+    {
+      "id": "eve_reveals_clue",
+      "trigger": "hour",
+      "hour": 16,
+      "actor": "eve",
+      "target": "village",
+      "event_type": "life.clue",
+      "detail": "Eve shares a clue about the hidden family line",
+      "effects": [
+        {"operation": "relieve_need", "action": "reveal_clue"}
+      ]
+    },
+    {
+      "id": "mira_rest",
+      "trigger": "hour",
+      "hour": 22,
+      "actor": "mira",
+      "target": "mira_home",
+      "event_type": "life.rest",
+      "detail": "Mira rests after the day's work",
+      "effects": [
+        {"operation": "relieve_need", "action": "rest"}
+      ]
+    },
+    {
+      "id": "lorn_rest",
+      "trigger": "hour",
+      "hour": 22,
+      "actor": "lorn",
+      "target": "lorn_house",
+      "event_type": "life.rest",
+      "detail": "Lorn rests after the last crossing",
+      "effects": [
+        {"operation": "relieve_need", "action": "rest"}
+      ]
+    },
+    {
+      "id": "eve_rest",
+      "trigger": "hour",
+      "hour": 22,
+      "actor": "eve",
+      "target": "archive_room",
+      "event_type": "life.rest",
+      "detail": "Eve rests after closing the archive",
+      "effects": [
+        {"operation": "relieve_need", "action": "rest"}
+      ]
+    },
+    {
+      "id": "ferry_link_night_close",
+      "trigger": "hour",
+      "hour": 20,
+      "actor": "world",
+      "target": "ferry_square",
+      "event_type": "structure.ferry_closed",
+      "detail": "The ferry crossing closes for the night",
+      "effects": [
+        {"operation": "set_link_state", "link": "ferry_square", "traversable": false, "locked": false}
+      ]
+    },
+    {
+      "id": "ferry_link_morning_open",
+      "trigger": "hour",
+      "hour": 6,
+      "actor": "world",
+      "target": "ferry_square",
+      "event_type": "structure.ferry_opened",
+      "detail": "The ferry crossing opens for the day",
+      "effects": [
+        {"operation": "set_link_state", "link": "ferry_square", "traversable": true, "locked": false}
       ]
     },
     {
@@ -62,6 +239,18 @@
       "effects": [
         {"operation": "consume_resource", "resource": "boat_integrity", "amount": 3}
       ]
+    }
+  ],
+  "strategy_rules": [
+    {
+      "id": "mira_coordinates_with_lorn",
+      "npc": "mira",
+      "peer": "lorn",
+      "min_peer_trust": 0.45,
+      "strategy": "cooperative_transport",
+      "goal_stage": 2,
+      "memory": "Mira trusts Lorn enough to coordinate transport with him.",
+      "event_type": "npc.goal_revised"
     }
   ],
   "entity_archetypes": [
