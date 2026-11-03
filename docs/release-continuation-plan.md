@@ -128,6 +128,8 @@ ctest --test-dir build --output-on-failure
 
 使用 llama.cpp 的 `Huihui-Qwen3.5-4B-abliterated.Q4_K_M`、OpenAI-compatible `/v1/chat/completions` 和 JSON Schema 约束验证 P0 意图输出。结构化短决策默认关闭 thinking；实测关闭 thinking 时返回合法 JSON，并由 Runtime 接受 `offer_ration`。显式设置 `reasoning_budget_tokens=256` 时，llama.cpp 仍正常结束响应，服务端生成量为 426 tokens，说明该字段确实限制思考段而不是被模板静默忽略。小模型不应默认开启长思考：它会显著增加延迟，并可能在 `max_tokens` 用尽前还没有产生最终 JSON。Prompt 同时明确本次请求允许的刺激 ID 和需求 ID，空刺激时强制 `cited_stimulus_ids=[]`，避免模型把需求 ID 当成外部刺激引用。
 
+当前基准的推荐档位是：普通对话关闭 thinking；有社会权衡的决策使用 `reasoning_budget_tokens=128`；低置信度才升级到 256；512 以上留给演化分析。该分档基于同一模型的三类村庄提示实测，而不是单看生成长度。
+
 ## 恢复工作入口
 
 会话恢复时依次阅读本文件的“当前检查点”和“P0 工作顺序”，再阅读 [design.md](design.md) 的“事实、意图与演化边界”“世界与社会的内在驱力模型”“NPC Runtime 与 World Intelligence”“Runtime 核心契约”。然后查看 `git status --short`，运行自动化验证命令，先修复当前工作包失败项，再继续下一项；不要为了通过测试删除功能或放宽断言。

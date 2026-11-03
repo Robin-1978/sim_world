@@ -25,5 +25,61 @@
     "completion_tokens": 426,
     "finish_reason": "stop",
     "runtime_result": "accepted"
+  },
+  "mode_benchmark": {
+    "method": "same model, prompt schema and village context; three prompts per mode; one llama.cpp slot",
+    "prompts": ["ration", "secret", "fairness"],
+    "modes": [
+      {
+        "mode": "thinking_off",
+        "max_tokens": 512,
+        "wall_seconds": [3.367, 7.008, 3.872],
+        "completion_tokens": [164, 173, 176],
+        "actions": ["offer_ration", "offer_ration", "explain_ration"],
+        "assessment": "fastest; one socially ambiguous prompt selected a weaker action"
+      },
+      {
+        "mode": "thinking_128",
+        "reasoning_budget_tokens": 128,
+        "max_tokens": 1024,
+        "wall_seconds": [6.311, 6.849, 7.638],
+        "completion_tokens": [308, 344, 380],
+        "actions": ["offer_ration", "protect_secret", "explain_ration"],
+        "assessment": "best cost-quality balance in this P0 decision set"
+      },
+      {
+        "mode": "thinking_256",
+        "reasoning_budget_tokens": 256,
+        "max_tokens": 1024,
+        "wall_seconds": [8.657, 8.689, 11.331],
+        "completion_tokens": [438, 445, 585],
+        "actions": ["offer_ration", "explain_ration", "explain_ration"],
+        "assessment": "slower without a stable quality improvement"
+      },
+      {
+        "mode": "thinking_512",
+        "reasoning_budget_tokens": 512,
+        "max_tokens": 1024,
+        "wall_seconds": [13.322, 19.1, 14.846],
+        "completion_tokens": [712, 1020, 775],
+        "actions": ["offer_ration", "protect_secret", "explain_ration"],
+        "assessment": "mostly correct but verbose and expensive"
+      },
+      {
+        "mode": "thinking_1024",
+        "reasoning_budget_tokens": 1024,
+        "max_tokens": 1536,
+        "wall_seconds": [23.645, 22.969, 22.839],
+        "completion_tokens": [1272, 1267, 1238],
+        "actions": ["offer_ration", "protect_secret", "explain_ration"],
+        "assessment": "no material P0 quality gain; reserve for evolution analysis"
+      }
+    ],
+    "recommendation": {
+      "routine_dialogue": "thinking_off",
+      "ambiguous_social_decision": "thinking_128",
+      "low_confidence_retry": "thinking_256",
+      "evolution_or_sandbox_analysis": "thinking_512_or_1024"
+    }
   }
 }

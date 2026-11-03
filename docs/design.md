@@ -260,6 +260,8 @@ Provider 使用一个共享模型槽位和串行队列；本地 llama.cpp 优先
 
 P0 的结构化 `IntentProposal` 是短输出任务，llama.cpp 默认关闭 thinking，并使用有限的 `max_tokens`；这样模型不会把整段输出预算耗在不可用于事实提交的推理文本上。需要复杂社会权衡时，调用方可显式开启 thinking，并通过顶层 `reasoning_budget_tokens` 限制思考段预算；该预算不等于最终 JSON 的总输出预算。无论是否开启 thinking，Runtime 只解析最终 JSON，`reasoning_content` 永远不进入对白、记忆或世界事实。当前实现支持 `TIDE_MARKS_ENABLE_THINKING`、`TIDE_MARKS_THINKING_BUDGET`、`TIDE_MARKS_MAX_TOKENS` 和 `TIDE_MARKS_TIMEOUT_MS` 环境覆盖；默认配置适合 P0 的短决策，长思考只用于受控诊断或后续高价值审议。
 
+小模型的 Provider 策略按决策价值分档，而不是固定追求最大思考预算：普通对白和低风险动作关闭 thinking；候选之间存在社会冲突、秘密或承诺权衡时使用约 128 token 的 reasoning budget；低置信度或校验失败才升级到 256。512 以上只用于演化提案、沙箱解释和离线分析，不进入每个 NPC Turn。预算升级必须记录原因、耗时、最终候选和校验结果，便于以后用真实回放重新校准。
+
 Provider 配置由 JSON 选择，不绑定具体模型：
 
 ```json
