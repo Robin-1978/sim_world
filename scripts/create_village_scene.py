@@ -14,6 +14,14 @@ def material(name, color, metallic=0.0, roughness=0.8):
     mat.diffuse_color = (*color, 1.0)
     mat.metallic = metallic
     mat.roughness = roughness
+    # glTF exports the Principled node values. Setting only diffuse_color
+    # leaves many real-time viewers with their default gray material.
+    mat.use_nodes = True
+    shader = mat.node_tree.nodes.get("Principled BSDF")
+    if shader is not None:
+        shader.inputs["Base Color"].default_value = (*color, 1.0)
+        shader.inputs["Metallic"].default_value = metallic
+        shader.inputs["Roughness"].default_value = roughness
     return mat
 
 

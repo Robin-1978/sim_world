@@ -40,6 +40,35 @@ void drawVillageGeometry() {
     DrawCube({6.2F, 0.12F, 0.0F}, 4.4F, 0.25F, 2.4F, Color{124, 76, 35, 255});
 }
 
+Vector2 mapPoint(Vector3 world, int x, int y, int width, int height) {
+    return {static_cast<float>(x) + (world.x + 12.0F) / 24.0F * static_cast<float>(width),
+            static_cast<float>(y) + (world.z + 10.0F) / 20.0F * static_cast<float>(height)};
+}
+
+void drawVillageMap(Vector3 player, const std::array<std::pair<const char*, Vector3>, 3>& npcs) {
+    constexpr int x = 1018;
+    constexpr int y = 430;
+    constexpr int width = 238;
+    constexpr int height = 238;
+    DrawRectangle(x, y, width, height, Color{8, 18, 29, 235});
+    DrawRectangleLines(x, y, width, height, Color{167, 148, 102, 255});
+    DrawText("VILLAGE MAP", x + 10, y + 8, 16, Color{240, 224, 177, 255});
+    const auto pathStart = mapPoint({-11.0F, 0.0F, 0.0F}, x, y + 30, width, height - 42);
+    const auto pathEnd = mapPoint({8.0F, 0.0F, 0.0F}, x, y + 30, width, height - 42);
+    DrawLineEx(pathStart, pathEnd, 4.0F, Color{133, 133, 126, 255});
+    const auto waterStart = mapPoint({9.0F, 0.0F, -9.0F}, x, y + 30, width, height - 42);
+    const auto waterEnd = mapPoint({9.0F, 0.0F, 9.0F}, x, y + 30, width, height - 42);
+    DrawLineEx(waterStart, waterEnd, 18.0F, Color{30, 93, 135, 210});
+    for (const auto& [name, position] : npcs) {
+        const auto point = mapPoint(position, x, y + 30, width, height - 42);
+        const Color color = name == std::string("Mira") ? Color{224, 80, 70, 255} :
+                            (name == std::string("Lorn") ? Color{75, 142, 225, 255} : Color{153, 90, 207, 255});
+        DrawCircleV(point, 5.0F, color);
+        DrawText(name, static_cast<int>(point.x) + 7, static_cast<int>(point.y) - 6, 11, RAYWHITE);
+    }
+    DrawCircleV(mapPoint(player, x, y + 30, width, height - 42), 5.0F, RAYWHITE);
+}
+
 }  // namespace
 
 int main() {
@@ -54,6 +83,7 @@ int main() {
     InitWindow(1280, 720, "Tide Marks - Tidemark Village");
     SetTargetFPS(60);
     const bool sceneAssetAvailable = FileExists("assets/blender/village.glb");
+    const bool useGlb = sceneAssetAvailable && std::getenv("TIDE_MARKS_USE_GLB") != nullptr;
     Model sceneAsset{};
     if (sceneAssetAvailable) sceneAsset = LoadModel("assets/blender/village.glb");
     Vector3 player{0.0F, 0.65F, 0.0F};
@@ -105,7 +135,7 @@ int main() {
         camera.fovy = 45.0F;
         camera.projection = CAMERA_PERSPECTIVE;
         BeginMode3D(camera);
-        if (sceneAssetAvailable) {
+        if (useGlb) {
             DrawModel(sceneAsset, {0.0F, 0.0F, 0.0F}, 1.0F, WHITE);
         } else {
             drawVillageGeometry();
@@ -123,6 +153,7 @@ int main() {
         DrawText(TextFormat("%s  grain=%d  ferry=%d  records=%d", village.state().now.toString().c_str(),
                             village.state().village.grain, village.state().village.boatIntegrity,
                             village.state().village.recordsIntegrity), 820, 16, 16, RAYWHITE);
+        drawVillageMap(player, npcs);
         EndDrawing();
     }
     if (sceneAssetAvailable) UnloadModel(sceneAsset);

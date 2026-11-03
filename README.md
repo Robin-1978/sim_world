@@ -26,6 +26,8 @@ cmake --build build -j2
 
 If GitHub is unreachable, set `HTTPS_PROXY` to a proxy configured for your environment for the configure command. The window uses a slanted 3D camera. **WASD** moves, **E** talks to a nearby NPC, and **Esc** exits. The client loads `assets/blender/village.glb` when started from the repository root.
 
+The default raylib view uses a colored procedural village layout and shows a village minimap. Set `TIDE_MARKS_USE_GLB=1` to preview the exported Blender mesh instead. The current world map covers the P0 village; the full island map is planned for the P1/P2 world expansion.
+
 To use the running local model in the 3D client, set the provider before launching:
 
 ```bash

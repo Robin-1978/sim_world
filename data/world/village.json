@@ -4,6 +4,18 @@
   "display_name": "Tidemark Village",
   "locations": ["granary", "village_square", "ferry_dock", "archive", "mira_home", "lorn_house", "archive_room"],
   "resources": {"grain": 100, "boat_integrity": 72, "records_integrity": 80},
+  "map": {
+    "bounds": {"min_x": -12, "max_x": 12, "min_z": -10, "max_z": 10},
+    "nodes": [
+      {"id": "mira_home", "label": "Mira's home", "x": -6, "z": -5},
+      {"id": "lorn_house", "label": "Lorn's house", "x": -1, "z": -5},
+      {"id": "archive_room", "label": "Archive room", "x": 4, "z": -5},
+      {"id": "granary", "label": "Granary", "x": -5, "z": 3},
+      {"id": "archive", "label": "Archive", "x": 3, "z": 3},
+      {"id": "ferry_dock", "label": "Ferry dock", "x": 6, "z": 0}
+    ],
+    "roads": [["mira_home", "granary"], ["granary", "archive"], ["archive", "ferry_dock"], ["lorn_house", "village_square"]]
+  },
   "scene_asset": "assets/blender/village.glb",
   "camera": "slanted_top_down"
 }
