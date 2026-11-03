@@ -125,8 +125,8 @@ private:
     void expireStimuli();
     void processAutonomousTurns();
     DialogueTurn executeTurn(const std::string& npcId, const std::string& input,
-                             const std::string& turnId, const std::string& trigger,
-                             const std::string& eventType);
+                             const std::string& turnId, const std::string& channelId,
+                             const std::string& trigger);
     void processHourBoundary(int day, int hour);
     void processActivity(const ActivityContent& activity);
     [[nodiscard]] bool applyActionEffects(const std::string& npcId, const std::string& actionId);

@@ -561,6 +561,41 @@ WorldContentPack ContentPackLoader::load(const std::string& rootPath) {
         rule.patterns = stringArray(item, "patterns", worldPath);
         pack.conversationPolicy.rules.push_back(std::move(rule));
     }
+    if (!world.contains("decision_channels") || !world.at("decision_channels").is_array()) {
+        throw std::runtime_error("world must define decision_channels: " + worldPath);
+    }
+    for (const auto& item : world.at("decision_channels")) {
+        DecisionChannelPolicy channel;
+        channel.id = requiredString(item, "id", worldPath);
+        if (pack.decisionChannels.contains(channel.id)) {
+            throw std::runtime_error("duplicate decision channel: " + channel.id);
+        }
+        if (!item.contains("conversation") || !item.at("conversation").is_boolean() ||
+            !item.contains("classify_speech_act") || !item.at("classify_speech_act").is_boolean() ||
+            !item.contains("default_world_action_allowed") ||
+            !item.at("default_world_action_allowed").is_boolean()) {
+            throw std::runtime_error("decision channel requires boolean conversation/classify_speech_act/default_world_action_allowed: " + channel.id);
+        }
+        channel.conversation = item.at("conversation").get<bool>();
+        channel.classifySpeechAct = item.at("classify_speech_act").get<bool>();
+        channel.defaultWorldActionAllowed = item.at("default_world_action_allowed").get<bool>();
+        channel.defaultSpeechAct = item.value("default_speech_act", channel.defaultSpeechAct);
+        channel.eventType = item.value("event_type", channel.eventType);
+        channel.memoryKind = item.value("memory_kind", channel.memoryKind);
+        channel.eventTarget = item.value("event_target", channel.eventTarget);
+        channel.providerPolicy = requiredString(item, "provider_policy", worldPath);
+        pack.decisionChannels.emplace(channel.id, std::move(channel));
+    }
+    pack.conversationChannelId = requiredString(world, "conversation_channel", worldPath);
+    pack.autonomousChannelId = requiredString(world, "autonomous_channel", worldPath);
+    const auto conversationChannel = pack.decisionChannels.find(pack.conversationChannelId);
+    const auto autonomousChannel = pack.decisionChannels.find(pack.autonomousChannelId);
+    if (conversationChannel == pack.decisionChannels.end() || !conversationChannel->second.conversation) {
+        throw std::runtime_error("conversation_channel must reference a conversation decision channel: " + worldPath);
+    }
+    if (autonomousChannel == pack.decisionChannels.end() || autonomousChannel->second.conversation) {
+        throw std::runtime_error("autonomous_channel must reference a non-conversation decision channel: " + worldPath);
+    }
     const auto promisePolicy = world.value("promise_policy", Json::object());
     if (!promisePolicy.is_object()) {
         throw std::runtime_error("promise_policy must be an object in " + worldPath);

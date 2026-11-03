@@ -829,5 +829,31 @@
         ]
       }
     ]
-  }
+  },
+  "conversation_channel": "player_dialogue",
+  "autonomous_channel": "npc_autonomous_intent",
+  "decision_channels": [
+    {
+      "id": "player_dialogue",
+      "conversation": true,
+      "classify_speech_act": true,
+      "default_world_action_allowed": false,
+      "default_speech_act": "statement",
+      "event_type": "dialogue.turn",
+      "memory_kind": "conversation",
+      "event_target": "player",
+      "provider_policy": "player_dialogue"
+    },
+    {
+      "id": "npc_autonomous_intent",
+      "conversation": false,
+      "classify_speech_act": false,
+      "default_world_action_allowed": true,
+      "default_speech_act": "autonomous",
+      "event_type": "npc.intent",
+      "memory_kind": "intent",
+      "event_target": "self",
+      "provider_policy": "autonomous_reappraisal"
+    }
+  ]
 }

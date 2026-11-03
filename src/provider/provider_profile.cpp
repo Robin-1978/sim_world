@@ -99,8 +99,18 @@ IntelligenceProfile loadIntelligenceProfile(const std::string& path) {
     if (result.providerType != "mock" && (result.llama.model.empty() || result.llama.baseUrl.empty())) {
         throw std::runtime_error("non-mock provider requires model and base_url: " + path);
     }
-    result.llama.playerDialogue = readPolicy(root, "player_dialogue", path);
-    result.llama.autonomousReappraisal = readPolicy(root, "autonomous_reappraisal", path);
+    if (!root.contains("decision_policy") || !root.at("decision_policy").is_object() ||
+        root.at("decision_policy").empty()) {
+        throw std::runtime_error("intelligence profile requires a non-empty decision_policy: " + path);
+    }
+    for (const auto& [key, value] : root.at("decision_policy").items()) {
+        (void)value;
+        result.llama.decisionPolicies.emplace(key, readPolicy(root, key, path));
+    }
+    // Preserve the first policy as a safe fallback for callers that construct a
+    // context before world content is attached. Dispatch still uses the
+    // provider_policy selected by the content channel.
+    result.llama.fallbackPolicy = result.llama.decisionPolicies.begin()->second;
     return result;
 }
 

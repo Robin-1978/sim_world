@@ -2,7 +2,6 @@
 
 #include "core/types.hpp"
 #include "npc/conversation.hpp"
-#include "npc/decision_trigger.hpp"
 #include <memory>
 
 namespace tide_marks {
@@ -46,8 +45,10 @@ struct DriveView {
 struct DecisionContext {
     std::string npcId;
     std::string npcName;
-    // The trigger is part of the decision context so provider policy can
-    // distinguish a player conversation from an autonomous reappraisal.
+    std::string channel;
+    std::string providerPolicy;
+    // Trigger describes why the channel was awakened (for example a salient
+    // event); it is not used to select provider behavior.
     std::string trigger;
     std::string speechAct;
     bool worldActionAllowed{true};
@@ -118,8 +119,8 @@ struct LlamaCppConfig {
     std::string apiKeyEnv;
     int timeoutMs{120000};
     double temperature{0.2};
-    DecisionPolicy playerDialogue;
-    DecisionPolicy autonomousReappraisal{true, 128, 1024};
+    DecisionPolicy fallbackPolicy;
+    std::map<std::string, DecisionPolicy> decisionPolicies;
 };
 
 class LlamaCppProvider final : public IProvider {

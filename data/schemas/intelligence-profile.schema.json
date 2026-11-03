@@ -22,12 +22,8 @@
     },
     "decision_policy": {
       "type": "object",
-      "required": ["player_dialogue", "autonomous_reappraisal"],
-      "properties": {
-        "player_dialogue": {"$ref": "#/$defs/decision_policy"},
-        "autonomous_reappraisal": {"$ref": "#/$defs/decision_policy"}
-      },
-      "additionalProperties": false
+      "minProperties": 1,
+      "additionalProperties": {"$ref": "#/$defs/decision_policy"}
     }
   },
   "additionalProperties": false,

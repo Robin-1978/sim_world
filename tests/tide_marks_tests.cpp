@@ -616,6 +616,10 @@ void runtime_loads_a_world_without_village_identifiers() {
            "runtime NPC state stores the authored definition id");
     expect(service.content().instance && service.content().instance->id == "fixture.minimal.instance",
            "replacement world is launched through its own game instance");
+    expect(service.content().decisionChannels.contains("player_dialogue") &&
+               service.content().conversationChannelId == "player_dialogue" &&
+               service.content().decisionChannels.at("player_dialogue").providerPolicy == "player_dialogue",
+           "replacement world supplies its own decision channel policy");
     const auto fixtureSnapshot = service.snapshotJson();
     expect(fixtureSnapshot.at("npcs").at("sable").at("definition_id") == "sable" &&
                !fixtureSnapshot.at("npcs").at("sable").contains("definition"),
@@ -693,13 +697,16 @@ void intelligence_profile_configures_decision_budgets() {
     const auto profile = loadIntelligenceProfile(defaultIntelligenceProfilePath());
     expect(profile.id == "village-qwen35-4b-v1", "village runs from an explicit intelligence profile");
     expect(profile.providerType == "llama_cpp", "profile selects the local llama.cpp provider");
-    expect(!profile.llama.playerDialogue.enableThinking &&
-               profile.llama.playerDialogue.maxTokens == 512,
+    expect(!profile.llama.decisionPolicies.at("player_dialogue").enableThinking &&
+               profile.llama.decisionPolicies.at("player_dialogue").maxTokens == 512,
            "player dialogue uses the fast non-thinking policy");
-    expect(profile.llama.autonomousReappraisal.enableThinking &&
-               profile.llama.autonomousReappraisal.reasoningBudgetTokens == 128 &&
-               profile.llama.autonomousReappraisal.maxTokens == 1024,
+    expect(profile.llama.decisionPolicies.at("autonomous_reappraisal").enableThinking &&
+               profile.llama.decisionPolicies.at("autonomous_reappraisal").reasoningBudgetTokens == 128 &&
+               profile.llama.decisionPolicies.at("autonomous_reappraisal").maxTokens == 1024,
            "autonomous reappraisal uses its bounded thinking policy");
+    expect(profile.llama.decisionPolicies.contains("player_dialogue") &&
+               profile.llama.decisionPolicies.contains("autonomous_reappraisal"),
+           "named decision policies are loaded independently of channel ids");
     const auto provider = makeProviderFromProfile(profile, "mock");
     expect(provider->name() == "mock", "the profile provider can be overridden for offline tests");
 }

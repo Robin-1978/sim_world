@@ -908,17 +908,17 @@ std::optional<std::vector<std::string>> WorldService::planRoute(const std::strin
 
 DialogueTurn WorldService::converse(const std::string& npcId, const std::string& playerInput,
                                     const std::string& turnId) {
-    return executeTurn(npcId, playerInput, turnId, std::string(DecisionTrigger::PlayerDialogue), "dialogue.turn");
+    return executeTurn(npcId, playerInput, turnId, content_.conversationChannelId, "player_input");
 }
 
 DialogueTurn WorldService::deliberate(const std::string& npcId, const std::string& trigger,
                                       const std::string& turnId) {
-    return executeTurn(npcId, {}, turnId, trigger, std::string(DecisionTrigger::AutonomousIntent));
+    return executeTurn(npcId, {}, turnId, content_.autonomousChannelId, trigger);
 }
 
 DialogueTurn WorldService::executeTurn(const std::string& npcId, const std::string& input,
-                                       const std::string& turnId, const std::string& trigger,
-                                       const std::string& eventType) {
+                                       const std::string& turnId, const std::string& channelId,
+                                       const std::string& trigger) {
     TransactionScope transaction(*this);
     DialogueTurn result;
     result.npcId = npcId;
@@ -931,15 +931,22 @@ DialogueTurn WorldService::executeTurn(const std::string& npcId, const std::stri
         result.error = "duplicate_turn";
         return result;
     }
+    const auto channel = content_.decisionChannels.find(channelId);
+    if (channel == content_.decisionChannels.end()) {
+        result.error = "unknown_decision_channel";
+        return result;
+    }
     auto context = decisionContext(npcId);
+    context.channel = channelId;
+    context.providerPolicy = channel->second.providerPolicy;
     context.trigger = trigger;
-    if (DecisionTrigger::isPlayerDialogue(trigger)) {
+    if (channel->second.conversation && channel->second.classifySpeechAct) {
         const auto speechAct = classifySpeechAct(input, content_.conversationPolicy);
         context.speechAct = toString(speechAct);
         context.worldActionAllowed = permitsWorldAction(speechAct, content_.conversationPolicy);
     } else {
-        context.speechAct = "autonomous";
-        context.worldActionAllowed = true;
+        context.speechAct = channel->second.defaultSpeechAct;
+        context.worldActionAllowed = channel->second.defaultWorldActionAllowed;
     }
     auto response = provider_->decide(context, input);
     if (!response.ok) {
@@ -980,8 +987,10 @@ DialogueTurn WorldService::executeTurn(const std::string& npcId, const std::stri
         auto& npc = state_.npcs.at(npcId);
         if (!turnId.empty()) state_.processedTurnIds.insert(turnId);
         ++npc.stateVersion;
-        npc.memories.push_back(Memory{"conversation", input, state_.now, response.proposal.confidence});
-        addEvent(eventType, npcId, kPlayerId, response.dialogue,
+        npc.memories.push_back(Memory{channel->second.memoryKind, input, state_.now, response.proposal.confidence});
+        const auto target = channel->second.eventTarget == "player" ? kPlayerId :
+                            channel->second.eventTarget == "self" ? "self" : channel->second.eventTarget;
+        addEvent(channel->second.eventType, npcId, target, response.dialogue,
                  Json{{"turn_id", turnId}, {"action_id", ""}, {"trigger", trigger},
                       {"speech_act", context.speechAct}, {"world_action_requested", false},
                       {"process_status", "conversation_only"}, {"provider", result.provider},
@@ -1014,7 +1023,7 @@ DialogueTurn WorldService::executeTurn(const std::string& npcId, const std::stri
     }
     auto& npc = state_.npcs.at(npcId);
     if (npc.activity.process) {
-        double incomingSalience = DecisionTrigger::isPlayerDialogue(trigger) ? 1.0 : 0.0;
+        double incomingSalience = channel->second.conversation ? 1.0 : 0.0;
         for (const auto& stimulus : context.stimuli) {
             incomingSalience = std::max(incomingSalience, stimulus.effectiveSalience);
         }
@@ -1071,9 +1080,11 @@ DialogueTurn WorldService::executeTurn(const std::string& npcId, const std::stri
         setActivityStatus(npc.activity, ActivityStatus::Active);
         applyNpcSignal(npc, NpcSignal::StartProcess);
     }
-    npc.memories.push_back(Memory{DecisionTrigger::isPlayerDialogue(trigger) ? "conversation" : "intent",
+    npc.memories.push_back(Memory{channel->second.memoryKind,
                                   input.empty() ? response.proposal.intent : input, state_.now, 1.0});
-    addEvent(eventType, npcId, DecisionTrigger::isPlayerDialogue(trigger) ? kPlayerId : "self", response.dialogue,
+    const auto target = channel->second.eventTarget == "player" ? kPlayerId :
+                        channel->second.eventTarget == "self" ? "self" : channel->second.eventTarget;
+    addEvent(channel->second.eventType, npcId, target, response.dialogue,
              Json{{"turn_id", turnId}, {"process_id", processId}, {"action_id", response.proposal.actionId},
                   {"trigger", trigger}, {"duration_minutes", candidate->durationMinutes},
                   {"process_status", candidate->durationMinutes > 0 ? "running" : "completed"},

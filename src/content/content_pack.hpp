@@ -76,6 +76,22 @@ struct NpcDeliberationPolicy {
     int cooldownMinutes{360};
 };
 
+// A decision channel is a content-defined interaction contract. It tells the
+// runtime how to project an input into the provider, how to record the result,
+// and which world-action default applies. The channel id is data; the runtime
+// never branches on a story-specific trigger string.
+struct DecisionChannelPolicy {
+    std::string id;
+    bool conversation{false};
+    bool classifySpeechAct{false};
+    bool defaultWorldActionAllowed{true};
+    std::string defaultSpeechAct{"autonomous"};
+    std::string eventType{"intent"};
+    std::string memoryKind{"intent"};
+    std::string eventTarget{"self"};
+    std::string providerPolicy;
+};
+
 struct NpcContent {
     NpcDefinition definition;
     std::string initialLocation;
@@ -206,6 +222,9 @@ struct WorldContentPack {
     StimulusPolicy stimulusPolicy;
     NpcDeliberationPolicy npcDeliberation;
     ConversationPolicy conversationPolicy;
+    std::map<std::string, DecisionChannelPolicy> decisionChannels;
+    std::string conversationChannelId;
+    std::string autonomousChannelId;
     PromisePolicy promisePolicy;
     std::vector<StimulusRule> stimulusRules;
     std::map<std::string, ResourceContent> resources;

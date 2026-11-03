@@ -94,41 +94,10 @@ ProviderResponse MockProvider::decide(const DecisionContext& context, const std:
 }
 
 LlamaCppProvider::LlamaCppProvider(LlamaCppConfig config) : config_(std::move(config)) {
-    // Environment variables remain an explicit developer override for local
-    // experiments. The checked-in Intelligence Profile is the normal source
-    // of truth for a run.
-    if (const char* timeout = std::getenv("TIDE_MARKS_TIMEOUT_MS"); timeout != nullptr) {
-        const int parsed = std::atoi(timeout);
-        if (parsed > 0) config_.timeoutMs = parsed;
+    if (config_.decisionPolicies.empty()) {
+        config_.decisionPolicies.emplace("default", config_.fallbackPolicy);
     }
-    if (const char* maxTokens = std::getenv("TIDE_MARKS_MAX_TOKENS"); maxTokens != nullptr) {
-        const int parsed = std::atoi(maxTokens);
-        if (parsed > 0) {
-            config_.playerDialogue.maxTokens = parsed;
-            config_.autonomousReappraisal.maxTokens = parsed;
-        }
-    }
-    if (const char* enableThinking = std::getenv("TIDE_MARKS_ENABLE_THINKING"); enableThinking != nullptr) {
-        const std::string value(enableThinking);
-        const bool enabled = value == "1" || value == "true" || value == "on";
-        config_.playerDialogue.enableThinking = enabled;
-        config_.autonomousReappraisal.enableThinking = enabled;
-    }
-    if (const char* thinkingBudget = std::getenv("TIDE_MARKS_THINKING_BUDGET"); thinkingBudget != nullptr) {
-        const int parsed = std::atoi(thinkingBudget);
-        if (parsed > 0) {
-            config_.playerDialogue.reasoningBudgetTokens = parsed;
-            config_.autonomousReappraisal.reasoningBudgetTokens = parsed;
-        }
-    }
-    if (const char* autonomousThinking = std::getenv("TIDE_MARKS_AUTONOMOUS_THINKING"); autonomousThinking != nullptr) {
-        const std::string value(autonomousThinking);
-        config_.autonomousReappraisal.enableThinking = value == "1" || value == "true" || value == "on";
-    }
-    if (const char* autonomousBudget = std::getenv("TIDE_MARKS_AUTONOMOUS_THINKING_BUDGET"); autonomousBudget != nullptr) {
-        const int parsed = std::atoi(autonomousBudget);
-        if (parsed > 0) config_.autonomousReappraisal.reasoningBudgetTokens = parsed;
-    }
+    config_.fallbackPolicy = config_.decisionPolicies.begin()->second;
 }
 
 ProviderResponse LlamaCppProvider::decide(const DecisionContext& context, const std::string& playerInput) {
@@ -164,11 +133,15 @@ ProviderResponse LlamaCppProvider::decide(const DecisionContext& context, const 
                               {"sensitivity", drive.sensitivity}, {"evidence_confidence", drive.evidenceConfidence},
                               {"critical", drive.critical}, {"expected_relief", drive.expectedRelief}});
     }
-    const bool autonomousDecision = DecisionTrigger::isAutonomous(context.trigger);
-    const DecisionPolicy& policy = autonomousDecision ? config_.autonomousReappraisal : config_.playerDialogue;
+    const auto configuredPolicy = config_.decisionPolicies.find(context.providerPolicy);
+    if (configuredPolicy == config_.decisionPolicies.end()) {
+        return ProviderResponse{false, {}, {}, "unknown_provider_policy:" + context.providerPolicy};
+    }
+    const DecisionPolicy& policy = configuredPolicy->second;
     const bool useThinking = policy.enableThinking;
     const int effectiveThinkingBudget = policy.reasoningBudgetTokens;
-    const Json userContent{{"npc_id", context.npcId}, {"time", context.now.toString()}, {"decision_trigger", context.trigger},
+    const Json userContent{{"npc_id", context.npcId}, {"time", context.now.toString()},
+                           {"decision_channel", context.channel}, {"decision_trigger", context.trigger},
                            {"speech_act", context.speechAct}, {"world_action_allowed", context.worldActionAllowed},
                            {"perception", context.perception}, {"memories", context.memories},
                            {"character", context.character}, {"internal_drives", context.internalDrives},

@@ -240,6 +240,8 @@ NPC 不每帧调用 LLM。日常移动、进食、休息、工作、资源结算
 
 对话输入先由世界内容包中的 `conversation_policy` 映射到询问、谈判、安抚、威胁、撒谎、承诺、交换、调查或结束等作者定义话语行为。关键词、匹配顺序和该话语行为是否允许提交世界行动都属于 JSON 配置；Runtime 只执行通用分类器和权限校验，不在 C++ 中写死中文或英文短语。问候、询问、告别和普通陈述可以配置为仅对话；请求、命令、谈判和承诺可以配置为允许产生行动提案。结构化响应包含 `action_id`、`intent`、`motivation`、`dialogue`、`beat_id`、`cited_stimulus_ids`、`tradeoffs`、`expected_relief`、候选记忆和上下文版本。LLM 用 `cited_stimulus_ids` 指出它实际依据的外驱，用 `tradeoffs` 解释内驱之间或内驱与社会后果之间的权衡，用 `expected_relief` 表达对结果的预测；这些字段用于审计、学习和回放校验，不能直接写入事实。`motivation` 只用于解释和诊断，不参与规则判定；`action_id` 必须属于当前 DecisionContext。仅对话响应使用空 `action_id`，不会进入行为树或修改世界事实。
 
+对话和自驱不是 Runtime 中的两个写死分支，而是世界内容包中的 `decision_channels`。每个 channel 配置是否是会话、是否进行话语行为分类、默认行动权限、事件类型、记忆类型、事件目标和对应的 Intelligence Profile 策略；`conversation_channel` 与 `autonomous_channel` 只是当前实例选择的两个入口。Runtime 按 channel 属性执行同一条提案校验和事务路径，因此新的观察者、定时器、群体审议或外部传感器入口只需增加 JSON channel，不需要增加 `if (trigger == ...)` 的业务耦合。
+
 对话动作例如 `create_promise` 不是直接完成任务，而是提交一条待验证命令。只有前置条件通过，承诺才进入世界并获得截止时间；接受、重谈、拒绝、兑现和违约都会留下事件、记忆、关系和后续计划变化。
 
 记忆分为事实记忆、关系记忆和表达记忆。事实和关系的可规则部分来自已提交事件；模型只能提出摘要候选。Perception 记录 `source`、`observed_at`、`confidence` 和 `scope`，传闻不能自动成为事实。模型迟到时可留在审计日志中，但没有提交权限。Turn 入队保存 `world_revision`、`npc_state_version`、Provider/Model、Prompt 版本和 `turn_id`；返回后若版本变化，动作重新校验或丢弃。
@@ -263,6 +265,8 @@ P0 的结构化 `IntentProposal` 是短输出任务，玩家对白默认关闭 t
 小模型的 Provider 策略按决策价值分档，而不是固定追求最大思考预算：普通对白和低风险动作关闭 thinking；候选之间存在社会冲突、秘密或承诺权衡时使用约 128 token 的 reasoning budget；低置信度或校验失败才升级到 256。512 以上只用于演化提案、沙箱解释和离线分析，不进入每个 NPC Turn。预算升级必须记录原因、耗时、最终候选和校验结果，便于以后用真实回放重新校准。
 
 Provider 与决策预算由可版本化的 Intelligence Profile 选择，不绑定具体模型。正式配置是 `data/intelligence-profile.json`，CLI 通过 `--profile PATH --provider profile` 显式使用它；`--provider mock` 保留确定性离线验证。Schema 位于 `data/schemas/intelligence-profile.schema.json`。
+
+Profile 的 `decision_policy` 是按 channel 使用的命名策略表。Provider 接收 Runtime 解析后的 `provider_policy`，只负责执行对应预算和输出格式，不再根据 `player_dialogue` 或 `autonomous_reappraisal` 这样的业务触发字符串猜测决策类型。
 
 ```json
 {
