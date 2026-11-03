@@ -236,17 +236,20 @@ void provider_and_action_validation_are_safe() {
     expect(!stale.accepted && stale.code == "state_conflict", "stale world revisions are rejected atomically");
 }
 
-void meta_action_registry_distinguishes_design_from_execution() {
-    expect(MetaActionRegistry::contains("transfer_resource"),
-           "reservation remains in the design registry");
-    expect(!MetaActionRegistry::isImplemented("transfer_resource"),
-           "a design-only meta action is not executable content");
-    expect(MetaActionRegistry::isImplemented("consume_resource"),
-           "resource consumption has a runtime executor");
-    expect(MetaActionRegistry::isImplemented("relieve_need"),
-           "need relief has an explicit runtime executor");
-    expect(MetaActionRegistry::isImplemented("set_link_state"),
-           "authored structural transitions have a runtime executor");
+void meta_actions_are_loaded_from_content() {
+    const auto content = ContentPackLoader::load(ContentPackLoader::defaultRoot());
+    expect(content.metaActions.contains("consume_resource"),
+           "the content pack defines its own resource-consumption action");
+    expect(content.metaActions.at("consume_resource").operation == "resource.consume",
+           "a content action binds to a generic Runtime operator");
+    expect(content.metaActions.contains("relieve_need") &&
+               content.metaActions.at("relieve_need").operation == "need.relieve",
+           "need relief is configured without a C++ story-action branch");
+    expect(content.metaActions.contains("set_link_state") &&
+               content.metaActions.at("set_link_state").operation == "link.set_state",
+           "structural transitions are configured by action id");
+    expect(!content.metaActions.contains("transfer_resource"),
+           "an undeclared action is absent rather than supplied by C++");
 }
 
 void needs_cover_domains_and_explicit_execution_paths() {
@@ -709,7 +712,7 @@ int main() {
     high_salience_stimulus_interrupts_and_releases_reservations();
     behavior_tree_supports_sequence_timeout_and_interrupt();
     provider_and_action_validation_are_safe();
-    meta_action_registry_distinguishes_design_from_execution();
+    meta_actions_are_loaded_from_content();
     needs_cover_domains_and_explicit_execution_paths();
     bounded_drive_expectation_adapts_from_outcomes();
     external_stimuli_and_structures_are_observable_and_persistent();

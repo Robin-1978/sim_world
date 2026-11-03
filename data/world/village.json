@@ -1,7 +1,10 @@
 {
   "kind": "world",
   "content_version": "village-p0.2",
-  "initial_time": {"day": 1, "hour": 6},
+  "initial_time": {
+    "day": 1,
+    "hour": 6
+  },
   "drive_adaptation": {
     "enabled": true,
     "expectation_learning_rate": 0.25,
@@ -12,8 +15,8 @@
     "max_active_per_npc": 32,
     "novelty_decay": 0.55,
     "habituation_step": 0.08,
-    "min_sensitivity": 0.40,
-    "max_sensitivity": 1.20,
+    "min_sensitivity": 0.4,
+    "max_sensitivity": 1.2,
     "repeat_window_minutes": 720
   },
   "npc_deliberation": {
@@ -26,32 +29,189 @@
   "promise_policy": {
     "renegotiation_extension_minutes": 1440,
     "broken": {
-      "promiser": {"trust": -0.08},
-      "promisee": {"respect": -0.08}
+      "promiser": {
+        "trust": -0.08
+      },
+      "promisee": {
+        "respect": -0.08
+      }
     },
-    "refused": {"actor": {"trust": -0.04}},
-    "accepted": {"actor": {"trust": 0.03}}
+    "refused": {
+      "actor": {
+        "trust": -0.04
+      }
+    },
+    "accepted": {
+      "actor": {
+        "trust": 0.03
+      }
+    }
   },
   "stimulus_rules": [
-    {"id": "dialogue", "event_prefix": "dialogue.", "category": "social_exchange", "visibility": "participants", "relevance": 0.95, "intensity": 0.65, "urgency": 0.55, "valence": 0.15, "source_confidence": 1.0, "ttl_minutes": 720},
-    {"id": "promise_broken", "event_prefix": "promise.broken", "category": "social_threat", "visibility": "participants", "relevance": 1.0, "intensity": 0.95, "urgency": 0.95, "valence": -0.9, "source_confidence": 1.0, "ttl_minutes": 2880},
-    {"id": "promise", "event_prefix": "promise.", "category": "social_obligation", "visibility": "participants", "relevance": 0.95, "intensity": 0.75, "urgency": 0.70, "valence": 0.25, "source_confidence": 1.0, "ttl_minutes": 1440},
-    {"id": "ration", "event_prefix": "life.ration", "category": "resource_change", "visibility": "world", "relevance": 0.80, "intensity": 0.75, "urgency": 0.55, "valence": -0.10, "source_confidence": 1.0, "ttl_minutes": 720},
-    {"id": "repair", "event_prefix": "life.repair", "category": "environment_repair", "visibility": "world", "relevance": 0.70, "intensity": 0.65, "urgency": 0.40, "valence": 0.60, "source_confidence": 1.0, "ttl_minutes": 720},
-    {"id": "clue", "event_prefix": "life.clue", "category": "epistemic_opportunity", "visibility": "world", "relevance": 0.85, "intensity": 0.70, "urgency": 0.45, "valence": 0.45, "source_confidence": 1.0, "ttl_minutes": 1440},
-    {"id": "life", "event_prefix": "life.", "category": "environment_event", "visibility": "world", "relevance": 0.60, "intensity": 0.50, "urgency": 0.35, "valence": 0.0, "source_confidence": 1.0, "ttl_minutes": 360},
-    {"id": "structure", "event_prefix": "link.", "category": "structural_change", "visibility": "world", "relevance": 0.75, "intensity": 0.70, "urgency": 0.55, "valence": 0.0, "source_confidence": 1.0, "ttl_minutes": 720},
-    {"id": "entity", "event_prefix": "entity.", "category": "structural_change", "visibility": "world", "relevance": 0.70, "intensity": 0.60, "urgency": 0.35, "valence": 0.0, "source_confidence": 1.0, "ttl_minutes": 720}
+    {
+      "id": "dialogue",
+      "event_prefix": "dialogue.",
+      "category": "social_exchange",
+      "visibility": "participants",
+      "relevance": 0.95,
+      "intensity": 0.65,
+      "urgency": 0.55,
+      "valence": 0.15,
+      "source_confidence": 1.0,
+      "ttl_minutes": 720
+    },
+    {
+      "id": "promise_broken",
+      "event_prefix": "promise.broken",
+      "category": "social_threat",
+      "visibility": "participants",
+      "relevance": 1.0,
+      "intensity": 0.95,
+      "urgency": 0.95,
+      "valence": -0.9,
+      "source_confidence": 1.0,
+      "ttl_minutes": 2880
+    },
+    {
+      "id": "promise",
+      "event_prefix": "promise.",
+      "category": "social_obligation",
+      "visibility": "participants",
+      "relevance": 0.95,
+      "intensity": 0.75,
+      "urgency": 0.7,
+      "valence": 0.25,
+      "source_confidence": 1.0,
+      "ttl_minutes": 1440
+    },
+    {
+      "id": "ration",
+      "event_prefix": "life.ration",
+      "category": "resource_change",
+      "visibility": "world",
+      "relevance": 0.8,
+      "intensity": 0.75,
+      "urgency": 0.55,
+      "valence": -0.1,
+      "source_confidence": 1.0,
+      "ttl_minutes": 720
+    },
+    {
+      "id": "repair",
+      "event_prefix": "life.repair",
+      "category": "environment_repair",
+      "visibility": "world",
+      "relevance": 0.7,
+      "intensity": 0.65,
+      "urgency": 0.4,
+      "valence": 0.6,
+      "source_confidence": 1.0,
+      "ttl_minutes": 720
+    },
+    {
+      "id": "clue",
+      "event_prefix": "life.clue",
+      "category": "epistemic_opportunity",
+      "visibility": "world",
+      "relevance": 0.85,
+      "intensity": 0.7,
+      "urgency": 0.45,
+      "valence": 0.45,
+      "source_confidence": 1.0,
+      "ttl_minutes": 1440
+    },
+    {
+      "id": "life",
+      "event_prefix": "life.",
+      "category": "environment_event",
+      "visibility": "world",
+      "relevance": 0.6,
+      "intensity": 0.5,
+      "urgency": 0.35,
+      "valence": 0.0,
+      "source_confidence": 1.0,
+      "ttl_minutes": 360
+    },
+    {
+      "id": "structure",
+      "event_prefix": "link.",
+      "category": "structural_change",
+      "visibility": "world",
+      "relevance": 0.75,
+      "intensity": 0.7,
+      "urgency": 0.55,
+      "valence": 0.0,
+      "source_confidence": 1.0,
+      "ttl_minutes": 720
+    },
+    {
+      "id": "entity",
+      "event_prefix": "entity.",
+      "category": "structural_change",
+      "visibility": "world",
+      "relevance": 0.7,
+      "intensity": 0.6,
+      "urgency": 0.35,
+      "valence": 0.0,
+      "source_confidence": 1.0,
+      "ttl_minutes": 720
+    }
   ],
   "id": "village_tidemark",
   "display_name": "Tidemark Village",
-  "locations": ["granary", "village_square", "ferry_dock", "archive", "mira_home", "lorn_house", "archive_room"],
+  "locations": [
+    "granary",
+    "village_square",
+    "ferry_dock",
+    "archive",
+    "mira_home",
+    "lorn_house",
+    "archive_room"
+  ],
   "resources": {
-    "grain": {"kind": "material", "unit": "ration", "owner": "village", "location": "granary", "initial": 100, "minimum": 0, "maximum": 100},
-    "boat_integrity": {"kind": "condition", "unit": "point", "owner": "village", "location": "ferry_dock", "initial": 72, "minimum": 0, "maximum": 100},
-    "records_integrity": {"kind": "information", "unit": "point", "owner": "village", "location": "archive", "initial": 80, "minimum": 0, "maximum": 100},
-    "cooperation": {"kind": "collective_metric", "unit": "point", "owner": "village", "initial": 0, "minimum": 0, "maximum": 100},
-    "reputation": {"kind": "collective_metric", "unit": "point", "owner": "village", "initial": 0, "minimum": 0, "maximum": 100}
+    "grain": {
+      "kind": "material",
+      "unit": "ration",
+      "owner": "village",
+      "location": "granary",
+      "initial": 100,
+      "minimum": 0,
+      "maximum": 100
+    },
+    "boat_integrity": {
+      "kind": "condition",
+      "unit": "point",
+      "owner": "village",
+      "location": "ferry_dock",
+      "initial": 72,
+      "minimum": 0,
+      "maximum": 100
+    },
+    "records_integrity": {
+      "kind": "information",
+      "unit": "point",
+      "owner": "village",
+      "location": "archive",
+      "initial": 80,
+      "minimum": 0,
+      "maximum": 100
+    },
+    "cooperation": {
+      "kind": "collective_metric",
+      "unit": "point",
+      "owner": "village",
+      "initial": 0,
+      "minimum": 0,
+      "maximum": 100
+    },
+    "reputation": {
+      "kind": "collective_metric",
+      "unit": "point",
+      "owner": "village",
+      "initial": 0,
+      "minimum": 0,
+      "maximum": 100
+    }
   },
   "activities": [
     {
@@ -63,8 +223,16 @@
       "event_type": "life.ration",
       "detail": "Mira records the morning ration",
       "effects": [
-        {"operation": "consume_resource", "resource": "grain", "amount": 5, "action": "offer_ration"},
-        {"operation": "relieve_need", "action": "offer_ration"}
+        {
+          "operation": "resource.consume",
+          "resource": "grain",
+          "amount": 5,
+          "action": "offer_ration"
+        },
+        {
+          "operation": "need.relieve",
+          "action": "offer_ration"
+        }
       ]
     },
     {
@@ -78,10 +246,27 @@
       "event_type": "life.repair",
       "detail": "Lorn patches the ferry before the next crossing",
       "effects": [
-        {"operation": "consume_resource", "resource": "grain", "amount": 5, "action": "repair_ferry"},
-        {"operation": "produce_resource", "resource": "boat_integrity", "amount": 8, "action": "repair_ferry"},
-        {"operation": "produce_resource", "resource": "cooperation", "amount": 1},
-        {"operation": "relieve_need", "action": "repair_ferry"}
+        {
+          "operation": "resource.consume",
+          "resource": "grain",
+          "amount": 5,
+          "action": "repair_ferry"
+        },
+        {
+          "operation": "resource.produce",
+          "resource": "boat_integrity",
+          "amount": 8,
+          "action": "repair_ferry"
+        },
+        {
+          "operation": "resource.produce",
+          "resource": "cooperation",
+          "amount": 1
+        },
+        {
+          "operation": "need.relieve",
+          "action": "repair_ferry"
+        }
       ]
     },
     {
@@ -93,8 +278,16 @@
       "event_type": "life.archive",
       "detail": "Eve indexes the tide registry",
       "effects": [
-        {"operation": "produce_resource", "resource": "records_integrity", "amount": 2, "action": "share_record"},
-        {"operation": "relieve_need", "action": "share_record"}
+        {
+          "operation": "resource.produce",
+          "resource": "records_integrity",
+          "amount": 2,
+          "action": "share_record"
+        },
+        {
+          "operation": "need.relieve",
+          "action": "share_record"
+        }
       ]
     },
     {
@@ -106,7 +299,10 @@
       "event_type": "life.protect_secret",
       "detail": "Mira protects the undocumented family record",
       "effects": [
-        {"operation": "relieve_need", "action": "protect_secret"}
+        {
+          "operation": "need.relieve",
+          "action": "protect_secret"
+        }
       ]
     },
     {
@@ -118,7 +314,10 @@
       "event_type": "life.explain_ration",
       "detail": "Mira explains the ration decision to the village",
       "effects": [
-        {"operation": "relieve_need", "action": "explain_ration"}
+        {
+          "operation": "need.relieve",
+          "action": "explain_ration"
+        }
       ]
     },
     {
@@ -130,7 +329,10 @@
       "event_type": "life.crossing",
       "detail": "Lorn keeps the crossing open",
       "effects": [
-        {"operation": "relieve_need", "action": "offer_crossing"}
+        {
+          "operation": "need.relieve",
+          "action": "offer_crossing"
+        }
       ]
     },
     {
@@ -142,7 +344,10 @@
       "event_type": "life.debt",
       "detail": "Lorn asks the village to settle its ferry debt",
       "effects": [
-        {"operation": "relieve_need", "action": "ask_debt"}
+        {
+          "operation": "need.relieve",
+          "action": "ask_debt"
+        }
       ]
     },
     {
@@ -154,7 +359,10 @@
       "event_type": "life.withhold",
       "detail": "Eve keeps a fragile record out of circulation",
       "effects": [
-        {"operation": "relieve_need", "action": "withhold_record"}
+        {
+          "operation": "need.relieve",
+          "action": "withhold_record"
+        }
       ]
     },
     {
@@ -166,7 +374,10 @@
       "event_type": "life.clue",
       "detail": "Eve shares a clue about the hidden family line",
       "effects": [
-        {"operation": "relieve_need", "action": "reveal_clue"}
+        {
+          "operation": "need.relieve",
+          "action": "reveal_clue"
+        }
       ]
     },
     {
@@ -178,7 +389,10 @@
       "event_type": "life.rest",
       "detail": "Mira rests after the day's work",
       "effects": [
-        {"operation": "relieve_need", "action": "rest"}
+        {
+          "operation": "need.relieve",
+          "action": "rest"
+        }
       ]
     },
     {
@@ -190,7 +404,10 @@
       "event_type": "life.rest",
       "detail": "Lorn rests after the last crossing",
       "effects": [
-        {"operation": "relieve_need", "action": "rest"}
+        {
+          "operation": "need.relieve",
+          "action": "rest"
+        }
       ]
     },
     {
@@ -202,7 +419,10 @@
       "event_type": "life.rest",
       "detail": "Eve rests after closing the archive",
       "effects": [
-        {"operation": "relieve_need", "action": "rest"}
+        {
+          "operation": "need.relieve",
+          "action": "rest"
+        }
       ]
     },
     {
@@ -214,7 +434,12 @@
       "event_type": "structure.ferry_closed",
       "detail": "The ferry crossing closes for the night",
       "effects": [
-        {"operation": "set_link_state", "link": "ferry_square", "traversable": false, "locked": false}
+        {
+          "operation": "link.set_state",
+          "link": "ferry_square",
+          "traversable": false,
+          "locked": false
+        }
       ]
     },
     {
@@ -226,7 +451,12 @@
       "event_type": "structure.ferry_opened",
       "detail": "The ferry crossing opens for the day",
       "effects": [
-        {"operation": "set_link_state", "link": "ferry_square", "traversable": true, "locked": false}
+        {
+          "operation": "link.set_state",
+          "link": "ferry_square",
+          "traversable": true,
+          "locked": false
+        }
       ]
     },
     {
@@ -237,7 +467,11 @@
       "event_type": "life.ferry_decay",
       "detail": "The ferry loses integrity with another day of use",
       "effects": [
-        {"operation": "consume_resource", "resource": "boat_integrity", "amount": 3}
+        {
+          "operation": "resource.consume",
+          "resource": "boat_integrity",
+          "amount": 3
+        }
       ]
     }
   ],
@@ -254,35 +488,346 @@
     }
   ],
   "entity_archetypes": [
-    {"id": "world_object", "kind": "world_object", "metadata": {"owned_by": "world"}},
-    {"id": "marker", "kind": "marker", "metadata": {"persistent": false}}
+    {
+      "id": "world_object",
+      "kind": "world_object",
+      "metadata": {
+        "owned_by": "world"
+      }
+    },
+    {
+      "id": "marker",
+      "kind": "marker",
+      "metadata": {
+        "persistent": false
+      }
+    }
   ],
   "map": {
-    "bounds": {"min_x": -12, "max_x": 12, "min_z": -10, "max_z": 10},
+    "bounds": {
+      "min_x": -12,
+      "max_x": 12,
+      "min_z": -10,
+      "max_z": 10
+    },
     "nodes": [
-      {"id": "mira_home", "label": "Mira's home", "x": -6, "z": -5},
-      {"id": "lorn_house", "label": "Lorn's house", "x": -1, "z": -5},
-      {"id": "archive_room", "label": "Archive room", "x": 4, "z": -5},
-      {"id": "granary", "label": "Granary", "x": -5, "z": 3},
-      {"id": "archive", "label": "Archive", "x": 3, "z": 3},
-      {"id": "ferry_dock", "label": "Ferry dock", "x": 6, "z": 0}
+      {
+        "id": "mira_home",
+        "label": "Mira's home",
+        "x": -6,
+        "z": -5
+      },
+      {
+        "id": "lorn_house",
+        "label": "Lorn's house",
+        "x": -1,
+        "z": -5
+      },
+      {
+        "id": "archive_room",
+        "label": "Archive room",
+        "x": 4,
+        "z": -5
+      },
+      {
+        "id": "granary",
+        "label": "Granary",
+        "x": -5,
+        "z": 3
+      },
+      {
+        "id": "archive",
+        "label": "Archive",
+        "x": 3,
+        "z": 3
+      },
+      {
+        "id": "ferry_dock",
+        "label": "Ferry dock",
+        "x": 6,
+        "z": 0
+      }
     ],
-    "roads": [["mira_home", "granary"], ["granary", "archive"], ["archive", "ferry_dock"], ["lorn_house", "village_square"]]
+    "roads": [
+      [
+        "mira_home",
+        "granary"
+      ],
+      [
+        "granary",
+        "archive"
+      ],
+      [
+        "archive",
+        "ferry_dock"
+      ],
+      [
+        "lorn_house",
+        "village_square"
+      ]
+    ]
   },
   "entities": [
-    {"id": "mira_home", "kind": "place", "display_name": "Mira's home", "bounds": {"min_x": -8, "max_x": -4, "min_z": -7, "max_z": -3}, "tags": ["home", "private"]},
-    {"id": "lorn_house", "kind": "place", "display_name": "Lorn's house", "bounds": {"min_x": -3, "max_x": 1, "min_z": -7, "max_z": -3}, "tags": ["home", "private"]},
-    {"id": "archive_room", "kind": "place", "display_name": "Archive room", "bounds": {"min_x": 2, "max_x": 6, "min_z": -7, "max_z": -3}, "tags": ["home", "private"]},
-    {"id": "granary", "kind": "place", "display_name": "Granary", "bounds": {"min_x": -7, "max_x": -3, "min_z": 2, "max_z": 5}, "tags": ["workplace", "resource"]},
-    {"id": "archive", "kind": "place", "display_name": "Archive", "bounds": {"min_x": 1, "max_x": 5, "min_z": 2, "max_z": 5}, "tags": ["workplace", "records"]},
-    {"id": "ferry_dock", "kind": "place", "display_name": "Ferry dock", "bounds": {"min_x": 5, "max_x": 8, "min_z": -1.5, "max_z": 1.5}, "tags": ["workplace", "transport"]},
-    {"id": "village_square", "kind": "place", "display_name": "Village square", "bounds": {"min_x": -3, "max_x": 5, "min_z": -1, "max_z": 1}, "tags": ["public", "meeting"]}
+    {
+      "id": "mira_home",
+      "kind": "place",
+      "display_name": "Mira's home",
+      "bounds": {
+        "min_x": -8,
+        "max_x": -4,
+        "min_z": -7,
+        "max_z": -3
+      },
+      "tags": [
+        "home",
+        "private"
+      ]
+    },
+    {
+      "id": "lorn_house",
+      "kind": "place",
+      "display_name": "Lorn's house",
+      "bounds": {
+        "min_x": -3,
+        "max_x": 1,
+        "min_z": -7,
+        "max_z": -3
+      },
+      "tags": [
+        "home",
+        "private"
+      ]
+    },
+    {
+      "id": "archive_room",
+      "kind": "place",
+      "display_name": "Archive room",
+      "bounds": {
+        "min_x": 2,
+        "max_x": 6,
+        "min_z": -7,
+        "max_z": -3
+      },
+      "tags": [
+        "home",
+        "private"
+      ]
+    },
+    {
+      "id": "granary",
+      "kind": "place",
+      "display_name": "Granary",
+      "bounds": {
+        "min_x": -7,
+        "max_x": -3,
+        "min_z": 2,
+        "max_z": 5
+      },
+      "tags": [
+        "workplace",
+        "resource"
+      ]
+    },
+    {
+      "id": "archive",
+      "kind": "place",
+      "display_name": "Archive",
+      "bounds": {
+        "min_x": 1,
+        "max_x": 5,
+        "min_z": 2,
+        "max_z": 5
+      },
+      "tags": [
+        "workplace",
+        "records"
+      ]
+    },
+    {
+      "id": "ferry_dock",
+      "kind": "place",
+      "display_name": "Ferry dock",
+      "bounds": {
+        "min_x": 5,
+        "max_x": 8,
+        "min_z": -1.5,
+        "max_z": 1.5
+      },
+      "tags": [
+        "workplace",
+        "transport"
+      ]
+    },
+    {
+      "id": "village_square",
+      "kind": "place",
+      "display_name": "Village square",
+      "bounds": {
+        "min_x": -3,
+        "max_x": 5,
+        "min_z": -1,
+        "max_z": 1
+      },
+      "tags": [
+        "public",
+        "meeting"
+      ]
+    }
   ],
   "links": [
-    {"id": "granary_square", "kind": "portal", "endpoints": ["granary", "village_square"], "traversable": true, "tags": ["public"]},
-    {"id": "archive_square", "kind": "portal", "endpoints": ["archive", "village_square"], "traversable": true, "tags": ["public"]},
-    {"id": "ferry_square", "kind": "portal", "endpoints": ["ferry_dock", "village_square"], "traversable": true, "tags": ["public"]}
+    {
+      "id": "granary_square",
+      "kind": "portal",
+      "endpoints": [
+        "granary",
+        "village_square"
+      ],
+      "traversable": true,
+      "tags": [
+        "public"
+      ]
+    },
+    {
+      "id": "archive_square",
+      "kind": "portal",
+      "endpoints": [
+        "archive",
+        "village_square"
+      ],
+      "traversable": true,
+      "tags": [
+        "public"
+      ]
+    },
+    {
+      "id": "ferry_square",
+      "kind": "portal",
+      "endpoints": [
+        "ferry_dock",
+        "village_square"
+      ],
+      "traversable": true,
+      "tags": [
+        "public"
+      ]
+    }
   ],
   "scene_asset": "assets/blender/village.glb",
-  "camera": "slanted_top_down"
+  "camera": "slanted_top_down",
+  "conversation_policy": {
+    "default_world_action_allowed": false,
+    "speech_acts": [
+      {
+        "id": "greeting",
+        "world_action_allowed": false,
+        "patterns": [
+          "hello",
+          "hi ",
+          "hey",
+          "good morning",
+          "good evening",
+          "nice to meet",
+          "你好",
+          "您好",
+          "嗨",
+          "早上好",
+          "晚上好"
+        ]
+      },
+      {
+        "id": "farewell",
+        "world_action_allowed": false,
+        "patterns": [
+          "bye",
+          "goodbye",
+          "see you",
+          "再见",
+          "回头见"
+        ]
+      },
+      {
+        "id": "promise",
+        "world_action_allowed": true,
+        "patterns": [
+          "promise",
+          "承诺",
+          "答应",
+          "保证"
+        ]
+      },
+      {
+        "id": "negotiation",
+        "world_action_allowed": true,
+        "patterns": [
+          "negotiate",
+          "deal",
+          "trade",
+          "交换",
+          "谈谈",
+          "重谈"
+        ]
+      },
+      {
+        "id": "request",
+        "world_action_allowed": true,
+        "patterns": [
+          "can you",
+          "could you",
+          "would you",
+          "will you",
+          "please",
+          "帮我",
+          "请",
+          "能不能",
+          "可以",
+          "给我",
+          "spare",
+          "offer",
+          "give me",
+          "repair",
+          "fix",
+          "修理",
+          "维修"
+        ]
+      },
+      {
+        "id": "inquiry",
+        "world_action_allowed": false,
+        "patterns": [
+          "what ",
+          "what?",
+          "why ",
+          "why?",
+          "where ",
+          "where?",
+          "when ",
+          "who ",
+          "how ",
+          "doing",
+          "日志",
+          "什么",
+          "为什么",
+          "哪里",
+          "谁",
+          "怎么",
+          "吗",
+          "？",
+          "?"
+        ]
+      },
+      {
+        "id": "command",
+        "world_action_allowed": true,
+        "patterns": [
+          "stop",
+          "go ",
+          "move",
+          "tell me",
+          "告诉我",
+          "停止",
+          "走开"
+        ]
+      }
+    ]
+  }
 }

@@ -4,6 +4,7 @@
 #include "npc/state_machine.hpp"
 #include "world/ids.hpp"
 #include <algorithm>
+#include <cstddef>
 #include <cmath>
 #include <fstream>
 #include <sstream>
@@ -26,6 +27,30 @@ void applyRelationshipDelta(RelationshipAxes& axes, const RelationshipDelta& del
 void applyNpcSignal(NpcState& npc, NpcSignal signal) {
     npc.mode = toString(transition(npcModeFromString(npc.mode), signal));
 }
+
+Json mergedBehaviorArgs(const MetaActionDefinition& definition, const BehaviorNodeContent& node) {
+    Json result = definition.defaultArgs;
+    for (auto it = node.args.begin(); it != node.args.end(); ++it) result[it.key()] = it.value();
+    return result;
+}
+
+WorldState transactionalBackup(const WorldState& state, std::size_t& eventCount) {
+    WorldState backup = state;
+    eventCount = backup.events.size();
+    // Committed history before this transaction is immutable. Keeping it out
+    // of the rollback copy avoids an O(history) copy on every game-minute.
+    backup.events.clear();
+    return backup;
+}
+
+void restoreTransactionalBackup(WorldState& state, WorldState backup,
+                                std::size_t eventCount) {
+    std::vector<WorldEvent> committed;
+    const auto end = std::min(eventCount, state.events.size());
+    committed.assign(state.events.begin(), state.events.begin() + static_cast<std::ptrdiff_t>(end));
+    state = std::move(backup);
+    state.events = std::move(committed);
+}
 }
 
 class WorldService::TransactionScope {
@@ -36,8 +61,17 @@ public:
     }
 
     ~TransactionScope() {
+        if (!active_) return;
         if (std::uncaught_exceptions() > uncaughtAtConstruction_) service_.rollbackTransaction();
         else service_.commitTransaction();
+    }
+
+    // Used when a validated recipe reports failure after staging a partial
+    // change. No caller-visible fact may survive a failed recipe.
+    void rollback() {
+        if (!active_) return;
+        active_ = false;
+        service_.rollbackTransaction();
     }
 
     TransactionScope(const TransactionScope&) = delete;
@@ -46,17 +80,26 @@ public:
 private:
     WorldService& service_;
     int uncaughtAtConstruction_;
+    bool active_{true};
 };
 
 void WorldService::beginTransaction() {
     if (transactionDepth_++ == 0) {
-        transactionBackup_ = state_;
+        transactionBackup_ = transactionalBackup(state_, transactionBackupEventCount_);
         deferredEvents_.clear();
+        transactionRollbackRequested_ = false;
     }
 }
 
 void WorldService::commitTransaction() {
     if (--transactionDepth_ != 0) return;
+    if (transactionRollbackRequested_) {
+        restoreTransactionalBackup(state_, std::move(transactionBackup_), transactionBackupEventCount_);
+        transactionRollbackRequested_ = false;
+        deferredEvents_.clear();
+        rebuildEntityRegistry();
+        return;
+    }
     rebuildEntityRegistry();
     auto events = std::move(deferredEvents_);
     deferredEvents_.clear();
@@ -65,8 +108,12 @@ void WorldService::commitTransaction() {
 }
 
 void WorldService::rollbackTransaction() {
-    if (--transactionDepth_ != 0) return;
-    state_ = std::move(transactionBackup_);
+    if (--transactionDepth_ != 0) {
+        transactionRollbackRequested_ = true;
+        return;
+    }
+    restoreTransactionalBackup(state_, std::move(transactionBackup_), transactionBackupEventCount_);
+    transactionRollbackRequested_ = false;
     deferredEvents_.clear();
     rebuildEntityRegistry();
 }
@@ -406,7 +453,7 @@ void WorldService::processHourBoundary(int day, int hour) {
 void WorldService::processActivity(const ActivityContent& activity) {
     std::map<std::string, int> required;
     for (const auto& effect : activity.effects) {
-        if (effect.operation == "consume_resource" || effect.operation == "reserve_resource") {
+        if (effect.operation == "resource.consume" || effect.operation == "resource.reserve") {
             required[effect.resource] += effect.amount;
         }
     }
@@ -416,24 +463,24 @@ void WorldService::processActivity(const ActivityContent& activity) {
 
     Json changes = Json::object();
     for (const auto& effect : activity.effects) {
-        if (effect.operation == "relieve_need") {
+        if (effect.operation == "need.relieve") {
             if (activity.actor != kWorldActor) applyNeedRelief(activity.actor, effect.effectAction);
             continue;
         }
-        if (effect.operation == "set_link_state") {
+        if (effect.operation == "link.set_state") {
             state_.links[effect.linkId] = RuntimeLinkState{effect.traversable, effect.locked};
             changes[effect.linkId] = Json{{"traversable", effect.traversable}, {"locked", effect.locked}};
             continue;
         }
         const int before = resourceValue(effect.resource);
-        if (effect.operation == "consume_resource") setResource(effect.resource, before - effect.amount);
-        if (effect.operation == "produce_resource") setResource(effect.resource, before + effect.amount);
-        if (effect.operation == "reserve_resource") state_.resources[effect.resource].reserved += effect.amount;
-        if (effect.operation == "release_resource") {
+        if (effect.operation == "resource.consume") setResource(effect.resource, before - effect.amount);
+        if (effect.operation == "resource.produce") setResource(effect.resource, before + effect.amount);
+        if (effect.operation == "resource.reserve") state_.resources[effect.resource].reserved += effect.amount;
+        if (effect.operation == "resource.release") {
             auto& resource = state_.resources[effect.resource];
             resource.reserved = std::max(0, resource.reserved - effect.amount);
         }
-        if (effect.operation != "release_resource") {
+        if (effect.operation != "resource.release") {
             changes[effect.resource] = Json{{"before", before}, {"after", resourceValue(effect.resource)}};
         }
     }
@@ -554,7 +601,8 @@ void WorldService::cancelProcess(const std::string& npcId, ProcessExecution& pro
 void WorldService::completeProcess(const std::string& npcId, ProcessExecution process) {
     auto found = state_.npcs.find(npcId);
     if (found == state_.npcs.end()) return;
-    const bool applied = applyActionEffects(npcId, process.actionId, &process.reservedResources);
+    const bool applied = applyActionEffects(npcId, process.recipeId.empty() ? process.actionId : process.recipeId,
+                                            &process.reservedResources);
     process.progress = 1.0;
     process.status = applied ? ProcessStatus::Completed : ProcessStatus::Failed;
     process.behaviorStatus = applied ? "success" : "failure";
@@ -845,12 +893,12 @@ std::optional<std::vector<std::string>> WorldService::planRoute(const std::strin
 
 DialogueTurn WorldService::converse(const std::string& npcId, const std::string& playerInput,
                                     const std::string& turnId) {
-    return executeTurn(npcId, playerInput, turnId, "player_dialogue", "dialogue.turn");
+    return executeTurn(npcId, playerInput, turnId, std::string(DecisionTrigger::PlayerDialogue), "dialogue.turn");
 }
 
 DialogueTurn WorldService::deliberate(const std::string& npcId, const std::string& trigger,
                                       const std::string& turnId) {
-    return executeTurn(npcId, {}, turnId, trigger, "npc.autonomous_intent");
+    return executeTurn(npcId, {}, turnId, trigger, std::string(DecisionTrigger::AutonomousIntent));
 }
 
 DialogueTurn WorldService::executeTurn(const std::string& npcId, const std::string& input,
@@ -870,6 +918,14 @@ DialogueTurn WorldService::executeTurn(const std::string& npcId, const std::stri
     }
     auto context = decisionContext(npcId);
     context.trigger = trigger;
+    if (DecisionTrigger::isPlayerDialogue(trigger)) {
+        const auto speechAct = classifySpeechAct(input, content_.conversationPolicy);
+        context.speechAct = toString(speechAct);
+        context.worldActionAllowed = permitsWorldAction(speechAct, content_.conversationPolicy);
+    } else {
+        context.speechAct = "autonomous";
+        context.worldActionAllowed = true;
+    }
     auto response = provider_->decide(context, input);
     if (!response.ok) {
         // Rule fallback keeps the world playable when the local server is down.
@@ -901,6 +957,33 @@ DialogueTurn WorldService::executeTurn(const std::string& npcId, const std::stri
             return result;
         }
     }
+    if (response.proposal.actionId.empty()) {
+        if (context.worldActionAllowed || response.proposal.worldActionRequested) {
+            result.error = "world_action_required";
+            return result;
+        }
+        auto& npc = state_.npcs.at(npcId);
+        if (!turnId.empty()) state_.processedTurnIds.insert(turnId);
+        ++npc.stateVersion;
+        npc.memories.push_back(Memory{"conversation", input, state_.now, response.proposal.confidence});
+        addEvent(eventType, npcId, kPlayerId, response.dialogue,
+                 Json{{"turn_id", turnId}, {"action_id", ""}, {"trigger", trigger},
+                      {"speech_act", context.speechAct}, {"world_action_requested", false},
+                      {"process_status", "conversation_only"}, {"provider", result.provider},
+                      {"context_world_revision", response.proposal.worldRevision},
+                      {"context_npc_state_version", response.proposal.npcStateVersion}});
+        result.accepted = true;
+        result.intent = response.proposal.intent;
+        result.motivation = response.proposal.rationale;
+        result.dialogue = response.dialogue;
+        result.event = state_.events.back();
+        syncNpcEntityState();
+        return result;
+    }
+    if (!context.worldActionAllowed) {
+        result.error = "speech_act_disallows_world_action";
+        return result;
+    }
     const auto validation = ActionValidator::validate(context, response.proposal.actionId);
     if (!validation.valid) {
         result.error = validation.code;
@@ -916,7 +999,7 @@ DialogueTurn WorldService::executeTurn(const std::string& npcId, const std::stri
     }
     auto& npc = state_.npcs.at(npcId);
     if (npc.activity.process) {
-        double incomingSalience = trigger == "player_dialogue" ? 1.0 : 0.0;
+        double incomingSalience = DecisionTrigger::isPlayerDialogue(trigger) ? 1.0 : 0.0;
         for (const auto& stimulus : context.stimuli) {
             incomingSalience = std::max(incomingSalience, stimulus.effectiveSalience);
         }
@@ -928,20 +1011,13 @@ DialogueTurn WorldService::executeTurn(const std::string& npcId, const std::stri
         cancelProcess(npcId, *npc.activity.process, trigger);
         npc.activity = NpcActivity{};
     }
-    std::map<std::string, int> reservations;
-    if (candidate->durationMinutes > 0) {
-        for (const auto& activity : content_.activities) {
-            for (const auto& effect : activity.effects) {
-                if (effect.effectAction == candidate->actionId && effect.operation == "consume_resource") {
-                    reservations[effect.resource] += effect.amount;
-                }
-            }
-        }
-        for (const auto& [resource, amount] : reservations) {
-            if (availableResourceValue(resource) < amount) {
-                result.error = "insufficient_resource";
-                return result;
-            }
+    std::map<std::string, int> reservations = candidate->durationMinutes > 0
+                                                   ? candidate->reservations
+                                                   : std::map<std::string, int>{};
+    for (const auto& [resource, amount] : reservations) {
+        if (availableResourceValue(resource) < amount) {
+            result.error = "insufficient_resource";
+            return result;
         }
     }
     const std::string processId =
@@ -964,6 +1040,7 @@ DialogueTurn WorldService::executeTurn(const std::string& npcId, const std::stri
         process.id = processId;
         process.goalId = goalId;
         process.actionId = candidate->actionId;
+        process.recipeId = candidate->recipeId;
         process.planId = candidate->planId;
         process.trigger = trigger;
         process.startedAt = state_.now;
@@ -979,9 +1056,9 @@ DialogueTurn WorldService::executeTurn(const std::string& npcId, const std::stri
         setActivityStatus(npc.activity, ActivityStatus::Active);
         applyNpcSignal(npc, NpcSignal::StartProcess);
     }
-    npc.memories.push_back(Memory{trigger == "player_dialogue" ? "conversation" : "intent",
+    npc.memories.push_back(Memory{DecisionTrigger::isPlayerDialogue(trigger) ? "conversation" : "intent",
                                   input.empty() ? response.proposal.intent : input, state_.now, 1.0});
-    addEvent(eventType, npcId, trigger == "player_dialogue" ? kPlayerId : "self", response.dialogue,
+    addEvent(eventType, npcId, DecisionTrigger::isPlayerDialogue(trigger) ? kPlayerId : "self", response.dialogue,
              Json{{"turn_id", turnId}, {"process_id", processId}, {"action_id", response.proposal.actionId},
                   {"trigger", trigger}, {"duration_minutes", candidate->durationMinutes},
                   {"process_status", candidate->durationMinutes > 0 ? "running" : "completed"},
@@ -1026,65 +1103,159 @@ const NpcContent* WorldService::authoredNpc(const std::string& npcId) const {
     return found == content_.npcs.end() ? nullptr : &*found;
 }
 
+const BehaviorRecipeContent* WorldService::recipeForAction(const std::string& actionId) const {
+    const auto found = std::find_if(content_.behaviorRecipes.begin(), content_.behaviorRecipes.end(),
+                                    [&actionId](const auto& recipe) { return recipe.id == actionId; });
+    return found == content_.behaviorRecipes.end() ? nullptr : &*found;
+}
+
+bool WorldService::evaluateBehaviorCondition(const std::string& npcId,
+                                             const BehaviorNodeContent& node) const {
+    const auto definition = content_.conditions.find(node.name);
+    if (definition == content_.conditions.end()) return false;
+    Json args = definition->second.args;
+    for (auto it = node.args.begin(); it != node.args.end(); ++it) args[it.key()] = it.value();
+    const auto& operation = definition->second.operation;
+    if (operation == "always") return true;
+    if (operation == "resource.available") {
+        return availableResourceValue(args.value("resource", "")) >= args.value("minimum", 1);
+    }
+    if (operation == "resource.below") {
+        return resourceValue(args.value("resource", "")) < args.value("below", 1);
+    }
+    if (operation == "link.traversable" || operation == "link.locked") {
+        const auto link = state_.links.find(args.value("link", ""));
+        const bool traversable = link == state_.links.end() ||
+                                 (link->second.traversable && !link->second.locked);
+        return operation == "link.traversable" ? traversable : !traversable;
+    }
+    if (operation == "need.critical") {
+        const auto npc = state_.npcs.find(npcId);
+        const auto* authored = authoredNpc(npcId);
+        if (npc == state_.npcs.end() || authored == nullptr) return false;
+        const auto needId = args.value("need", "");
+        const auto need = std::find_if(authored->needs.begin(), authored->needs.end(),
+                                       [&needId](const auto& item) { return item.id == needId; });
+        const auto stateNeed = npc->second.needs.find(needId);
+        return need != authored->needs.end() && stateNeed != npc->second.needs.end() &&
+               stateNeed->second.deficit >= need->criticalThreshold;
+    }
+    if (operation == "npc.at") {
+        const auto npc = state_.npcs.find(npcId);
+        return npc != state_.npcs.end() && npc->second.location == args.value("location", "");
+    }
+    if (operation == "time.between") {
+        const int minuteOfDay = state_.now.hour() * 60 + state_.now.minuteOfHour();
+        return minuteOfDay >= args.value("from_minute", 0) && minuteOfDay < args.value("to_minute", 0);
+    }
+    return false;
+}
+
+bool WorldService::applyMetaAction(const std::string& npcId, const std::string& actionId,
+                                   const BehaviorNodeContent& node,
+                                   const std::map<std::string, int>* reservedResources) {
+    const auto definition = content_.metaActions.find(node.name);
+    if (definition == content_.metaActions.end()) return false;
+    const Json args = mergedBehaviorArgs(definition->second, node);
+    const auto& operation = definition->second.operation;
+    if (operation == "resource.consume") {
+        const auto resource = args.value("resource", "");
+        const int amount = args.value("amount", 0);
+        if (amount <= 0 || !content_.resources.contains(resource)) return false;
+        const bool reserved = reservedResources != nullptr && reservedResources->contains(resource);
+        if (reserved && reservedResources->at(resource) < amount) return false;
+        if (!reserved && availableResourceValue(resource) < amount) return false;
+        auto& state = state_.resources[resource];
+        const int before = state.amount;
+        state.amount = std::max(0, state.amount - amount);
+        if (reserved) state.reserved = std::max(0, state.reserved - amount);
+        addEvent("action.resource", npcId, resource, "A behavior recipe consumed a resource",
+                 Json{{"action_id", actionId}, {"resource", resource}, {"before", before},
+                      {"after", state.amount}, {"amount", amount}});
+        return true;
+    }
+    if (operation == "resource.produce") {
+        const auto resource = args.value("resource", "");
+        const int amount = args.value("amount", 0);
+        if (amount <= 0 || !content_.resources.contains(resource)) return false;
+        const int before = resourceValue(resource);
+        setResource(resource, before + amount);
+        addEvent("action.resource", npcId, resource, "A behavior recipe produced a resource",
+                 Json{{"action_id", actionId}, {"resource", resource}, {"before", before},
+                      {"after", resourceValue(resource)}, {"amount", amount}});
+        return true;
+    }
+    if (operation == "resource.reserve") {
+        const auto resource = args.value("resource", "");
+        const int amount = args.value("amount", 0);
+        if (amount <= 0 || availableResourceValue(resource) < amount) return false;
+        state_.resources[resource].reserved += amount;
+        addEvent("action.reservation", npcId, resource, "A behavior recipe reserved a resource",
+                 Json{{"action_id", actionId}, {"resource", resource}, {"amount", amount}});
+        return true;
+    }
+    if (operation == "resource.release") {
+        const auto resource = args.value("resource", "");
+        const int amount = args.value("amount", 0);
+        auto found = state_.resources.find(resource);
+        if (amount <= 0 || found == state_.resources.end()) return false;
+        found->second.reserved = std::max(0, found->second.reserved - amount);
+        addEvent("action.reservation", npcId, resource, "A behavior recipe released a resource reservation",
+                 Json{{"action_id", actionId}, {"resource", resource}, {"amount", amount}});
+        return true;
+    }
+    if (operation == "need.relieve") {
+        const auto sourceAction = args.value("action", actionId);
+        applyNeedRelief(npcId, sourceAction);
+        return true;
+    }
+    if (operation == "link.set_state") {
+        const auto link = args.value("link", "");
+        if (!state_.entities.contains(linkEntityId(link))) return false;
+        state_.links[link] = RuntimeLinkState{args.value("traversable", true), args.value("locked", false)};
+        addEvent("action.structure", npcId, link, "A behavior recipe changed a traversal link",
+                 Json{{"action_id", actionId}, {"link_id", link},
+                      {"traversable", args.value("traversable", true)}, {"locked", args.value("locked", false)}});
+        return true;
+    }
+    if (operation == "relationship.adjust") {
+        auto npc = state_.npcs.find(npcId);
+        if (npc == state_.npcs.end() || args.value("target", "player") != "player") return false;
+        RelationshipDelta delta;
+        delta.trust = args.value("trust", 0.0);
+        delta.respect = args.value("respect", 0.0);
+        delta.fear = args.value("fear", 0.0);
+        delta.owed = args.value("owed", 0.0);
+        applyRelationshipDelta(npc->second.playerRelation, delta);
+        addEvent("action.relationship", npcId, kPlayerId, "A behavior recipe changed a relationship",
+                 Json{{"action_id", actionId}, {"trust", delta.trust}, {"respect", delta.respect},
+                      {"fear", delta.fear}, {"owed", delta.owed}});
+        return true;
+    }
+    return false;
+}
+
 bool WorldService::applyActionEffects(const std::string& npcId, const std::string& actionId) {
     return applyActionEffects(npcId, actionId, nullptr);
 }
 
 bool WorldService::applyActionEffects(const std::string& npcId, const std::string& actionId,
                                       const std::map<std::string, int>* reservedResources) {
-    std::map<std::string, int> required;
-    for (const auto& activity : content_.activities) {
-        for (const auto& effect : activity.effects) {
-            if (effect.effectAction == actionId &&
-                (effect.operation == "consume_resource" || effect.operation == "reserve_resource")) {
-                required[effect.resource] += effect.amount;
-            }
-        }
-    }
-    for (const auto& [resource, amount] : required) {
-        if (reservedResources != nullptr) {
-            const auto reserved = reservedResources->find(resource);
-            if (reserved == reservedResources->end() || reserved->second < amount) return false;
-        } else if (availableResourceValue(resource) < amount) {
-            return false;
-        }
-    }
-    for (const auto& activity : content_.activities) {
-        for (const auto& effect : activity.effects) {
-            if (effect.effectAction != actionId) continue;
-            if (effect.operation == "relieve_need") {
-                applyNeedRelief(npcId, actionId);
-                continue;
-            }
-            if (effect.operation == "set_link_state") {
-                state_.links[effect.linkId] = RuntimeLinkState{effect.traversable, effect.locked};
-                addEvent("action.structure", npcId, effect.linkId, "Authored action changed a traversal link",
-                         Json{{"action_id", actionId}, {"link_id", effect.linkId},
-                              {"traversable", effect.traversable}, {"locked", effect.locked}});
-                continue;
-            }
-            const int before = resourceValue(effect.resource);
-            if (effect.operation == "consume_resource") {
-                setResource(effect.resource, before - effect.amount);
-                if (reservedResources != nullptr) {
-                    auto& reserved = state_.resources[effect.resource].reserved;
-                    reserved = std::max(0, reserved - effect.amount);
-                }
-            }
-            if (effect.operation == "produce_resource") setResource(effect.resource, before + effect.amount);
-            if (effect.operation == "reserve_resource") state_.resources[effect.resource].reserved += effect.amount;
-            if (effect.operation == "release_resource") {
-                auto& resource = state_.resources[effect.resource];
-                resource.reserved = std::max(0, resource.reserved - effect.amount);
-            }
-            if (effect.operation == "consume_resource" || effect.operation == "produce_resource") {
-                addEvent("action.resource", npcId, effect.resource, "Authored action changed a resource",
-                         Json{{"action_id", actionId}, {"activity_id", activity.id}, {"resource", effect.resource},
-                              {"before", before}, {"after", resourceValue(effect.resource)}});
-            }
-        }
-    }
-    return true;
+    const auto* recipe = recipeForAction(actionId);
+    if (recipe == nullptr) return false;
+    // A recipe is one atomic transition. Its conditions and all meta-action
+    // effects either commit together or disappear together.
+    TransactionScope recipeTransaction(*this);
+    const auto result = BehaviorRecipeRuntime::run(
+        *recipe,
+        [this, &npcId](const BehaviorNodeContent& node) {
+            return evaluateBehaviorCondition(npcId, node);
+        },
+        [this, &npcId, &actionId, reservedResources](const BehaviorNodeContent& node) {
+            return applyMetaAction(npcId, actionId, node, reservedResources);
+        });
+    if (result.status != NodeStatus::Success) recipeTransaction.rollback();
+    return result.status == NodeStatus::Success;
 }
 
 void WorldService::applyNeedRelief(const std::string& npcId, const std::string& actionId) {

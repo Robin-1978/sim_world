@@ -1,0 +1,309 @@
+{
+  "kind": "behavior_pack",
+  "schema_version": 2,
+  "recipes": [
+    {
+      "id": "repair_ferry",
+      "plan_id": "lorn_ferry",
+      "duration_minutes": 120,
+      "interruptible": false,
+      "interrupt_salience_threshold": 1.0,
+      "root": {
+        "type": "sequence",
+        "id": "repair_ferry.sequence",
+        "children": [
+          {
+            "type": "condition",
+            "id": "repair_ferry.condition",
+            "name": "repairable_ferry",
+            "args": {
+              "resource": "boat_integrity",
+              "below": 100
+            }
+          },
+          {
+            "type": "meta_action",
+            "id": "repair_ferry.consume",
+            "name": "consume_resource",
+            "args": {
+              "resource": "grain",
+              "amount": 5
+            }
+          },
+          {
+            "type": "meta_action",
+            "id": "repair_ferry.produce",
+            "name": "produce_resource",
+            "args": {
+              "resource": "boat_integrity",
+              "amount": 8
+            }
+          },
+          {
+            "type": "meta_action",
+            "id": "repair_ferry.relieve",
+            "name": "relieve_need",
+            "args": {
+              "action": "repair_ferry"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "offer_ration",
+      "plan_id": "mira_ration",
+      "duration_minutes": 30,
+      "interruptible": true,
+      "interrupt_salience_threshold": 0.85,
+      "root": {
+        "type": "sequence",
+        "id": "offer_ration.sequence",
+        "children": [
+          {
+            "type": "condition",
+            "id": "offer_ration.condition",
+            "name": "resource_available",
+            "args": {
+              "resource": "grain",
+              "minimum": 1
+            }
+          },
+          {
+            "type": "meta_action",
+            "id": "offer_ration.consume",
+            "name": "consume_resource",
+            "args": {
+              "resource": "grain",
+              "amount": 5
+            }
+          },
+          {
+            "type": "meta_action",
+            "id": "offer_ration.relieve",
+            "name": "relieve_need",
+            "args": {
+              "action": "offer_ration"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "protect_secret",
+      "plan_id": "mira_protect_secret",
+      "duration_minutes": 45,
+      "interruptible": true,
+      "interrupt_salience_threshold": 0.9,
+      "root": {
+        "type": "sequence",
+        "id": "protect_secret.sequence",
+        "children": [
+          {
+            "type": "meta_action",
+            "id": "protect_secret.relieve",
+            "name": "relieve_need",
+            "args": {
+              "action": "protect_secret"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "explain_ration",
+      "plan_id": "mira_explain_ration",
+      "duration_minutes": 20,
+      "interruptible": true,
+      "interrupt_salience_threshold": 0.7,
+      "root": {
+        "type": "sequence",
+        "id": "explain_ration.sequence",
+        "children": [
+          {
+            "type": "meta_action",
+            "id": "explain_ration.relieve",
+            "name": "relieve_need",
+            "args": {
+              "action": "explain_ration"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "rest",
+      "plan_id": "rest",
+      "duration_minutes": 480,
+      "interruptible": true,
+      "interrupt_salience_threshold": 0.95,
+      "root": {
+        "type": "sequence",
+        "id": "rest.sequence",
+        "children": [
+          {
+            "type": "meta_action",
+            "id": "rest.relieve",
+            "name": "relieve_need",
+            "args": {
+              "action": "rest"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "offer_crossing",
+      "plan_id": "lorn_offer_crossing",
+      "duration_minutes": 45,
+      "interruptible": true,
+      "interrupt_salience_threshold": 0.8,
+      "root": {
+        "type": "sequence",
+        "id": "offer_crossing.sequence",
+        "children": [
+          {
+            "type": "meta_action",
+            "id": "offer_crossing.relieve",
+            "name": "relieve_need",
+            "args": {
+              "action": "offer_crossing"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "ask_debt",
+      "plan_id": "lorn_ask_debt",
+      "duration_minutes": 15,
+      "interruptible": true,
+      "interrupt_salience_threshold": 0.7,
+      "root": {
+        "type": "sequence",
+        "id": "ask_debt.sequence",
+        "children": [
+          {
+            "type": "meta_action",
+            "id": "ask_debt.relieve",
+            "name": "relieve_need",
+            "args": {
+              "action": "ask_debt"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "share_record",
+      "plan_id": "eve_share_record",
+      "duration_minutes": 60,
+      "interruptible": true,
+      "interrupt_salience_threshold": 0.8,
+      "root": {
+        "type": "sequence",
+        "id": "share_record.sequence",
+        "children": [
+          {
+            "type": "meta_action",
+            "id": "share_record.relieve",
+            "name": "relieve_need",
+            "args": {
+              "action": "share_record"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "withhold_record",
+      "plan_id": "eve_withhold_record",
+      "duration_minutes": 30,
+      "interruptible": true,
+      "interrupt_salience_threshold": 0.7,
+      "root": {
+        "type": "sequence",
+        "id": "withhold_record.sequence",
+        "children": [
+          {
+            "type": "meta_action",
+            "id": "withhold_record.relieve",
+            "name": "relieve_need",
+            "args": {
+              "action": "withhold_record"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "reveal_clue",
+      "plan_id": "eve_reveal_clue",
+      "duration_minutes": 20,
+      "interruptible": true,
+      "interrupt_salience_threshold": 0.85,
+      "root": {
+        "type": "sequence",
+        "id": "reveal_clue.sequence",
+        "children": [
+          {
+            "type": "meta_action",
+            "id": "reveal_clue.relieve",
+            "name": "relieve_need",
+            "args": {
+              "action": "reveal_clue"
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "meta_actions": [
+    {
+      "id": "consume_resource",
+      "category": "resource",
+      "operator": "resource.consume"
+    },
+    {
+      "id": "produce_resource",
+      "category": "resource",
+      "operator": "resource.produce"
+    },
+    {
+      "id": "relieve_need",
+      "category": "need",
+      "operator": "need.relieve"
+    },
+    {
+      "id": "set_link_state",
+      "category": "topology",
+      "operator": "link.set_state"
+    }
+  ],
+  "conditions": [
+    {
+      "id": "always",
+      "operator": "always"
+    },
+    {
+      "id": "resource_available",
+      "operator": "resource.available"
+    },
+    {
+      "id": "repairable_ferry",
+      "operator": "resource.below"
+    },
+    {
+      "id": "link_traversable",
+      "operator": "link.traversable"
+    },
+    {
+      "id": "npc_at",
+      "operator": "npc.at"
+    },
+    {
+      "id": "need_critical",
+      "operator": "need.critical"
+    }
+  ]
+}

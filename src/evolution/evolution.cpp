@@ -87,7 +87,7 @@ EvolutionValidation EvolutionManager::validate(const EvolutionProposal& proposal
         if (operation.contains("meta_actions")) {
             if (!operation.at("meta_actions").is_array()) return {false, "invalid_meta_actions", "meta_actions must be an array."};
             for (const auto& action : operation.at("meta_actions")) {
-                if (!action.is_string() || !MetaActionRegistry::isImplemented(action.get<std::string>())) {
+                if (!action.is_string() || !content.metaActions.contains(action.get<std::string>())) {
                     return {false, "unimplemented_meta_action", "An operation references an unimplemented meta action."};
                 }
             }

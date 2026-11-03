@@ -1,41 +1,30 @@
 #include "world/meta_actions.hpp"
 
-#include <algorithm>
-
 namespace tide_marks {
 
-const std::vector<MetaActionSpec>& MetaActionRegistry::all() {
-    static const std::vector<MetaActionSpec> specs{
-        {"consume_resource", "resource", "Decrease a resource after checking unit, ownership and availability.", true},
-        {"produce_resource", "resource", "Increase a resource within its declared capacity.", true},
-        {"transfer_resource", "resource", "Move a resource between entity inventories.", false},
-        {"reserve_resource", "resource", "Reserve a resource for a pending plan.", true},
-        {"release_resource", "resource", "Release a previous reservation.", true},
-        {"relieve_need", "need", "Apply a committed action's authored need relief.", true},
-        {"adjust_relationship", "relationship", "Adjust one relationship axis with a recorded reason.", false},
-        {"move_entity", "movement", "Create a validated movement intent.", false},
-        {"arrive_entity", "movement", "Commit an arrival result.", false},
-        {"create_promise", "promise", "Create a promise with a due time and parties.", false},
-        {"transition_promise", "promise", "Transition a promise through its allowed states.", false},
-        {"append_memory", "knowledge", "Append a sourced memory projection.", false},
-        {"assert_known_fact", "knowledge", "Record a fact within an observation scope.", false},
-        {"set_link_state", "topology", "Change authored link traversal state.", true},
-        {"create_entity", "entity", "Create an entity from a registered archetype.", false},
-        {"set_entity_lifecycle", "entity", "Change active, dormant, or destroyed lifecycle.", false},
+const std::set<std::string>& MetaActionRegistry::executableOperators() {
+    static const std::set<std::string> operators{
+        "resource.consume",
+        "resource.produce",
+        "resource.reserve",
+        "resource.release",
+        "need.relieve",
+        "link.set_state",
+        "relationship.adjust",
     };
-    return specs;
+    return operators;
 }
 
-bool MetaActionRegistry::contains(const std::string& id) {
-    const auto& specs = all();
-    return std::any_of(specs.begin(), specs.end(), [&id](const auto& spec) { return spec.id == id; });
+bool MetaActionRegistry::isExecutableOperator(const std::string& operation) {
+    return executableOperators().contains(operation);
 }
 
-bool MetaActionRegistry::isImplemented(const std::string& id) {
-    const auto& specs = all();
-    return std::any_of(specs.begin(), specs.end(), [&id](const auto& spec) {
-        return spec.id == id && spec.implemented;
-    });
+bool MetaActionRegistry::isExecutableConditionOperator(const std::string& operation) {
+    static const std::set<std::string> operators{
+        "always", "resource.available", "resource.below", "link.traversable",
+        "link.locked", "need.critical", "npc.at", "time.between",
+    };
+    return operators.contains(operation);
 }
 
 }  // namespace tide_marks

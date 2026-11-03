@@ -115,6 +115,7 @@ struct ProcessExecution {
     std::string id;
     std::string goalId;
     std::string actionId;
+    std::string recipeId;
     std::string planId;
     std::string trigger;
     GameTime startedAt;

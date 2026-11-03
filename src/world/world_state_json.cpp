@@ -38,7 +38,8 @@ Json stimulusJson(const ExternalStimulus& stimulus) {
 Json processJson(const ProcessExecution& process) {
     Json reserved = Json::object();
     for (const auto& [resource, amount] : process.reservedResources) reserved[resource] = amount;
-    return Json{{"id", process.id}, {"goal_id", process.goalId}, {"action_id", process.actionId}, {"plan_id", process.planId},
+    return Json{{"id", process.id}, {"goal_id", process.goalId}, {"action_id", process.actionId},
+                {"recipe_id", process.recipeId}, {"plan_id", process.planId},
                 {"trigger", process.trigger}, {"started_at", process.startedAt.minute},
                 {"completes_at", process.completesAt.minute}, {"suspended_at", process.suspendedAt.minute},
                 {"progress", process.progress},
@@ -58,6 +59,7 @@ ProcessExecution processFromJson(const Json& json) {
     process.id = jsonValue<std::string>(json, "id", "");
     process.goalId = jsonValue<std::string>(json, "goal_id", "");
     process.actionId = jsonValue<std::string>(json, "action_id", "");
+    process.recipeId = jsonValue<std::string>(json, "recipe_id", process.actionId);
     process.planId = jsonValue<std::string>(json, "plan_id", "");
     process.trigger = jsonValue<std::string>(json, "trigger", "");
     process.startedAt = GameTime{jsonValue<std::int64_t>(json, "started_at", 0)};

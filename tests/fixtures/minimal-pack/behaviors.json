@@ -1,0 +1,56 @@
+{
+  "kind": "behavior_pack",
+  "schema_version": 2,
+  "meta_actions": [
+    {
+      "id": "relieve_need",
+      "category": "need",
+      "operator": "need.relieve",
+      "description": "Apply authored need relief."
+    },
+    {
+      "id": "consume_resource",
+      "category": "resource",
+      "operator": "resource.consume",
+      "description": "Consume a configured resource."
+    }
+  ],
+  "conditions": [
+    {
+      "id": "resource_available",
+      "operator": "resource.available"
+    },
+    {
+      "id": "always",
+      "operator": "always"
+    }
+  ],
+  "recipes": [
+    {
+      "id": "inspect",
+      "plan_id": "inspect_lift",
+      "duration_minutes": 0,
+      "interruptible": true,
+      "interrupt_salience_threshold": 1.0,
+      "root": {
+        "type": "sequence",
+        "id": "inspect.sequence",
+        "children": [
+          {
+            "type": "condition",
+            "id": "inspect.always",
+            "name": "always"
+          },
+          {
+            "type": "meta_action",
+            "id": "inspect.relieve",
+            "name": "relieve_need",
+            "args": {
+              "action": "inspect"
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

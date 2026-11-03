@@ -39,6 +39,25 @@ ProviderResponse MockProvider::decide(const DecisionContext& context, const std:
     if (context.candidates.empty()) {
         return ProviderResponse{false, {}, {}, "no_candidates"};
     }
+    const auto speechAct = speechActFromString(context.speechAct);
+    if (!context.worldActionAllowed) {
+        IntentProposal proposal;
+        proposal.intent = toString(speechAct);
+        proposal.speechAct = toString(speechAct);
+        proposal.worldActionRequested = false;
+        proposal.rationale = "The input is conversational and does not request a world action.";
+        proposal.expectedOutcome = "The NPC responds without changing world facts.";
+        proposal.confidence = 1.0;
+        proposal.worldRevision = context.worldRevision;
+        proposal.npcStateVersion = context.npcStateVersion;
+        const std::string name = context.npcName.empty() ? context.npcId : context.npcName;
+        const std::string dialogue = speechAct == SpeechAct::Greeting
+                                         ? "Hello. It is good to meet you."
+                                         : speechAct == SpeechAct::Farewell
+                                             ? "Goodbye. I will remember our conversation."
+                                             : name + " listens carefully before answering.";
+        return ProviderResponse{true, std::move(proposal), dialogue, {}};
+    }
     std::string selected = context.candidates.front().actionId;
     const std::string lowered = [&playerInput] {
         std::string value = playerInput;
@@ -57,6 +76,8 @@ ProviderResponse MockProvider::decide(const DecisionContext& context, const std:
     IntentProposal proposal;
     proposal.actionId = selected;
     proposal.intent = "respond";
+    proposal.speechAct = context.speechAct.empty() ? "autonomous" : context.speechAct;
+    proposal.worldActionRequested = true;
     proposal.rationale = "The authored candidate best fits the current context.";
     proposal.expectedOutcome = "The selected authored action is attempted and validated by Runtime.";
     proposal.confidence = 1.0;
@@ -143,11 +164,12 @@ ProviderResponse LlamaCppProvider::decide(const DecisionContext& context, const 
                               {"sensitivity", drive.sensitivity}, {"evidence_confidence", drive.evidenceConfidence},
                               {"critical", drive.critical}, {"expected_relief", drive.expectedRelief}});
     }
-    const bool autonomousDecision = !context.trigger.empty() && context.trigger != "player_dialogue";
+    const bool autonomousDecision = DecisionTrigger::isAutonomous(context.trigger);
     const DecisionPolicy& policy = autonomousDecision ? config_.autonomousReappraisal : config_.playerDialogue;
     const bool useThinking = policy.enableThinking;
     const int effectiveThinkingBudget = policy.reasoningBudgetTokens;
     const Json userContent{{"npc_id", context.npcId}, {"time", context.now.toString()}, {"decision_trigger", context.trigger},
+                           {"speech_act", context.speechAct}, {"world_action_allowed", context.worldActionAllowed},
                            {"perception", context.perception}, {"memories", context.memories},
                            {"character", context.character}, {"internal_drives", context.internalDrives},
                            {"drives", drives},
@@ -164,7 +186,10 @@ ProviderResponse LlamaCppProvider::decide(const DecisionContext& context, const 
     needIds.reserve(context.drives.size());
     for (const auto& drive : context.drives) needIds.push_back(drive.id);
     const std::string systemPrompt =
-        "Return one JSON object only. Choose exactly one action_id from the supplied candidates. "
+        "Return one JSON object only. Choose exactly one action_id from the supplied candidates, or use an empty action_id for a conversation-only response. "
+        "The current speech_act is " + context.speechAct + ". world_action_allowed is " +
+        (context.worldActionAllowed ? std::string("true") : std::string("false")) + ". "
+        "If world_action_allowed is false, action_id MUST be empty and the dialogue must answer the player without promising or performing a world action. "
         "cited_stimulus_ids may contain only IDs from the supplied stimuli array; the valid stimulus IDs for this request are " +
         Json(stimulusIds).dump() + ". If that list is empty, cited_stimulus_ids MUST be []. Never use a drive or need ID as a stimulus ID. "
         "expected_relief may contain only need IDs from the supplied drives array; the valid need IDs for this request are " +
@@ -255,7 +280,7 @@ ProviderResponse LlamaCppProvider::decide(const DecisionContext& context, const 
         const std::string action = answer.value("action_id", "");
         const auto allowed = std::find_if(context.candidates.begin(), context.candidates.end(),
                                           [&action](const auto& candidate) { return candidate.actionId == action; });
-        if (allowed == context.candidates.end()) {
+        if (!action.empty() && allowed == context.candidates.end()) {
             return ProviderResponse{false, {}, {}, "unknown_action_id"};
         }
         IntentProposal proposal;
@@ -274,6 +299,8 @@ ProviderResponse LlamaCppProvider::decide(const DecisionContext& context, const 
             if (!item.value().is_number()) return ProviderResponse{false, {}, {}, "invalid_expected_relief"};
             proposal.expectedRelief[item.key()] = std::clamp(item.value().get<double>(), 0.0, 1.0);
         }
+        proposal.speechAct = context.speechAct;
+        proposal.worldActionRequested = !proposal.actionId.empty();
         return ProviderResponse{true, std::move(proposal), answer.value("dialogue", ""), {}};
     } catch (const std::exception& error) {
         return ProviderResponse{false, {}, {}, std::string("invalid_provider_json:") + error.what()};

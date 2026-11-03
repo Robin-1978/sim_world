@@ -1,6 +1,5 @@
 {
   "kind": "world",
-  "kind": "world",
   "content_version": "fixture-1.0.0",
   "id": "fixture_world",
   "display_name": "Fixture World",
@@ -32,14 +31,37 @@
   "promise_policy": {
     "renegotiation_extension_minutes": 1440,
     "broken": {
-      "promiser": {"trust": -0.08},
-      "promisee": {"respect": -0.08}
+      "promiser": {
+        "trust": -0.08
+      },
+      "promisee": {
+        "respect": -0.08
+      }
     },
-    "refused": {"actor": {"trust": -0.04}},
-    "accepted": {"actor": {"trust": 0.03}}
+    "refused": {
+      "actor": {
+        "trust": -0.04
+      }
+    },
+    "accepted": {
+      "actor": {
+        "trust": 0.03
+      }
+    }
   },
   "stimulus_rules": [
-    {"id": "inspection", "event_prefix": "fixture.inspection", "category": "work_event", "visibility": "world", "relevance": 0.8, "intensity": 0.6, "urgency": 0.4, "valence": 0.2, "source_confidence": 1.0, "ttl_minutes": 120}
+    {
+      "id": "inspection",
+      "event_prefix": "fixture.inspection",
+      "category": "work_event",
+      "visibility": "world",
+      "relevance": 0.8,
+      "intensity": 0.6,
+      "urgency": 0.4,
+      "valence": 0.2,
+      "source_confidence": 1.0,
+      "ttl_minutes": 120
+    }
   ],
   "resources": {
     "energy": {
@@ -69,7 +91,10 @@
       "event_type": "fixture.inspection",
       "detail": "Sable inspects the service lift",
       "effects": [
-        {"operation": "relieve_need", "action": "inspect"}
+        {
+          "operation": "relieve_need",
+          "action": "inspect"
+        }
       ]
     }
   ],
@@ -125,5 +150,121 @@
         "mechanism"
       ]
     }
-  ]
+  ],
+  "conversation_policy": {
+    "default_world_action_allowed": false,
+    "speech_acts": [
+      {
+        "id": "greeting",
+        "world_action_allowed": false,
+        "patterns": [
+          "hello",
+          "hi ",
+          "hey",
+          "good morning",
+          "good evening",
+          "nice to meet",
+          "你好",
+          "您好",
+          "嗨",
+          "早上好",
+          "晚上好"
+        ]
+      },
+      {
+        "id": "farewell",
+        "world_action_allowed": false,
+        "patterns": [
+          "bye",
+          "goodbye",
+          "see you",
+          "再见",
+          "回头见"
+        ]
+      },
+      {
+        "id": "promise",
+        "world_action_allowed": true,
+        "patterns": [
+          "promise",
+          "承诺",
+          "答应",
+          "保证"
+        ]
+      },
+      {
+        "id": "negotiation",
+        "world_action_allowed": true,
+        "patterns": [
+          "negotiate",
+          "deal",
+          "trade",
+          "交换",
+          "谈谈",
+          "重谈"
+        ]
+      },
+      {
+        "id": "request",
+        "world_action_allowed": true,
+        "patterns": [
+          "can you",
+          "could you",
+          "would you",
+          "will you",
+          "please",
+          "帮我",
+          "请",
+          "能不能",
+          "可以",
+          "给我",
+          "spare",
+          "offer",
+          "give me",
+          "repair",
+          "fix",
+          "修理",
+          "维修"
+        ]
+      },
+      {
+        "id": "inquiry",
+        "world_action_allowed": false,
+        "patterns": [
+          "what ",
+          "what?",
+          "why ",
+          "why?",
+          "where ",
+          "where?",
+          "when ",
+          "who ",
+          "how ",
+          "doing",
+          "日志",
+          "什么",
+          "为什么",
+          "哪里",
+          "谁",
+          "怎么",
+          "吗",
+          "？",
+          "?"
+        ]
+      },
+      {
+        "id": "command",
+        "world_action_allowed": true,
+        "patterns": [
+          "stop",
+          "go ",
+          "move",
+          "tell me",
+          "告诉我",
+          "停止",
+          "走开"
+        ]
+      }
+    ]
+  }
 }

@@ -1,6 +1,8 @@
 #pragma once
 
 #include "core/types.hpp"
+#include "npc/conversation.hpp"
+#include "npc/decision_trigger.hpp"
 #include <memory>
 
 namespace tide_marks {
@@ -16,6 +18,8 @@ struct ActionCandidate {
     // Optional content-authored words used only by the offline MockProvider's
     // natural-language spotter. Runtime validation never depends on them.
     std::vector<std::string> keywords;
+    std::string recipeId;
+    std::map<std::string, int> reservations;
 };
 
 struct StructuralConstraintView {
@@ -45,6 +49,8 @@ struct DecisionContext {
     // The trigger is part of the decision context so provider policy can
     // distinguish a player conversation from an autonomous reappraisal.
     std::string trigger;
+    std::string speechAct;
+    bool worldActionAllowed{true};
     GameTime now;
     std::string perception;
     std::string memories;
@@ -71,6 +77,8 @@ struct IntentProposal {
     std::vector<std::string> citedStimulusIds;
     std::vector<std::string> tradeoffs;
     std::map<std::string, double> expectedRelief;
+    std::string speechAct;
+    bool worldActionRequested{false};
 };
 
 struct ProviderResponse {

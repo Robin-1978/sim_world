@@ -52,7 +52,173 @@ std::vector<ScheduleSlot> parseSchedule(const Json& value, const std::string& pa
 
 std::vector<std::string> stringArray(const Json& value, const char* key, const std::string& path);
 
-std::vector<ActionCandidate> parseActions(const Json& beats, const std::string& npcId) {
+BehaviorNodeContent parseBehaviorNode(const Json& value, const std::string& path,
+                                      const std::string& parentId, int index) {
+    if (!value.is_object()) throw std::runtime_error("behavior node must be an object in " + path);
+    BehaviorNodeContent result;
+    result.type = requiredString(value, "type", path);
+    result.id = value.value("id", parentId + "." + std::to_string(index));
+    if (result.id.empty()) throw std::runtime_error("behavior node id must not be empty in " + path);
+    if (result.type == "condition" || result.type == "meta_action") {
+        result.name = requiredString(value, "name", path);
+    } else if (result.type != "sequence" && result.type != "selector" &&
+               result.type != "interruptible" && result.type != "timeout") {
+        throw std::runtime_error("unsupported behavior node type '" + result.type + "' in " + path);
+    }
+    result.args = value.value("args", Json::object());
+    if (!result.args.is_object()) throw std::runtime_error("behavior node args must be an object in " + path);
+    if (result.type == "timeout") {
+        if (!value.contains("max_ticks") || !value.at("max_ticks").is_number_integer() ||
+            value.at("max_ticks").get<int>() <= 0) {
+            throw std::runtime_error("timeout behavior node requires positive max_ticks in " + path);
+        }
+        result.maxTicks = value.at("max_ticks").get<int>();
+    }
+    if (result.type == "sequence" || result.type == "selector" ||
+        result.type == "interruptible" || result.type == "timeout") {
+        if (!value.contains("children") || !value.at("children").is_array() || value.at("children").empty()) {
+            throw std::runtime_error("composite behavior node requires children in " + path);
+        }
+        for (std::size_t childIndex = 0; childIndex < value.at("children").size(); ++childIndex) {
+            result.children.push_back(parseBehaviorNode(value.at("children").at(childIndex), path,
+                                                        result.id, static_cast<int>(childIndex)));
+        }
+        if ((result.type == "interruptible" || result.type == "timeout") && result.children.size() != 1) {
+            throw std::runtime_error(result.type + " requires exactly one child in " + path);
+        }
+    }
+    return result;
+}
+
+void parseBehaviorPack(WorldContentPack& pack, const Json& document, const std::string& path) {
+    if (document.value("kind", "") != "behavior_pack" || document.value("schema_version", 0) != 2) {
+        throw std::runtime_error("unsupported behavior pack schema: " + path);
+    }
+    const auto metaActions = document.value("meta_actions", Json::array());
+    if (!metaActions.is_array()) throw std::runtime_error("behavior pack meta_actions must be an array: " + path);
+    for (const auto& item : metaActions) {
+        MetaActionDefinition definition;
+        definition.id = requiredString(item, "id", path);
+        definition.category = requiredString(item, "category", path);
+        definition.description = item.value("description", definition.id);
+        definition.operation = requiredString(item, "operator", path);
+        definition.defaultArgs = item.value("args", Json::object());
+        if (!MetaActionRegistry::isExecutableOperator(definition.operation)) {
+            throw std::runtime_error("meta action '" + definition.id + "' uses an unsupported operator '" +
+                                     definition.operation + "' in " + path);
+        }
+        if (!definition.defaultArgs.is_object()) {
+            throw std::runtime_error("meta action default args must be an object: " + definition.id);
+        }
+        if (!pack.metaActions.emplace(definition.id, std::move(definition)).second) {
+            throw std::runtime_error("duplicate meta action: " + item.value("id", std::string{}));
+        }
+    }
+    const auto conditions = document.value("conditions", Json::array());
+    if (!conditions.is_array()) throw std::runtime_error("behavior pack conditions must be an array: " + path);
+    for (const auto& item : conditions) {
+        ConditionDefinition definition;
+        definition.id = requiredString(item, "id", path);
+        definition.operation = requiredString(item, "operator", path);
+        if (!MetaActionRegistry::isExecutableConditionOperator(definition.operation)) {
+            throw std::runtime_error("condition uses unsupported operator: " + definition.operation);
+        }
+        definition.args = item.value("args", Json::object());
+        if (!definition.args.is_object()) {
+            throw std::runtime_error("condition default args must be an object: " + definition.id);
+        }
+        if (!pack.conditions.emplace(definition.id, std::move(definition)).second) {
+            throw std::runtime_error("duplicate condition definition: " + item.value("id", std::string{}));
+        }
+    }
+    const auto recipes = document.value("recipes", Json::array());
+    if (!recipes.is_array()) throw std::runtime_error("behavior pack recipes must be an array: " + path);
+    std::set<std::string> ids;
+    for (const auto& item : recipes) {
+        const auto id = requiredString(item, "id", path);
+        if (!ids.insert(id).second) throw std::runtime_error("duplicate behavior recipe: " + id);
+        if (!item.contains("root")) throw std::runtime_error("behavior recipe requires root: " + id);
+        BehaviorRecipeContent recipe;
+        recipe.id = id;
+        recipe.planId = item.value("plan_id", id);
+        recipe.durationMinutes = item.value("duration_minutes", 0);
+        recipe.interruptible = item.value("interruptible", true);
+        recipe.interruptSalienceThreshold = item.value("interrupt_salience_threshold", 1.0);
+        if (recipe.durationMinutes < 0 || recipe.interruptSalienceThreshold < 0.0 ||
+            recipe.interruptSalienceThreshold > 1.0) {
+            throw std::runtime_error("invalid behavior recipe timing or interrupt threshold: " + id);
+        }
+        recipe.root = parseBehaviorNode(item.at("root"), path, id, 0);
+        pack.behaviorRecipes.push_back(std::move(recipe));
+    }
+}
+
+Json mergedArgs(const Json& defaults, const Json& supplied) {
+    Json result = defaults.is_object() ? defaults : Json::object();
+    if (supplied.is_object()) {
+        for (auto it = supplied.begin(); it != supplied.end(); ++it) result[it.key()] = it.value();
+    }
+    return result;
+}
+
+const BehaviorRecipeContent* findRecipe(const WorldContentPack& pack, const std::string& id) {
+    const auto found = std::find_if(pack.behaviorRecipes.begin(), pack.behaviorRecipes.end(),
+                                    [&id](const auto& recipe) { return recipe.id == id; });
+    return found == pack.behaviorRecipes.end() ? nullptr : &*found;
+}
+
+void collectBehaviorReservations(const BehaviorNodeContent& node,
+                                 const WorldContentPack& pack,
+                                 std::map<std::string, int>& reservations) {
+    if (node.type == "meta_action") {
+        const auto definition = pack.metaActions.find(node.name);
+        if (definition != pack.metaActions.end()) {
+            const auto args = mergedArgs(definition->second.defaultArgs, node.args);
+            if (definition->second.operation == "resource.consume" ||
+                definition->second.operation == "resource.reserve") {
+                const auto resource = args.value("resource", "");
+                const int amount = args.value("amount", 0);
+                if (!resource.empty() && amount > 0) reservations[resource] += amount;
+            }
+        }
+    }
+    for (const auto& child : node.children) collectBehaviorReservations(child, pack, reservations);
+}
+
+void validateBehaviorNodeReferences(const BehaviorNodeContent& node, const WorldContentPack& pack,
+                                    const std::string& path) {
+    if (node.type == "condition") {
+        if (!pack.conditions.contains(node.name)) {
+            throw std::runtime_error("behavior recipe references an undeclared condition: " + node.name);
+        }
+    } else if (node.type == "meta_action") {
+        const auto definition = pack.metaActions.find(node.name);
+        if (definition == pack.metaActions.end()) {
+            throw std::runtime_error("behavior recipe references an undeclared meta action: " + node.name);
+        }
+        const auto args = mergedArgs(definition->second.defaultArgs, node.args);
+        if (definition->second.operation.starts_with("resource.")) {
+            const auto resource = args.value("resource", "");
+            if (resource.empty() || !pack.resources.contains(resource)) {
+                throw std::runtime_error("behavior recipe references an unknown resource in " + path);
+            }
+            if (!args.contains("amount") || !args.at("amount").is_number_integer() ||
+                args.at("amount").get<int>() <= 0) {
+                throw std::runtime_error("behavior resource action requires a positive amount in " + path);
+            }
+        } else if (definition->second.operation == "link.set_state") {
+            const auto link = args.value("link", "");
+            if (std::none_of(pack.links.begin(), pack.links.end(),
+                             [&link](const auto& item) { return item.id == link; })) {
+                throw std::runtime_error("behavior action references an unknown link: " + link);
+            }
+        }
+    }
+    for (const auto& child : node.children) validateBehaviorNodeReferences(child, pack, path);
+}
+
+std::vector<ActionCandidate> parseActions(const Json& beats, const std::string& npcId,
+                                          const WorldContentPack& pack) {
     std::vector<ActionCandidate> result;
     for (const auto& beat : beats.value("beats", Json::array())) {
         if (beat.value("npc", "") != npcId) continue;
@@ -63,18 +229,17 @@ std::vector<ActionCandidate> parseActions(const Json& beats, const std::string& 
             if (!action.is_string()) throw std::runtime_error("allowed_actions entries must be strings");
             const std::string id = action.get<std::string>();
             allowedIds.insert(id);
+            const auto* recipe = findRecipe(pack, id);
+            if (recipe == nullptr) {
+                throw std::runtime_error("dialogue action has no behavior recipe: " + id);
+            }
             const auto definition = behaviorSet.value(id, Json::object());
             if (!definition.is_object()) throw std::runtime_error("dialogue behavior must be an object: " + id);
-            const int duration = definition.value("duration_minutes", 0);
-            const double interruptThreshold = definition.value("interrupt_salience_threshold", 1.0);
-            if ((!definition.empty() && (!definition.contains("duration_minutes") ||
-                                         !definition.at("duration_minutes").is_number_integer())) ||
-                duration < 0 || interruptThreshold < 0.0 || interruptThreshold > 1.0) {
-                throw std::runtime_error("invalid behavior definition in dialogue content");
-            }
-            result.push_back(ActionCandidate{id, beat.value("id", "content"), id, duration,
-                                             definition.value("interruptible", true), interruptThreshold,
-                                             stringArray(definition, "keywords", "dialogue content")});
+            ActionCandidate candidate{id, recipe->planId, beat.value("id", "content"), recipe->durationMinutes,
+                                      recipe->interruptible, recipe->interruptSalienceThreshold,
+                                      stringArray(definition, "keywords", "dialogue content"), recipe->id, {}};
+            collectBehaviorReservations(recipe->root, pack, candidate.reservations);
+            result.push_back(std::move(candidate));
         }
         for (auto it = behaviorSet.begin(); it != behaviorSet.end(); ++it) {
             if (!allowedIds.contains(it.key())) {
@@ -98,7 +263,7 @@ double boundedNumber(const Json& value, const char* key, const std::string& path
 }
 
 std::vector<NeedContent> parseNeeds(const Json& value, const std::vector<ActionCandidate>& actions,
-                                    const std::string& path) {
+                                    const WorldContentPack& pack, const std::string& path) {
     if (!value.contains("needs") || !value.at("needs").is_array()) {
         throw std::runtime_error("NPC must define a 'needs' array in " + path);
     }
@@ -136,12 +301,15 @@ std::vector<NeedContent> parseNeeds(const Json& value, const std::vector<ActionC
             }
             const auto metaActions = stringArray(it.value(), "meta_actions", path);
             if (metaActions.empty()) throw std::runtime_error("need satisfier must reference meta_actions in " + path);
+            bool explicitRelief = false;
             for (const auto& metaAction : metaActions) {
-                if (!MetaActionRegistry::contains(metaAction) || !MetaActionRegistry::isImplemented(metaAction)) {
+                const auto definition = pack.metaActions.find(metaAction);
+                if (definition == pack.metaActions.end()) {
                     throw std::runtime_error("need satisfier references an unavailable meta action: " + metaAction);
                 }
+                explicitRelief = explicitRelief || definition->second.operation == "need.relieve";
             }
-            if (std::find(metaActions.begin(), metaActions.end(), "relieve_need") == metaActions.end()) {
+            if (!explicitRelief) {
                 throw std::runtime_error("need satisfier must commit explicit relieve_need in " + path);
             }
             need.satisfiers[it.key()] = NeedSatisfier{relief, metaActions};
@@ -185,7 +353,8 @@ LinkContent parseLink(const Json& value, const std::string& path) {
     return result;
 }
 
-NpcContent parseNpc(const Json& value, const Json& beats, const std::string& path) {
+NpcContent parseNpc(const Json& value, const Json& beats, const WorldContentPack& pack,
+                    const std::string& path) {
     NpcContent result;
     result.definition = NpcDefinition{requiredString(value, "id", path), requiredString(value, "name", path),
                                       requiredString(value, "role", path), requiredString(value, "home", path),
@@ -202,8 +371,8 @@ NpcContent parseNpc(const Json& value, const Json& beats, const std::string& pat
         result.initialPeerTrust[it.key()] = it.value().get<double>();
     }
     result.schedule = parseSchedule(value.value("schedule", Json::object()), path);
-    result.actions = parseActions(beats, result.definition.id);
-    result.needs = parseNeeds(value, result.actions, path);
+    result.actions = parseActions(beats, result.definition.id, pack);
+    result.needs = parseNeeds(value, result.actions, pack, path);
     return result;
 }
 
@@ -233,11 +402,8 @@ ActivityContent parseActivity(const Json& value, const std::string& path) {
     for (const auto& effectValue : value.at("effects")) {
         EffectContent effect;
         effect.operation = requiredString(effectValue, "operation", path);
-        if (!MetaActionRegistry::contains(effect.operation)) {
-            throw std::runtime_error("unknown activity effect operation in " + path + ": " + effect.operation);
-        }
-        if (!MetaActionRegistry::isImplemented(effect.operation)) {
-            throw std::runtime_error("activity effect uses an unimplemented meta action in " + path + ": " +
+        if (!MetaActionRegistry::isExecutableOperator(effect.operation)) {
+            throw std::runtime_error("unknown or unimplemented activity operator in " + path + ": " +
                                      effect.operation);
         }
         effect.resource = effectValue.value("resource", "");
@@ -245,19 +411,19 @@ ActivityContent parseActivity(const Json& value, const std::string& path) {
         effect.maximum = effectValue.value("maximum", 100);
         effect.effectAction = effectValue.value("action", "");
         effect.targets = effectValue.value("targets", std::vector<std::string>{});
-        if ((effect.operation == "consume_resource" || effect.operation == "produce_resource" ||
-             effect.operation == "reserve_resource" || effect.operation == "release_resource") &&
+        if ((effect.operation == "resource.consume" || effect.operation == "resource.produce" ||
+             effect.operation == "resource.reserve" || effect.operation == "resource.release") &&
             effect.amount <= 0) {
             throw std::runtime_error("resource meta action needs a positive amount in " + path);
         }
-        if (effect.operation == "relieve_need") {
+        if (effect.operation == "need.relieve") {
             if (effect.effectAction.empty()) {
                 throw std::runtime_error("relieve_need requires the committed action id in 'action' in " + path);
             }
             if (!effect.resource.empty() || effect.amount != 0 || !effect.targets.empty()) {
                 throw std::runtime_error("relieve_need cannot write resources or arbitrary targets in " + path);
             }
-        } else if (effect.operation == "set_link_state") {
+        } else if (effect.operation == "link.set_state") {
             effect.linkId = requiredString(effectValue, "link", path);
             effect.traversable = effectValue.value("traversable", true);
             effect.locked = effectValue.value("locked", false);
@@ -267,7 +433,7 @@ ActivityContent parseActivity(const Json& value, const std::string& path) {
         } else if (effect.resource.empty()) {
             throw std::runtime_error("resource meta action requires 'resource' in " + path);
         }
-        if (effect.operation == "consume_resource" && !effect.targets.empty()) {
+        if (effect.operation == "resource.consume" && !effect.targets.empty()) {
             throw std::runtime_error("public resource consume does not accept targets in " + path);
         }
         result.effects.push_back(std::move(effect));
@@ -297,6 +463,10 @@ WorldContentPack ContentPackLoader::load(const std::string& rootPath) {
     WorldContentPack pack;
     pack.id = requiredString(manifest, "id", manifestPath);
     pack.version = requiredString(manifest, "version", manifestPath);
+    if (manifest.contains("behaviors")) {
+        const auto behaviorPath = rootPath + "/" + requiredString(manifest, "behaviors", manifestPath);
+        parseBehaviorPack(pack, readJson(behaviorPath), behaviorPath);
+    }
     const auto worldPath = rootPath + "/" + requiredString(manifest, "world", manifestPath);
     const auto world = readJson(worldPath);
     if (world.value("kind", "") != "world") {
@@ -363,6 +533,33 @@ WorldContentPack ContentPackLoader::load(const std::string& rootPath) {
         pack.npcDeliberation.minDrivePressure < 0.0 || pack.npcDeliberation.minDrivePressure > 1.0 ||
         pack.npcDeliberation.minInterruptSalience < 0.0 || pack.npcDeliberation.minInterruptSalience > 1.0) {
         throw std::runtime_error("npc_deliberation values are out of range in " + worldPath);
+    }
+    if (!world.contains("conversation_policy") || !world.at("conversation_policy").is_object()) {
+        throw std::runtime_error("world must define a conversation_policy: " + worldPath);
+    }
+    const auto& conversation = world.at("conversation_policy");
+    if (!conversation.contains("default_world_action_allowed") ||
+        !conversation.at("default_world_action_allowed").is_boolean()) {
+        throw std::runtime_error("conversation_policy.default_world_action_allowed must be boolean in " + worldPath);
+    }
+    pack.conversationPolicy.defaultWorldActionAllowed =
+        conversation.at("default_world_action_allowed").get<bool>();
+    if (!conversation.contains("speech_acts") || !conversation.at("speech_acts").is_array()) {
+        throw std::runtime_error("conversation_policy.speech_acts must be an array in " + worldPath);
+    }
+    std::set<std::string> speechActIds;
+    for (const auto& item : conversation.at("speech_acts")) {
+        SpeechActRule rule;
+        const auto id = requiredString(item, "id", worldPath);
+        if (!speechActIds.insert(id).second) throw std::runtime_error("duplicate speech act: " + id);
+        rule.act = speechActFromString(id);
+        if (rule.act == SpeechAct::Unknown) throw std::runtime_error("unsupported speech act: " + id);
+        if (!item.contains("world_action_allowed") || !item.at("world_action_allowed").is_boolean()) {
+            throw std::runtime_error("speech act world_action_allowed must be boolean: " + id);
+        }
+        rule.worldActionAllowed = item.at("world_action_allowed").get<bool>();
+        rule.patterns = stringArray(item, "patterns", worldPath);
+        pack.conversationPolicy.rules.push_back(std::move(rule));
     }
     const auto promisePolicy = world.value("promise_policy", Json::object());
     if (!promisePolicy.is_object()) {
@@ -521,10 +718,13 @@ WorldContentPack ContentPackLoader::load(const std::string& rootPath) {
     }
     const auto dialoguePath = rootPath + "/" + requiredString(manifest, "dialogue", manifestPath);
     const auto beats = readJson(dialoguePath);
+    for (const auto& recipe : pack.behaviorRecipes) {
+        validateBehaviorNodeReferences(recipe.root, pack, manifestPath);
+    }
     for (const auto& npcPathValue : manifest.at("npcs")) {
         const auto relativePath = npcPathValue.get<std::string>();
         const auto path = rootPath + "/" + relativePath;
-        auto npc = parseNpc(readJson(path), beats, path);
+        auto npc = parseNpc(readJson(path), beats, pack, path);
         if (npc.actions.empty()) throw std::runtime_error("NPC has no authored actions: " + npc.definition.id);
         pack.npcs.push_back(std::move(npc));
     }
@@ -548,11 +748,11 @@ WorldContentPack ContentPackLoader::load(const std::string& rootPath) {
             throw std::runtime_error("activity actor is not an authored NPC: " + activity.actor);
         }
         for (const auto& effect : activity.effects) {
-            if (effect.operation != "relieve_need" && effect.operation != "set_link_state" &&
+            if (effect.operation != "need.relieve" && effect.operation != "link.set_state" &&
                 !pack.resources.contains(effect.resource)) {
                 throw std::runtime_error("activity effect references an unknown resource: " + effect.resource);
             }
-            if (effect.operation == "set_link_state") {
+            if (effect.operation == "link.set_state") {
                 const auto link = std::find_if(pack.links.begin(), pack.links.end(),
                                                [&effect](const auto& item) { return item.id == effect.linkId; });
                 if (link == pack.links.end()) {
@@ -567,7 +767,7 @@ WorldContentPack ContentPackLoader::load(const std::string& rootPath) {
     std::map<std::string, std::set<std::string>> reliefActionsByActor;
     for (const auto& activity : pack.activities) {
         for (const auto& effect : activity.effects) {
-            if (effect.operation == "relieve_need") {
+            if (effect.operation == "need.relieve") {
                 reliefActionsByActor[activity.actor].insert(effect.effectAction);
             }
         }

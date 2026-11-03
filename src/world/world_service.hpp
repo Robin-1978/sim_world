@@ -104,7 +104,10 @@ private:
     EntityRegistry entities_;
     WorldContentPack content_;
     int transactionDepth_{0};
+    bool transactionRollbackRequested_{false};
     WorldState transactionBackup_;
+    std::size_t transactionBackupEventCount_{0};
+    std::uint64_t transactionBackupRevision_{0};
     std::vector<WorldEvent> deferredEvents_;
 
     void beginTransaction();
@@ -125,6 +128,12 @@ private:
     [[nodiscard]] bool applyActionEffects(const std::string& npcId, const std::string& actionId);
     [[nodiscard]] bool applyActionEffects(const std::string& npcId, const std::string& actionId,
                                            const std::map<std::string, int>* reservedResources);
+    [[nodiscard]] bool evaluateBehaviorCondition(const std::string& npcId,
+                                                 const BehaviorNodeContent& node) const;
+    [[nodiscard]] bool applyMetaAction(const std::string& npcId, const std::string& actionId,
+                                       const BehaviorNodeContent& node,
+                                       const std::map<std::string, int>* reservedResources);
+    [[nodiscard]] const BehaviorRecipeContent* recipeForAction(const std::string& actionId) const;
     void tickProcesses();
     void resumeSuspendedProcesses();
     void completeProcess(const std::string& npcId, ProcessExecution process);

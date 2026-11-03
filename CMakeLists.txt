@@ -65,6 +65,8 @@ add_library(tide_marks_core
     src/evolution/evolution.cpp
     src/npc/action_validator.cpp
     src/npc/behavior_tree.cpp
+    src/npc/behavior_recipe.cpp
+    src/npc/conversation.cpp
     src/npc/drive_system.cpp
     src/npc/goal_selector.cpp
     src/npc/state_machine.cpp

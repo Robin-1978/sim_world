@@ -7,6 +7,8 @@
 #include "world/components.hpp"
 #include "npc/action_validator.hpp"
 #include "npc/behavior_tree.hpp"
+#include "npc/behavior_recipe.hpp"
+#include "npc/conversation.hpp"
 #include "npc/goal_selector.hpp"
 #include "npc/state_machine.hpp"
 #include "navigation/path_planner.hpp"

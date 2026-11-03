@@ -2,6 +2,8 @@
 
 #include "core/types.hpp"
 #include "provider/provider.hpp"
+#include "npc/behavior_recipe.hpp"
+#include "npc/conversation.hpp"
 #include "world/components.hpp"
 
 #include <map>
@@ -203,6 +205,7 @@ struct WorldContentPack {
     DriveAdaptationPolicy driveAdaptation;
     StimulusPolicy stimulusPolicy;
     NpcDeliberationPolicy npcDeliberation;
+    ConversationPolicy conversationPolicy;
     PromisePolicy promisePolicy;
     std::vector<StimulusRule> stimulusRules;
     std::map<std::string, ResourceContent> resources;
@@ -212,6 +215,11 @@ struct WorldContentPack {
     std::vector<SpatialContent> spatialEntities;
     std::vector<LinkContent> links;
     std::vector<EntityArchetypeContent> entityArchetypes;
+    // Behavior alpha-names are content. Runtime only knows the finite set of
+    // generic operators in world/meta_actions.hpp.
+    std::map<std::string, MetaActionDefinition> metaActions;
+    std::map<std::string, ConditionDefinition> conditions;
+    std::vector<BehaviorRecipeContent> behaviorRecipes;
     std::optional<GameInstanceContent> instance;
 };
 

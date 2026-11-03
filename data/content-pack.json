@@ -4,6 +4,7 @@
   "id": "tide_marks.village",
   "version": "0.2.0",
   "world": "world/village.json",
+  "behaviors": "behaviors/village.json",
   "npcs": [
     "npcs/mira.json",
     "npcs/lorn.json",

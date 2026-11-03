@@ -8,5 +8,6 @@
     "npc.json"
   ],
   "dialogue": "dialogue.json",
-  "instance": "instance.json"
+  "instance": "instance.json",
+  "behaviors": "behaviors.json"
 }

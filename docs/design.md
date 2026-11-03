@@ -238,7 +238,7 @@ NPC 不每帧调用 LLM。日常移动、进食、休息、工作、资源结算
 
 ## 6. 对话、记忆和 LLM 演化
 
-对话输入先映射到询问、谈判、安抚、威胁、撒谎、承诺、交换、调查或结束等作者定义意图。结构化响应包含 `action_id`、`intent`、`motivation`、`dialogue`、`beat_id`、`cited_stimulus_ids`、`tradeoffs`、`expected_relief`、候选记忆和上下文版本。LLM 用 `cited_stimulus_ids` 指出它实际依据的外驱，用 `tradeoffs` 解释内驱之间或内驱与社会后果之间的权衡，用 `expected_relief` 表达对结果的预测；这些字段用于审计、学习和回放校验，不能直接写入事实。`motivation` 只用于解释和诊断，不参与规则判定；`action_id` 必须属于当前 DecisionContext。
+对话输入先由世界内容包中的 `conversation_policy` 映射到询问、谈判、安抚、威胁、撒谎、承诺、交换、调查或结束等作者定义话语行为。关键词、匹配顺序和该话语行为是否允许提交世界行动都属于 JSON 配置；Runtime 只执行通用分类器和权限校验，不在 C++ 中写死中文或英文短语。问候、询问、告别和普通陈述可以配置为仅对话；请求、命令、谈判和承诺可以配置为允许产生行动提案。结构化响应包含 `action_id`、`intent`、`motivation`、`dialogue`、`beat_id`、`cited_stimulus_ids`、`tradeoffs`、`expected_relief`、候选记忆和上下文版本。LLM 用 `cited_stimulus_ids` 指出它实际依据的外驱，用 `tradeoffs` 解释内驱之间或内驱与社会后果之间的权衡，用 `expected_relief` 表达对结果的预测；这些字段用于审计、学习和回放校验，不能直接写入事实。`motivation` 只用于解释和诊断，不参与规则判定；`action_id` 必须属于当前 DecisionContext。仅对话响应使用空 `action_id`，不会进入行为树或修改世界事实。
 
 对话动作例如 `create_promise` 不是直接完成任务，而是提交一条待验证命令。只有前置条件通过，承诺才进入世界并获得截止时间；接受、重谈、拒绝、兑现和违约都会留下事件、记忆、关系和后续计划变化。
 
@@ -370,23 +370,34 @@ Behavior DSL 只组合注册节点、条件和元动作，例如：
 
 ```json
 {
-  "kind": "behavior_recipe",
-  "schema_version": 1,
+  "kind": "behavior_pack",
+  "schema_version": 2,
+  "meta_actions": [
+    {"id": "consume_crate", "category": "resource", "operator": "resource.consume"},
+    {"id": "relieve_loading_need", "category": "need", "operator": "need.relieve"}
+  ],
+  "conditions": [
+    {"id": "crate_available", "operator": "resource.available"}
+  ],
+  "recipes": [
+  {
   "id": "unload_crate",
   "allowed_actors": ["role:dockworker"],
   "reservation_scope": "transaction",
   "root": {
     "type": "sequence",
     "children": [
-      {"type": "condition", "name": "resource_available", "args": {"resource": "crate", "minimum": 1}},
-      {"type": "meta_action", "name": "transfer_resource", "args": {"from": "boat", "to": "dock", "resource": "crate", "amount": 1}},
-      {"type": "meta_action", "name": "append_memory", "args": {"subject": "actor", "source_event": "last_commit", "scope": "self"}}
+      {"type": "condition", "name": "crate_available", "args": {"resource": "crate", "minimum": 1}},
+      {"type": "meta_action", "name": "consume_crate", "args": {"resource": "crate", "amount": 1}},
+      {"type": "meta_action", "name": "relieve_loading_need", "args": {"action": "unload_crate"}}
     ]
   }
+  }
+  ]
 }
 ```
 
-P0 不把这套 DSL 误称为已经完成的通用编程语言。当前小村庄将每个内容动作的时长、可中断策略和已登记元动作效果作为最小行为配方，由 `ActionCandidate` 固化为 `ProcessExecution`；`src/npc/behavior_tree.*` 已提供执行状态返回契约，但尚未让 JSON 任意构造完整树。Sequence、Selector、Wait、补偿步骤和跨过程组合属于 P1，届时仍复用同一个 `NpcActivity` 生命周期，不增加第二套状态机。
+ P0 不把这套 DSL 误称为通用编程语言，但它已经支持由 JSON 构造一棵受约束的行为树。内容包声明 `meta_actions`（故事动作 ID 到 Runtime 通用 operator 的绑定）、`conditions`（条件 ID 到只读谓词的绑定）和 `recipes`；加载器校验引用，`BehaviorRecipeRuntime` 在运行时编译 `Sequence`、`Selector`、`Interruptible`、`Timeout`、`Condition` 和 `Action` 节点。游戏代码不会为 Mira、Lorn、Eve 或某个故事动作创建专用 BT。`GoalSelector`/LLM 只选择候选 `recipe_id`，接受后由 Runtime 创建 `ProcessExecution` 并记录该 recipe；长过程等待由 ProcessExecution 管理，过程完成时才在事务中运行已编译配方的原子效果。新增行为只需新增 JSON 配方和已登记的通用 operator；只有新增底层事实变换原语才需要扩展 Runtime。
 
 演化操作是类型化的，例如 `create_entity_archetype`、`overlay_strategy`、`register_behavior_recipe`、`add_relationship` 和 `schedule_event`；不是任意 JSON Patch。新增 C++ Component、System、权限、调度、事件格式、存档迁移或可执行代码必须由开发者发布。
 

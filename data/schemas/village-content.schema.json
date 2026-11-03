@@ -2,68 +2,170 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Adaptive world content",
   "type": "object",
-  "required": ["kind", "content_version", "id", "drive_adaptation", "stimulus_policy", "npc_deliberation", "stimulus_rules", "entities", "links"],
+  "required": [
+    "kind",
+    "content_version",
+    "id",
+    "drive_adaptation",
+    "stimulus_policy",
+    "npc_deliberation",
+    "stimulus_rules",
+    "entities",
+    "links",
+    "conversation_policy"
+  ],
   "properties": {
-    "kind": {"const": "world"},
-    "content_version": {"type": "string"},
+    "kind": {
+      "const": "world"
+    },
+    "content_version": {
+      "type": "string"
+    },
     "drive_adaptation": {
       "type": "object",
-      "required": ["enabled", "expectation_learning_rate", "max_expectation_step", "cooldown_minutes"],
+      "required": [
+        "enabled",
+        "expectation_learning_rate",
+        "max_expectation_step",
+        "cooldown_minutes"
+      ],
       "properties": {
-        "enabled": {"type": "boolean"},
-        "expectation_learning_rate": {"type": "number", "minimum": 0, "maximum": 1},
-        "max_expectation_step": {"type": "number", "minimum": 0, "maximum": 1},
-        "cooldown_minutes": {"type": "integer", "minimum": 0}
+        "enabled": {
+          "type": "boolean"
+        },
+        "expectation_learning_rate": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "max_expectation_step": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "cooldown_minutes": {
+          "type": "integer",
+          "minimum": 0
+        }
       },
       "additionalProperties": false
     },
     "stimulus_policy": {
       "type": "object",
-      "required": ["max_active_per_npc", "novelty_decay", "habituation_step", "min_sensitivity", "max_sensitivity", "repeat_window_minutes"],
+      "required": [
+        "max_active_per_npc",
+        "novelty_decay",
+        "habituation_step",
+        "min_sensitivity",
+        "max_sensitivity",
+        "repeat_window_minutes"
+      ],
       "properties": {
-        "max_active_per_npc": {"type": "integer", "minimum": 1},
-        "novelty_decay": {"type": "number", "minimum": 0, "maximum": 1},
-        "habituation_step": {"type": "number", "minimum": 0, "maximum": 1},
-        "min_sensitivity": {"type": "number", "minimum": 0},
-        "max_sensitivity": {"type": "number", "minimum": 0},
-        "repeat_window_minutes": {"type": "integer", "minimum": 0}
+        "max_active_per_npc": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "novelty_decay": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "habituation_step": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "min_sensitivity": {
+          "type": "number",
+          "minimum": 0
+        },
+        "max_sensitivity": {
+          "type": "number",
+          "minimum": 0
+        },
+        "repeat_window_minutes": {
+          "type": "integer",
+          "minimum": 0
+        }
       },
       "additionalProperties": false
     },
     "npc_deliberation": {
       "type": "object",
-      "required": ["enabled", "min_stimulus_salience", "min_drive_pressure", "min_interrupt_salience", "cooldown_minutes"],
+      "required": [
+        "enabled",
+        "min_stimulus_salience",
+        "min_drive_pressure",
+        "min_interrupt_salience",
+        "cooldown_minutes"
+      ],
       "properties": {
-        "enabled": {"type": "boolean"},
-        "min_stimulus_salience": {"type": "number", "minimum": 0, "maximum": 1},
-        "min_drive_pressure": {"type": "number", "minimum": 0, "maximum": 1},
-        "min_interrupt_salience": {"type": "number", "minimum": 0, "maximum": 1},
-        "cooldown_minutes": {"type": "integer", "minimum": 0}
+        "enabled": {
+          "type": "boolean"
+        },
+        "min_stimulus_salience": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "min_drive_pressure": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "min_interrupt_salience": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "cooldown_minutes": {
+          "type": "integer",
+          "minimum": 0
+        }
       },
       "additionalProperties": false
     },
     "promise_policy": {
       "type": "object",
       "properties": {
-        "renegotiation_extension_minutes": {"type": "integer", "minimum": 1},
+        "renegotiation_extension_minutes": {
+          "type": "integer",
+          "minimum": 1
+        },
         "broken": {
           "type": "object",
           "properties": {
-            "promiser": {"$ref": "#/$defs/relationship_delta"},
-            "promisee": {"$ref": "#/$defs/relationship_delta"}
+            "promiser": {
+              "$ref": "#/$defs/relationship_delta"
+            },
+            "promisee": {
+              "$ref": "#/$defs/relationship_delta"
+            }
           },
           "additionalProperties": false
         },
         "refused": {
           "type": "object",
-          "required": ["actor"],
-          "properties": {"actor": {"$ref": "#/$defs/relationship_delta"}},
+          "required": [
+            "actor"
+          ],
+          "properties": {
+            "actor": {
+              "$ref": "#/$defs/relationship_delta"
+            }
+          },
           "additionalProperties": false
         },
         "accepted": {
           "type": "object",
-          "required": ["actor"],
-          "properties": {"actor": {"$ref": "#/$defs/relationship_delta"}},
+          "required": [
+            "actor"
+          ],
+          "properties": {
+            "actor": {
+              "$ref": "#/$defs/relationship_delta"
+            }
+          },
           "additionalProperties": false
         }
       },
@@ -73,42 +175,134 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["id", "event_prefix", "category", "visibility", "relevance", "intensity", "urgency", "valence", "source_confidence", "ttl_minutes"],
+        "required": [
+          "id",
+          "event_prefix",
+          "category",
+          "visibility",
+          "relevance",
+          "intensity",
+          "urgency",
+          "valence",
+          "source_confidence",
+          "ttl_minutes"
+        ],
         "properties": {
-          "id": {"type": "string"},
-          "event_prefix": {"type": "string", "minLength": 1},
-          "category": {"type": "string"},
-          "visibility": {"enum": ["world", "participants", "actor", "target"]},
-          "relevance": {"type": "number", "minimum": 0, "maximum": 1},
-          "intensity": {"type": "number", "minimum": 0, "maximum": 1},
-          "urgency": {"type": "number", "minimum": 0, "maximum": 1},
-          "valence": {"type": "number", "minimum": -1, "maximum": 1},
-          "source_confidence": {"type": "number", "minimum": 0, "maximum": 1},
-          "ttl_minutes": {"type": "integer", "minimum": 1}
+          "id": {
+            "type": "string"
+          },
+          "event_prefix": {
+            "type": "string",
+            "minLength": 1
+          },
+          "category": {
+            "type": "string"
+          },
+          "visibility": {
+            "enum": [
+              "world",
+              "participants",
+              "actor",
+              "target"
+            ]
+          },
+          "relevance": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "intensity": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "urgency": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "valence": {
+            "type": "number",
+            "minimum": -1,
+            "maximum": 1
+          },
+          "source_confidence": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "ttl_minutes": {
+            "type": "integer",
+            "minimum": 1
+          }
         },
         "additionalProperties": false
       }
     },
-    "id": {"type": "string", "pattern": "^[a-z0-9_-]+$"},
-    "display_name": {"type": "string"},
-    "locations": {"type": "array", "items": {"type": "string"}},
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9_-]+$"
+    },
+    "display_name": {
+      "type": "string"
+    },
+    "locations": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
     "resources": {
       "type": "object",
       "additionalProperties": {
         "type": "object",
-        "required": ["kind", "unit", "initial", "minimum", "maximum"],
+        "required": [
+          "kind",
+          "unit",
+          "initial",
+          "minimum",
+          "maximum"
+        ],
         "properties": {
-          "kind": {"type": "string"},
-          "unit": {"type": "string"},
-          "owner": {"type": "string"},
-          "location": {"type": "string"},
-          "initial": {"type": "integer"},
-          "minimum": {"type": "integer"},
-          "maximum": {"type": "integer"},
-          "divisible": {"type": "boolean"},
-          "quality_axes": {"type": "array", "items": {"type": "string"}},
-          "substitutes": {"type": "array", "items": {"type": "string"}},
-          "decay": {"type": "object"}
+          "kind": {
+            "type": "string"
+          },
+          "unit": {
+            "type": "string"
+          },
+          "owner": {
+            "type": "string"
+          },
+          "location": {
+            "type": "string"
+          },
+          "initial": {
+            "type": "integer"
+          },
+          "minimum": {
+            "type": "integer"
+          },
+          "maximum": {
+            "type": "integer"
+          },
+          "divisible": {
+            "type": "boolean"
+          },
+          "quality_axes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "substitutes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "decay": {
+            "type": "object"
+          }
         },
         "additionalProperties": false
       }
@@ -117,31 +311,88 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["id", "trigger", "event_type", "effects"],
+        "required": [
+          "id",
+          "trigger",
+          "event_type",
+          "effects"
+        ],
         "properties": {
-          "id": {"type": "string"},
-          "trigger": {"enum": ["hour", "day"]},
-          "hour": {"type": "integer", "minimum": 0, "maximum": 23},
-          "actor": {"type": "string"},
-          "target": {"type": "string"},
-          "condition_resource": {"type": "string"},
-          "condition_below": {"type": "integer"},
-          "event_type": {"type": "string"},
-          "detail": {"type": "string"},
+          "id": {
+            "type": "string"
+          },
+          "trigger": {
+            "enum": [
+              "hour",
+              "day"
+            ]
+          },
+          "hour": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 23
+          },
+          "actor": {
+            "type": "string"
+          },
+          "target": {
+            "type": "string"
+          },
+          "condition_resource": {
+            "type": "string"
+          },
+          "condition_below": {
+            "type": "integer"
+          },
+          "event_type": {
+            "type": "string"
+          },
+          "detail": {
+            "type": "string"
+          },
           "effects": {
             "type": "array",
             "items": {
               "type": "object",
-              "required": ["operation"],
+              "required": [
+                "operation"
+              ],
               "properties": {
-                "operation": {"enum": ["consume_resource", "produce_resource", "reserve_resource", "release_resource", "relieve_need", "set_link_state"]},
-                "resource": {"type": "string"},
-                "amount": {"type": "integer"},
-                "action": {"type": "string"},
-                "link": {"type": "string"},
-                "traversable": {"type": "boolean"},
-                "locked": {"type": "boolean"},
-                "targets": {"type": "array", "items": {"type": "string"}}
+                "operation": {
+                  "enum": [
+                    "resource.consume",
+                    "resource.produce",
+                    "resource.reserve",
+                    "resource.release",
+                    "need.relieve",
+                    "link.set_state",
+                    "relationship.adjust"
+                  ]
+                },
+                "resource": {
+                  "type": "string"
+                },
+                "amount": {
+                  "type": "integer"
+                },
+                "action": {
+                  "type": "string"
+                },
+                "link": {
+                  "type": "string"
+                },
+                "traversable": {
+                  "type": "boolean"
+                },
+                "locked": {
+                  "type": "boolean"
+                },
+                "targets": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
               },
               "additionalProperties": false
             }
@@ -154,16 +405,44 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["id", "npc", "peer", "min_peer_trust", "strategy", "goal_stage", "memory", "event_type"],
+        "required": [
+          "id",
+          "npc",
+          "peer",
+          "min_peer_trust",
+          "strategy",
+          "goal_stage",
+          "memory",
+          "event_type"
+        ],
         "properties": {
-          "id": {"type": "string"},
-          "npc": {"type": "string"},
-          "peer": {"type": "string"},
-          "min_peer_trust": {"type": "number", "minimum": 0, "maximum": 1},
-          "strategy": {"type": "string"},
-          "goal_stage": {"type": "integer", "minimum": 0},
-          "memory": {"type": "string"},
-          "event_type": {"type": "string"}
+          "id": {
+            "type": "string"
+          },
+          "npc": {
+            "type": "string"
+          },
+          "peer": {
+            "type": "string"
+          },
+          "min_peer_trust": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "strategy": {
+            "type": "string"
+          },
+          "goal_stage": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "memory": {
+            "type": "string"
+          },
+          "event_type": {
+            "type": "string"
+          }
         },
         "additionalProperties": false
       }
@@ -172,13 +451,31 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["id", "kind", "display_name", "bounds"],
+        "required": [
+          "id",
+          "kind",
+          "display_name",
+          "bounds"
+        ],
         "properties": {
-          "id": {"type": "string"},
-          "kind": {"type": "string"},
-          "display_name": {"type": "string"},
-          "bounds": {"type": "object"},
-          "tags": {"type": "array", "items": {"type": "string"}}
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "bounds": {
+            "type": "object"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
         },
         "additionalProperties": true
       }
@@ -187,15 +484,40 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["id", "kind", "endpoints"],
+        "required": [
+          "id",
+          "kind",
+          "endpoints"
+        ],
         "properties": {
-          "id": {"type": "string"},
-          "kind": {"type": "string"},
-          "endpoints": {"type": "array", "minItems": 2, "items": {"type": "string"}},
-          "traversable": {"type": "boolean"},
-          "locked": {"type": "boolean"},
-          "required_item": {"type": "string"},
-          "tags": {"type": "array", "items": {"type": "string"}}
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "endpoints": {
+            "type": "array",
+            "minItems": 2,
+            "items": {
+              "type": "string"
+            }
+          },
+          "traversable": {
+            "type": "boolean"
+          },
+          "locked": {
+            "type": "boolean"
+          },
+          "required_item": {
+            "type": "string"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
         },
         "additionalProperties": true
       }
@@ -204,26 +526,100 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["id", "kind"],
+        "required": [
+          "id",
+          "kind"
+        ],
         "properties": {
-          "id": {"type": "string"},
-          "kind": {"type": "string"},
-          "metadata": {"type": "object"}
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "metadata": {
+            "type": "object"
+          }
         },
         "additionalProperties": true
       }
+    },
+    "conversation_policy": {
+      "type": "object",
+      "required": [
+        "default_world_action_allowed",
+        "speech_acts"
+      ],
+      "properties": {
+        "default_world_action_allowed": {
+          "type": "boolean"
+        },
+        "speech_acts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "world_action_allowed",
+              "patterns"
+            ],
+            "properties": {
+              "id": {
+                "enum": [
+                  "greeting",
+                  "inquiry",
+                  "request",
+                  "command",
+                  "negotiation",
+                  "promise",
+                  "farewell",
+                  "statement"
+                ]
+              },
+              "world_action_allowed": {
+                "type": "boolean"
+              },
+              "patterns": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
     }
   },
-  "additionalProperties": true
-,
+  "additionalProperties": true,
   "$defs": {
     "relationship_delta": {
       "type": "object",
       "properties": {
-        "trust": {"type": "number", "minimum": -1, "maximum": 1},
-        "respect": {"type": "number", "minimum": -1, "maximum": 1},
-        "fear": {"type": "number", "minimum": -1, "maximum": 1},
-        "owed": {"type": "number", "minimum": -1, "maximum": 1}
+        "trust": {
+          "type": "number",
+          "minimum": -1,
+          "maximum": 1
+        },
+        "respect": {
+          "type": "number",
+          "minimum": -1,
+          "maximum": 1
+        },
+        "fear": {
+          "type": "number",
+          "minimum": -1,
+          "maximum": 1
+        },
+        "owed": {
+          "type": "number",
+          "minimum": -1,
+          "maximum": 1
+        }
       },
       "additionalProperties": false
     }
