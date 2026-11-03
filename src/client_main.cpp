@@ -2,6 +2,7 @@
 
 #include <array>
 #include <cmath>
+#include <cstdlib>
 #include <iostream>
 #include <memory>
 #include <string>
@@ -42,7 +43,14 @@ void drawVillageGeometry() {
 }  // namespace
 
 int main() {
-    auto village = tide_marks::WorldService::createVillage();
+    std::unique_ptr<tide_marks::IProvider> provider = std::make_unique<tide_marks::MockProvider>();
+    if (const char* selected = std::getenv("TIDE_MARKS_PROVIDER"); selected != nullptr && std::string(selected) == "llama") {
+        tide_marks::LlamaCppConfig config;
+        if (const char* model = std::getenv("TIDE_MARKS_MODEL"); model != nullptr) config.model = model;
+        if (const char* base = std::getenv("TIDE_MARKS_BASE_URL"); base != nullptr) config.baseUrl = base;
+        provider = std::make_unique<tide_marks::LlamaCppProvider>(config);
+    }
+    auto village = tide_marks::WorldService::createVillage(std::move(provider));
     InitWindow(1280, 720, "Tide Marks - Tidemark Village");
     SetTargetFPS(60);
     const bool sceneAssetAvailable = FileExists("assets/blender/village.glb");

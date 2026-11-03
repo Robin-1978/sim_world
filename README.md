@@ -26,6 +26,14 @@ cmake --build build -j2
 
 If GitHub is unreachable, prefix the configure command with `HTTPS_PROXY=http://gfw.gs-robot.cn:6780`. The window uses a slanted 3D camera. **WASD** moves, **E** talks to a nearby NPC, and **Esc** exits. The client loads `assets/blender/village.glb` when started from the repository root.
 
+To use the running local model in the 3D client, set the provider before launching:
+
+```bash
+TIDE_MARKS_PROVIDER=llama \
+TIDE_MARKS_MODEL=Huihui-Qwen3.5-4B-abliterated.Q4_K_M \
+  ./build/tide_marks_client
+```
+
 Bullet 3.25 is an independent CMake option for the production physics adapter:
 
 ```bash
