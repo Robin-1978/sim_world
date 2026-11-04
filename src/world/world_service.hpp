@@ -14,6 +14,7 @@
 #include "world/persistence.hpp"
 #include "world/event_journal.hpp"
 #include "world/transaction_manager.hpp"
+#include "world/simulation_scheduler.hpp"
 #include "world/ids.hpp"
 #include <memory>
 #include <optional>
@@ -251,7 +252,6 @@ private:
     void reviseNpcStrategies(int day);
     void applyPromiseDeadline();
     void applyExchangeDeadlines();
-    [[nodiscard]] std::int64_t nextSimulationBoundary(std::int64_t target) const;
     CommandResult reject(std::string code, std::string message) const;
 };
 

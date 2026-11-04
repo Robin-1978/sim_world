@@ -657,7 +657,7 @@ void WorldService::advanceMinutes(std::int64_t minutes) {
     pumpAsyncTurns();
     const auto target = state_.now.minute + minutes;
     while (state_.now.minute < target) {
-        const auto boundary = nextSimulationBoundary(target);
+        const auto boundary = SimulationScheduler::nextBoundary(state_, content_, target);
         const auto elapsedMinutes = boundary - state_.now.minute;
         if (elapsedMinutes <= 0) throw std::logic_error("simulation scheduler did not advance time");
         // A time step is one state transition. A long offline jump is a
@@ -721,51 +721,6 @@ void WorldService::advanceMinutes(std::int64_t minutes) {
     }
     pumpAsyncTurns();
     syncNpcEntityState();
-}
-
-std::int64_t WorldService::nextSimulationBoundary(std::int64_t target) const {
-    const auto current = state_.now.minute;
-    auto boundary = target;
-    const auto consider = [&boundary, current, target](std::int64_t candidate) {
-        if (candidate > current && candidate <= target) boundary = std::min(boundary, candidate);
-    };
-    const auto nextMultiple = [current](std::int64_t interval) {
-        if (interval <= 0) return current + 1;
-        return ((current / interval) + 1) * interval;
-    };
-
-    // Hour and day boundaries drive authored schedules, need decay, daily
-    // memories, activities and autonomous reassessment.
-    consider(nextMultiple(kMinutesPerHour));
-    consider(nextMultiple(kMinutesPerDay));
-
-    for (const auto& [npcId, npc] : state_.npcs) {
-        const auto* authored = authoredNpc(npcId);
-        const auto interval = authored != nullptr && authored->simulationTier == "far"
-                                  ? content_.simulationPolicy.farTickMinutes
-                                  : content_.simulationPolicy.nearTickMinutes;
-        consider(nextMultiple(std::max(1, interval)));
-        if (npc.activity.process && npc.activity.process->status == ProcessStatus::Running) {
-            consider(std::max(current + 1, npc.activity.process->completesAt.minute));
-        }
-        for (const auto& stimulus : npc.stimuli) {
-            if (stimulus.active) consider(std::max(current + 1, stimulus.expiresAt.minute));
-        }
-    }
-    for (const auto& [id, promise] : state_.promises) {
-        (void)id;
-        if (promise.status == PromiseStatus::Accepted || promise.status == PromiseStatus::Renegotiated) {
-            consider(std::max(current + 1, promise.due.minute));
-        }
-    }
-    for (const auto& [id, contract] : state_.exchangeContracts) {
-        (void)id;
-        if (contract.status == ExchangeContractStatus::Proposed ||
-            contract.status == ExchangeContractStatus::Accepted) {
-            consider(std::max(current + 1, contract.due.minute));
-        }
-    }
-    return boundary;
 }
 
 void WorldService::advanceTo(GameTime target) {

@@ -21,3 +21,4 @@
 #include "world/persistence.hpp"
 #include "world/event_journal.hpp"
 #include "world/transaction_manager.hpp"
+#include "world/simulation_scheduler.hpp"

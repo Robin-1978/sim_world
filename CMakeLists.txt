@@ -88,6 +88,7 @@ add_library(tide_marks_core
     src/world/meta_actions.cpp
     src/world/event_journal.cpp
         src/world/persistence.cpp
+    src/world/simulation_scheduler.cpp
     src/world/transaction_manager.cpp
     src/world/world_service.cpp
     src/world/world_state_json.cpp
