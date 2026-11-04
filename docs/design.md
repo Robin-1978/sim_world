@@ -132,6 +132,8 @@ effective_salience = salience × adapted_sensitivity(source_type, actor)
 
 外驱的“自动演化”有两层：第一层是在已批准规则内，事件自动生成刺激、到期、聚合、习惯化和重新评价；第二层是新的刺激类型、评价规则或聚合方式，只能通过 `EvolutionProposal` 进入沙箱和版本化激活。后者不能由 LLM 直接登记为活动规则。
 
+安全需求必须有真实的威胁来源。当前 P0 的 `crossing_safety` 已参与缺口、目标排序和修船满足，但还没有攻击/破坏事件，因此它只能验证“安全状态衰减—修复—满足”的基础链路，不能宣称已经完成冲突驱动的安全模拟。P1 需要增加受约束的冲突事实：攻击或破坏是对目标的行动尝试，威胁和恐吓可以不造成物理损伤，防守、撤离、封锁和修复是响应行动。它们都必须先产生可审计事件，再由 `StimulusProjector` 投射为威胁刺激；实际安全缺口由事件、暴露时间、伤害/可用性变化和主体可信感知共同计算，LLM 只能权衡风险和响应，不能直接把安全感改成某个数值。
+
 ### 结构：可执行约束与受治理演化
 
 结构不是内驱或外驱的别名，也不是一块不可变的背景。它是决定谁能感知、持有、移动、交换、协作和改变世界的规则事实，包括空间连接与访问、角色和权限、组织与制度、所有权与容量、生产配方、合同规则、信息可见范围及判定优先级。决策上下文中的 `StructuralConstraint` 必须是结构化条目，包含约束 ID、类型、作用实体/范围、来源规则、硬/软级别、数值边界、有效期和不可用原因。
@@ -230,7 +232,7 @@ NPC 由身份、物理状态、需求、长期目标、关系、感知、记忆�
 
 NPC 不每帧调用 LLM。日常移动、进食、休息、工作、资源结算和远端生活由规则推进；玩家交互、重大冲突、反思、社会策略和演化提案才进入串行 TurnQueue。NPC 具有 active、dormant、destroyed 生命周期；休眠不删除身份和历史。
 
-一次有效的 `IntentProposal` 只负责选择并启动一个已登记的行为/过程，不负责逐 tick 指挥。运行时把它固化为 NPC 的 `ProcessExecution`：记录 `process_id`、动作与配方 ID、开始/完成时间、进度、资源预留、上下文 Revision、可中断策略和状态。之后每个游戏时间步只推进过程、重算前置条件和检查中断信号；完成、失败或中断才提交对应事实。只要过程仍有效，不重复询问 LLM；过程结束后或出现高显著性外驱、硬约束变化、资源失效时，GoalSystem 才重新安排意图。一个 NPC 只有一个 `NpcActivity` 槽，它是活动生命周期的唯一所有者；槽中的 `ActivityStatus` 是唯一阶段，Goal 和 ProcessExecution 的状态字段只是该阶段的持久化投影。Goal、ProcessExecution、FSM 和 BT 是同一个活动的四个视角，各自只回答一个问题：Goal 回答“为什么做、是否仍值得做”，ProcessExecution 回答“正在执行哪个过程、进度和预留是什么”，FSM 回答“NPC 当前处于什么运行模式”，BT/BehaviorRecipe 回答“当前过程如何逐步执行”。Goal 的终止状态只能由 `NpcActivity` 的转换函数根据过程结果、中断信号或失效条件统一写入；FSM 模式由同一转换函数投影得到；BT 只返回 `Running/Success/Failure/Interrupted`，不能直接改写 Goal 或过程状态。
+一次有效的 `IntentProposal` 只负责选择并启动一个已登记的行为/过程，不负责逐 tick 指挥。运行时把它固化为 NPC 的 `ProcessExecution`：记录 `process_id`、动作与配方 ID、开始/完成时间、进度、资源预留、上下文 Revision、可中断策略和状态。之后每个游戏时间步只推进过程、重算前置条件和检查中断信号；完成、失败或中断才提交对应事实。只要过程仍有效，不重复询问 LLM；过程结束后或出现高显著性外驱、硬约束变化、资源失效时，当前 WorldService 的重评估入口才重新安排意图，未来可抽出独立 GoalSystem。一个 NPC 只有一个 `NpcActivity` 槽，它是活动生命周期的唯一所有者；槽中的 `ActivityStatus` 是唯一阶段，Goal 和 ProcessExecution 的状态字段只是该阶段的持久化投影。Goal、ProcessExecution、FSM 和 BT 是同一个活动的四个视角，各自只回答一个问题：Goal 回答“为什么做、是否仍值得做”，ProcessExecution 回答“正在执行哪个过程、进度和预留是什么”，FSM 回答“NPC 当前处于什么运行模式”，BT/BehaviorRecipe 回答“当前过程如何逐步执行”。Goal 的终止状态只能由 `NpcActivity` 的转换函数根据过程结果、中断信号或失效条件统一写入；FSM 模式由同一转换函数投影得到；BT 只返回 `Running/Success/Failure/Interrupted`，不能直接改写 Goal 或过程状态。
 
 角色独特性来自角色底稿、价值观、秘密、底线、玩家历史、关系四轴（trust、respect、fear、owed）、当前需求、已确认事实和世界事件的组合。角色底稿由作者维护，不由模型静默改写。NPC 可以从未相识进入初次接触、试探、关系建立或冲突，再进入压力事件、兑现/失信和新目标；这是内容和规则的推进状态，不是模型自由发明的剧情。
 
@@ -299,7 +301,7 @@ Provider 的 thinking、reasoning budget、max tokens 和 timeout 只从版本�
 
 ## 7. Runtime 核心契约
 
-`WorldService` 是应用入口，`WorldState` 是事实，`EntityRegistry` 是投影，Domain Systems 执行规则，`WorldScheduler` 是唯一时间入口，`EventLog` 记录提交事实，`EventBus` 只通知已提交事件，View/Renderer 只读。
+`WorldService` 是应用入口，`WorldState` 是事实，`EntityRegistry` 是投影，Domain Systems 执行规则。当前 P0 的唯一时间入口是 `WorldService::advanceMinutes`；未来可将同一契约抽出为 `WorldScheduler::advance_to`。`EventLog` 记录提交事实，`EventBus` 只通知已提交事件，View/Renderer 只读。
 
 Runtime Core 只保证实体、组件存储、事务、Revision、事件、调度、持久化、回放和权限；Needs、Drive、Perception、Goal、Behavior、Resource 和 Relationship 是可组合的 World Simulation Framework 能力。P0 可以把这组能力编译在同一进程中，但不能把村庄角色或某一套心理模型写进 Core。这样同一 Runtime 才能加载不同内容实例，且 LLM 只能通过已注册能力提出变化。
 
@@ -321,33 +323,34 @@ Command / IntentProposal / EvolutionProposal
 
 提交前失败不改变状态、Revision 或事件；提交后订阅者失败只能进入诊断计数，不能回滚事实。跨实体操作使用同一事务和版本检查；命令使用幂等键。
 
-事务只覆盖一次状态转换，不跨越整个长过程。长过程采用“启动事务 → 资源预留与 `ProcessExecution` → 时间推进/中断检查 → 完成或失败事务”的边界。完成时消费本过程拥有的预留并写入效果；被高显著性外驱打断时进入 `ActivityStatus::Suspended`，同一事务释放预留并记录 `npc.process_suspended`，保留目标、进度和计划需求；刺激失效且资源仍可满足时，GoalSystem 按原计划重新预留并恢复，`completesAt` 顺延暂停时长，记录 `npc.process_resumed`。若资源被他人占用或目标已失效，则转为 `Cancelled`/`Failed`，必要时通过声明式补偿步骤处理已经发生的部分结果。这样既保持单次提交原子性，也允许捕鱼、维修、搬运、等待交易和移动持续多个 tick。
+事务只覆盖一次状态转换，不跨越整个长过程。长过程采用“启动事务 → 资源预留与 `ProcessExecution` → 时间推进/中断检查 → 完成或失败事务”的边界。完成时消费本过程拥有的预留并写入效果；被高显著性外驱打断时进入 `ActivityStatus::Suspended`，同一事务释放预留并记录 `npc.process_suspended`，保留目标、进度和计划需求；刺激失效且资源仍可满足时，当前活动生命周期逻辑按原计划重新预留并恢复，`completesAt` 顺延暂停时长，记录 `npc.process_resumed`。若资源被他人占用或目标已失效，则转为 `Cancelled`/`Failed`，必要时通过声明式补偿步骤处理已经发生的部分结果。这样既保持单次提交原子性，也允许捕鱼、维修、搬运、等待交易和移动持续多个 tick。
 
 ### 原子元动作与复合行为
 
 Runtime 只向内容和模型暴露一组可审计的原子元动作。元动作不是任意字段写入器，而是带有 `id`、参数 Schema、前置条件、目标范围、权限、资源成本、直接效果、产生事件的规则和失败码的注册执行器。注册表还必须标记 `implemented`；未实现的设计目录项不能被内容加载器接受。后续能力必须通过注册表和 C++ 执行器增加，不能由 JSON 指向任意函数或代码。
 
-小村庄 P0 的第一版元动作目录按真实因果需要收敛如下：
+小村庄 P0 的元动作目录分为“当前已实现的运行时能力”和“尚未实现、只能作为 P1 设计入口的能力”。设计目录不能被误读为已注册执行器：
 
-| 组 | 元动作 | 说明 |
-|---|---|---|
-| 资源 | `consume_resource` | 检查可用量、单位、质量和预留后扣减资源 |
-| 资源 | `produce_resource` | 按过程输出和容量上限增加资源或耐久 |
-| 资源 | `transfer_resource` | 在实体或公共池之间转移库存，不直接覆盖绝对数值 |
-| 资源 | `reserve_resource` / `release_resource` | 为承诺、维修或交易预留资源，避免并发超用 |
-| 需求 | `relieve_need` | 依据已提交行动和来源事件降低需求缺口 |
-| 关系 | `adjust_relationship` | 按 trust、respect、fear、owed 单轴调整并记录原因 |
-| 移动 | `move_entity` / `arrive_entity` | 校验拓扑和通行状态，再由 MovementSystem 执行 |
-| 承诺 | `create_promise` / `transition_promise` | 建立、接受、重谈、兑现或违约承诺 |
-| 知识 | `append_memory` / `assert_known_fact` | 保存来源、时间、置信度和可见范围 |
-| 拓扑 | `set_link_state` | 开关、锁定或改变连接通行状态 |
-| 实体 | `create_entity` / `set_entity_lifecycle` | 从注册原型创建实体，或休眠/销毁 |
+| 状态 | 组 | 元动作/接口 | 说明 |
+|---|---|---|---|
+| P0 operator | 资源 | `consume_resource` / `produce_resource` | 检查可用量、单位、质量和预留后扣减或增加资源 |
+| P0 operator | 资源 | `reserve_resource` / `release_resource` | 为当前过程预留或释放资源，避免并发超用 |
+| P0 operator | 需求 | `relieve_need` | 依据已提交行动和来源事件降低需求缺口 |
+| P0 operator | 关系 | `adjust_relationship` | 按 trust、respect、fear、owed 单轴调整并记录原因 |
+| P0 operator | 拓扑 | `set_link_state` | 开关、锁定或改变连接通行状态 |
+| P1 operator | 资源 | `transfer_resource` | 在实体或公共池之间转移库存，不直接覆盖绝对数值 |
+| P1 operator | 移动 | `move_entity` / `arrive_entity` | 校验拓扑和通行状态，再由 MovementSystem 执行 |
+| P1 operator | 冲突 | `conflict.attack` / `conflict.sabotage` | 对目标发起有能力、位置、权限和风险校验的攻击/破坏尝试；结果只能通过配置的伤害或可用性效果落地 |
+| P1 operator | 安全 | `security.threaten` / `security.defend` / `security.evacuate` / `security.repair` | 产生威胁、降低暴露、撤离主体或恢复结构；不直接写安全需求数值 |
+| P1 operator | 承诺 | `create_promise` / `transition_promise` | 建立、接受、重谈、兑现或违约；当前 P0 通过命令接口验证承诺生命周期 |
+| P1 operator | 知识 | `append_memory` / `assert_known_fact` | 保存来源、时间、置信度和可见范围；当前 P0 仅记录运行时事件和记忆投影 |
+| P0 command API | 实体 | `create_entity` / `set_entity_lifecycle` | 从注册原型创建实体，或休眠/销毁；当前不是 Behavior DSL operator |
 
 `emit_event` 不作为可由模型自由调用的独立“改写动作”；每个成功元动作和事务由 Runtime 自动产生 WorldEvent，避免事实与事件分开提交。`set_resource`、`adjust_resource` 和 `set_npc_resource` 这类可写入任意绝对值或第二份库存的接口不向内容和 LLM 暴露，内容使用受单位、所有权、预留、前置条件和容量约束的语义化元动作。
 
-村庄复合行为可以由这些元动作自然生成：配给是“检查粮食 → 预留/消耗粮食 → 满足需求 → 记录”；修船是“检查粮食和船况 → 消耗粮食 → 增加船况 → 调整关系 → 追加记忆”；档案整理是“检查档案实体 → 增加记录完整性 → 满足认知需求”；承诺履行是“检查物品和时间 → 转移资源 → 转换承诺状态 → 调整关系与记忆”。这些配方可以从 JSON 组合，不需要为每个故事动作添加新的 C++ 方法。
+村庄复合行为可以由当前已注册元动作自然生成：配给是“检查粮食 → 消耗粮食 → 满足需求 → 记录”；修船是“检查粮食和船况 → 消耗粮食 → 增加船况 → 调整关系”；档案整理使用资源/需求配方；承诺当前通过独立命令和策略接口结算。转移资源、移动、知识和承诺的行为配方要等相应 operator 注册后才可进入内容包，不把尚未实现的动作写进可加载 JSON。
 
-定时 `Activity` 负责在作者定义的时刻唤醒内容动作；P0 的最小配方把该动作的资源和需求效果声明在活动内容中，并由同一个事务执行，完整 Behavior DSL 则把它们组合为条件、顺序、选择、超时、中断、资源预留和补偿步骤。`ProductionProcess` 描述输入、输出和过程进度，`MetaActionDefinition` 描述单个事实变更。三者由 ID 引用并分别校验。LLM 可以创造性提出新的行为组合、参数和目标，但必须使用已注册元动作；缺少表达力时生成 CapabilityProposal。整条计划先在暂存事务中汇总成本、预留和效果，不能逐个元动作直接写 WorldState。
+定时 `Activity` 负责在作者定义的时刻唤醒内容动作；当前 P0 的 JSON Behavior DSL 已把资源和需求效果组合为条件、顺序、选择、超时和中断节点。`ProductionProcess` 的完整输入/输出和补偿语义仍属于 P1；`MetaActionDefinition` 描述单个已注册事实变更。三者由 ID 引用并分别校验。LLM 可以创造性提出新的行为组合、参数和目标，但必须使用已注册元动作；缺少表达力时生成 CapabilityProposal。整条计划先在暂存事务中汇总成本、预留和效果，不能逐个元动作直接写 WorldState。
 
 ```text
 IntentProposal + BehaviorRecipe
@@ -362,7 +365,7 @@ IntentProposal + BehaviorRecipe
 
 ### 时间、移动和模拟等级
 
-物理时间、游戏时间和事件时间分开。近场物理固定步长，NPC 事件唤醒或低频更新，远端跳到下一个有意义的日程、会面、资源结算或承诺截止。所有跳时由 `WorldScheduler::advance_to` 按时间边界处理；需求结算、目标唤醒和资源冲突不能各自维护时钟。
+物理时间、游戏时间和事件时间分开。近场物理固定步长，NPC 事件唤醒或低频更新，远端跳到下一个有意义的日程、会面、资源结算或承诺截止。P0 由 `WorldService::advanceMinutes` 顺序推进分钟并在边界执行结算；未来的 `WorldScheduler::advance_to` 必须保持同一契约，需求结算、目标唤醒和资源冲突不能各自维护时钟。
 
 近场和远端共享 `MovementIntent`/`MovementResult`，包含起点、终点、路线、预计到达时间、资源消耗和失败原因；模拟等级只改变执行精度，不改变业务规则。Navigation 与 Physics 分离；物理观察必须经过 WorldService 才能成为业务事实。
 
@@ -453,7 +456,7 @@ Behavior DSL 只组合注册节点、条件和元动作，例如：
 }
 ```
 
-交易合同至少记录双方、交换资源、数量/质量、报价或支付物、预留、交付地点和时间、有效期、结算及违约路径。承诺状态变化对关系轴的影响由内容包 `promise_policy` 声明，包括违约双方、拒绝方和接受方的 `trust/respect/fear/owed` 增量以及重谈延长时长；Runtime 只负责把增量原子写入事务，不在代码里写死数值。聊天记录至少包含 `speech_act`、发送者、接收者/观察者、渠道、事实引用、来源和置信度、会话轮次、回复期限及预期后果。对话里的“我答应给你粮食”只能提交 `promise.offer` 或合同提案，不能直接增加粮食或关系。运行时把确认后的定义编译成 `consume_resource`、`produce_resource`、`transfer_resource`、`relieve_need`、`adjust_relationship` 等元动作事务；Event 由提交器自动产生。LLM 可以提出新的过程组合，但不能只凭一段文字生成不存在的产量、所有权或承诺结果。
+交易合同至少记录双方、交换资源、数量/质量、报价或支付物、预留、交付地点和时间、有效期、结算及违约路径。承诺状态变化对关系轴的影响由内容包 `promise_policy` 声明，包括违约双方、拒绝方和接受方的 `trust/respect/fear/owed` 增量以及重谈延长时长；Runtime 只负责把增量原子写入事务，不在代码里写死数值。聊天记录至少包含 `speech_act`、发送者、接收者/观察者、渠道、事实引用、来源和置信度、会话轮次、回复期限及预期后果。对话里的“我答应给你粮食”只能提交 `promise.offer` 或合同提案，不能直接增加粮食或关系。P1 注册对应 operator 后，运行时才把确认后的定义编译成 `transfer_resource`、`create_promise`、`append_memory` 等元动作事务；当前 P0 已实现的配方只使用已注册资源、需求、关系和拓扑 operator。Event 由提交器自动产生。LLM 可以提出新的过程组合，但不能只凭一段文字生成不存在的产量、所有权或承诺结果。
 
 ## 9. 存档、回放和调试
 

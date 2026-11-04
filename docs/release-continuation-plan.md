@@ -1,13 +1,13 @@
 # 《潮痕》持续推进计划
 
 > 本文件只记录实施状态、工作包、验证和下一步；架构与模型以 [design.md](design.md) 为唯一来源。
-> 最后更新：2026-11-03
+> 最后更新：2026-11-04
 
 ## 当前目标
 
-完成一个由三 NPC 小村庄承载的最小平台验证：需求/内驱随游戏时间变化，外部事件和结构约束进入决策上下文，规则或 LLM 产生意图，C++ 校验并提交事实，结果进入 EventLog、Snapshot、Replay 和文本调试界面。3D、港区和场景实验暂不作为当前门槛。
+维护已经完成的三 NPC 小村庄平台验证，并沿同一契约推进可替换世界 Runtime：需求/内驱随游戏时间变化，外部事件和结构约束进入决策上下文，规则或 LLM 产生意图，C++ 校验并提交事实，结果进入 EventLog、Snapshot、Replay 和文本调试界面。当前门槛是 P1 的异步决策、operator 扩展和社会模拟，不提前做商店、利率或政策实验。
 
-当前 P0 验收已完成。后续工作进入 P1/P2：扩展通用行为 DSL、交易与制度模型，以及带沙箱的 World Intelligence 演化；这些能力不回写 P0 的 Runtime Core 契约。
+当前 P0 验收已完成。下一步不是继续堆叠小村庄特例，而是沿稳定契约推进 P1：异步决策队列、已注册 operator 的经济/移动/承诺扩展和更大社会网络；P2 再实现带沙箱的 World Intelligence 演化。这些能力不回写 P0 的 Runtime Core 契约。
 
 ## 当前检查点
 
@@ -20,11 +20,11 @@
 | 文本调试界面和 headless 回放 | 已完成 | `src/text_ui_main.cpp`, `src/headless_main.cpp` |
 | 内容包加载 | 已完成 | `WorldService::load/fromContent`, `data/`, `tests/fixtures/minimal-pack` |
 | 存档 schema 与事件截断点 | 已完成 | `world_state_json.*`, `save_schema_version=10`, `simulation_version=adaptive-runtime-p0.10`, `event_sequence`, `instance_id`, `NpcActivity` 聚合、`definition_id` 引用、实例/内容版本校验；运行态不复制角色定义 |
-| 内驱/需求模型 | 四域、显式满足配方和有界预期适应已实现；敏感度学习与演化提案待扩展 | `src/npc/drive_system.*`, `NeedContent`, `NeedState`, `need.*` events |
+| 内驱/需求模型 | 四域、显式满足配方和有界预期适应已实现；安全需求目前验证衰减/修复链路，威胁与冲突事件待 P1 | `src/npc/drive_system.*`, `NeedContent`, `NeedState`, `need.*` events |
 | 外驱/结构上下文 | 已实现结构化 Stimulus/Constraint、到期、习惯化和快照；结构演化治理已接入，沙箱留给 P2 | `DecisionContext.stimuli`, `constraints`, `WorldService::projectStimuli`, `src/evolution/evolution.*` |
-| LLM 解释与权衡 | 对话提案已接入引用 Stimulus、tradeoffs、expected relief；高显著性自主审议基础链路已接入，异步 TurnQueue 待实现 | `IntentProposal`, `IProvider`, `WorldService::converse/deliberate` |
+| LLM 解释与权衡 | 同步对话/自驱提案、channel 策略、Qwen JSON Schema 和缺失 action 回退已完成；异步 TurnQueue 待 P1 | `IntentProposal`, `IProvider`, `decision_channels`, `WorldService::converse/deliberate` |
 | 长过程执行 | 数据驱动时长、单一活动槽、资源预留、完成/挂起/恢复事件和 Snapshot 恢复均已实现；挂起释放预留，刺激清除且资源可用时按原计划恢复并顺延完成时间；Goal、Process、FSM、BT 是同一活动的四个投影 | `ProcessExecution`, `NpcActivity`, `WorldService::tickProcesses`, `resumeSuspendedProcesses`, `src/npc/state_machine.*` |
-| 通用资源与实例活动 | 基础层已实现，生产/交易语义扩展属于 P1 | `ResourceContent`, `ResourceState(amount,reserved)`, `ActivityContent`, data-driven schedule effects；承诺关系增量与重谈时长已由 `promise_policy` 驱动 |
+| 通用资源与实例活动 | 资源数量/预留、定时 Activity 和基础生产效果已实现；资源转移、生产过程、交易结算属于 P1 | `ResourceContent`, `ResourceState(amount,reserved)`, `ActivityContent`, data-driven schedule effects；承诺关系增量与重谈时长已由 `promise_policy` 驱动 |
 | 元动作语义目录 | 已冻结；故事动作 ID 由内容包绑定到通用 operator，行为配方在运行时编译为 BT | `src/world/meta_actions.*`, `src/npc/behavior_recipe.*`, `data/behaviors/village.json` |
 | World Intelligence 演化提案 | 结构治理已完成，沙箱/激活待 P2 | `src/evolution/evolution.*`, `data/schemas/evolution-proposal.schema.json`; 校验白名单、禁止 Core mutation、独立审批已覆盖 |
 | 3D 表现和 Blender 场景 | 已有 P0 原型 | 不参与当前平台模型验收 |
@@ -72,10 +72,10 @@
 2. 校验模型返回的上下文版本、候选白名单、资源、权限、关系和幂等键。
 3. ~~让一次有效决策启动持久化为 `ProcessExecution`，过程中不重复调用 LLM~~ 已完成：候选行为声明时长、可中断策略和显著性阈值；完成/中断才提交对应效果。`NpcActivity` 现在是唯一活动槽和生命周期状态源，Goal/Process/FSM/BT 不再各自维护生命周期。
 4. 已提交行动统一形成 WorldEvent，并驱动资源、需求、记忆和下一轮外部刺激；更丰富的关系/合同元动作属于 P1。
-5. 把真实 Provider 的自主审议接入异步 TurnQueue；当前同步路径只用于 Mock、测试和受控推进，不阻塞主循环是后续门槛。
-6. 对模型关闭、模型迟到、过期提案、未知动作、重复提案、过程恢复和中断释放预留增加回归测试。
+5. ~~把真实 Provider 的自主审议接入异步 TurnQueue~~ 延后到 P1；当前同步路径只用于受控推进，不能被误称为非阻塞调度。
+6. ~~对模型关闭、模型迟到、过期提案、未知动作、重复提案、过程恢复和中断释放预留增加回归测试~~ 已覆盖；模型缺少必需 action 时会回退到同一候选集的确定性 Provider。
 
-P0-K 的前三项以及模型关闭、过期提案、重复提案、过程恢复和中断释放预留已有回归覆盖。异步 Provider TurnQueue 属于 P1；当前同步路径只服务于受控推进。
+P0-K 的提案校验、模型关闭回退、过期提案、重复提案、过程恢复、嵌套事务回滚和中断释放预留已有回归覆盖。异步 Provider TurnQueue 属于 P1；当前同步路径只服务于受控推进。
 
 ### P0-L：小村庄因果演示（已完成）
 
@@ -84,30 +84,49 @@ P0-K 的前三项以及模型关闭、过期提案、重复提案、过程恢复
 3. 保持一个共享模型槽位；不让 LLM 阻塞游戏时间，也不让 LLM 直接修改 WorldState。
 4. P0 通过后再进入港区内容，不提前实现商店、利率或政策沙箱。
 
-### P0-M：世界对象与元动作建模（已完成 P0 基线）
+### P0-M：世界对象与元动作建模（P0 基线已完成，扩展项进入 P1）
 
 已完成：运行态 NPC 只保存 `definition_id`，快照不复制内容定义；承诺关系增量与重谈期限由 `promise_policy` 数据驱动；实体 ID 前缀和游戏时间单位由共享运行时常量生成；Game Instance 清单与 Content Pack 清单分开；快照保存并校验 `instance_id`；第二个最小实例验证替换性。
 
-1. 冻结 Entity/Agent、Resource、ProductionProcess、ConsumptionNeed、Exchange/Contract、Communication、Institution/Rule 和 Event 的属性契约。
-2. 让内容加载器校验单位、所有权、容量、输入/输出、时间窗口、权限和引用，不接受只有名称没有语义属性的动作。
-3. 完成 P0 元动作注册表：资源消耗/产出/转移/预留、需求满足、关系调整、移动、承诺、记忆、连接状态和实体生命周期。
-   - 已完成执行器：`consume_resource`、`produce_resource`、`reserve_resource`、`release_resource`。
+1. ~~冻结 Entity/Agent、Resource、ProductionProcess、ConsumptionNeed、Exchange/Contract、Communication、Institution/Rule 和 Event 的属性契约~~ 已完成 P0 的基础字段和 JSON 边界；完整交易、制度和生产字段继续在 P1 逐项落地。
+2. ~~让内容加载器校验单位、所有权、容量、输入/输出、时间窗口、权限和引用~~ 已完成当前资源、拓扑、需求、行为配方和引用校验；质量、所有权、交易输入/输出的完整语义属于 P1 operator。
+3. ~~完成 P0 元动作注册表：资源消耗/产出/预留、需求满足、关系调整和连接状态~~ 已完成；当前已注册执行器为 `resource.consume`、`resource.produce`、`resource.reserve`、`resource.release`、`need.relieve`、`relationship.adjust`、`link.set_state`。资源转移、移动、承诺和知识动作保留为 P1 operator，不提前写入可加载内容。
 4. ~~把小村庄真实的配给、修船、档案整理和承诺行为组合为 BehaviorRecipe；不再为每个 NPC 添加 C++ 特例。~~ 已完成：`data/behaviors/village.json` 定义 meta actions、conditions 和 recipes，Runtime 编译 Sequence/Selector/Condition/Action/Timeout/Interruptible 节点；ActionCandidate 只引用配方，ProcessExecution 在完成时执行同一配方。
-5. 为元动作、复合行为、事务失败和回滚补自动化测试；测试通过前不增加商店、利率或政策规则。
+5. ~~为元动作、复合行为、事务失败和回滚补自动化测试~~ 已完成；当前完整测试约 3 秒通过。新增商店、利率或政策规则前，必须先完成对应的 P1 事实模型。
 
 ## 后续工作包
 
-### P1：潮门港与可组合行为扩展
+### P1：异步决策与社会模拟扩展
 
-在现有 JSON Behavior DSL 上加入 Wait、补偿步骤和更丰富的资源/交易语义，再加入港区、家庭/组织指标、阵营关系、近远场模拟等级、完整 UI、物理机关和内容迁移。验收仍以可回放的事实链为准。
+按以下顺序推进：
+
+1. **异步决策队列**：Provider 在独立工作线程运行；请求保存 channel、World Revision、NPC State Version、内容/提示版本和幂等键；返回后只接受仍然有效的提案，过期提案进入审计日志，不阻塞 World Tick。
+2. **已注册 operator 扩展**：先实现并测试 `transfer_resource`、`move_entity`/`arrive_entity`、`conflict.attack`/`conflict.sabotage`、`security.defend`/`security.evacuate`/`security.repair`、承诺/合同结算、知识记忆来源和生产过程；每个 operator 都要有参数校验、事件、回放和失败补偿，再开放给 JSON 内容。
+3. **潮门港纵向切片**：增加交易、家庭/组织指标、阵营关系和近远场更新，仍使用同一 WorldState、ProcessExecution、EventLog 和 Replay 契约。
+4. **验证与性能**：增加多个实例并行离线推进、事件数量/内存指标和 `advance_to` 调度边界测试；保持本地三 NPC 回归在可接受时间内。
+
+验收标准是同一 Runtime 加载港区内容后，交易和社会变化能由事件链解释，暂停/恢复/回放不调用 LLM，远端实体不会逐帧模拟。
 
 ### P2：World Intelligence 演化和沙箱
 
-实现 Evolution/Scenario Proposal Schema、提案库、来源事实、回放沙箱、指标评估、审批策略、版本化 overlay、激活、观察和回滚。只有已注册的声明式能力可以在线激活；新增 C++ 能力仍需开发者发布。
+实现 Evolution/Scenario Proposal Schema、提案库、来源事实、回放沙箱、指标评估、审批策略、版本化 overlay、激活、观察和回滚。先支持内容、知识和策略提案，再支持声明式 capability；只有已注册的声明式能力可以在线激活，新增 C++ 能力仍需开发者发布。小店、利率和政策实验放在这一阶段，必须在已有经济/制度事实模型上运行，不能由 LLM 直接生成数值结果。
 
 ### P3：可替换世界实例
 
 用同一 Runtime 加载新的小说世界，扩展多区域、阵营、经济和长期余波。现实世界实验只有在定义对应机制、数据边界和校准方法后才进入计划。
+
+## 剩余目标总表
+
+| 优先级 | 剩余目标 | 完成条件 |
+|---|---|---|
+| P1-1 | 异步 Provider TurnQueue | 模型请求不阻塞 World Tick；过期结果可审计且不改事实 |
+| P1-2 | 资源转移、移动、冲突/安全、承诺/合同、知识和生产 operator | JSON 可引用；前置条件、事务、事件、回放和失败补偿齐全 |
+| P1-3 | 潮门港社会切片 | 交易、组织/阵营关系和近远场模拟形成可回放因果链 |
+| P1-4 | 调度与性能基线 | `advance_to` 边界、事件增长、快照大小和离线推进有基准 |
+| P2-1 | Evolution/Scenario Sandbox | 从快照运行候选变化，输出指标、差异和来源，不污染原始 Pack |
+| P2-2 | Overlay 激活与回滚 | 内容/策略版本可审计、可观察、可回退 |
+| P2-3 | 场景实验 | 小店、利率、政策只作用于已建模事实，并返回可解释结果 |
+| P3 | 新世界实例 | 第二个非村庄内容包完整运行，证明 Runtime 可替换 |
 
 ## 自动化验证命令
 
