@@ -10,11 +10,19 @@ Tide Marks is a rule-driven world that keeps living without the player at its ce
 cmake --preset default
 cmake --build --preset default
 ctest --test-dir build --output-on-failure
-./build/tide_marks_headless --scenario village --days 2 --replay /tmp/tide_marks-village.jsonl
-./build/tide_marks_headless --scenario village --days 2 --dump-events
+./build/tide_marks_headless --days 2 --replay /tmp/tide_marks-village.jsonl
+./build/tide_marks_headless --days 2 --dump-events
 ```
 
 This prints the starting state, a dialogue turn, two days of NPC life, and the replay summary. It does not require a display or a running model server. `./build/tide_marks_client` is a display-free scene inspector.
+
+The headless entry point reads the world identity, first dialogue participant, content version, and opening state from the selected pack. Load a different instance, including a genuinely different fiction, with:
+
+```bash
+./build/tide_marks_headless \
+  --content-root tests/fixtures/glass-orchard-pack \
+  --days 1 --provider mock --dump-events
+```
 
 ## Text interface
 
@@ -28,6 +36,15 @@ Try `look`, `map`, `entities`, `talk mira ration please`, `day`, `events`, `save
 
 ```bash
 ./build/tide_marks_text --script docs/examples/village-session.txt
+```
+
+Pass `--content-root` to inspect another loaded instance with the same text console:
+
+```bash
+./build/tide_marks_text \
+  --content-root tests/fixtures/glass-orchard-pack \
+  --script tests/fixtures/glass-orchard-pack/session.txt \
+  --provider mock
 ```
 
 ## 3D window

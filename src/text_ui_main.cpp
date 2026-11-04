@@ -17,14 +17,19 @@ std::unique_ptr<IProvider> providerFromProfile(const std::string& profilePath, c
     return makeProviderFromProfile(profile, overrideType);
 }
 
-void printHelp() {
+void printHelp(const WorldService& service) {
+    std::string npcIds;
+    for (const auto& npc : service.content().npcs) {
+        if (!npcIds.empty()) npcIds += ", ";
+        npcIds += npc.definition.id;
+    }
     std::cout << "Commands:\n"
               << "  look                         show time, resources, NPCs\n"
               << "  map                          show authored topology\n"
               << "  entities                     show runtime entity lifecycle\n"
               << "  entity-create <id> <archetype>\n"
               << "  entity-activate|entity-dormant|entity-destroy <id>\n"
-              << "  talk <npc> <text>            talk to mira, lorn, or eve\n"
+              << "  talk <npc> <text>            talk to a loaded NPC: " << npcIds << "\n"
               << "  advance <minutes>            advance all NPC life\n"
               << "  day                          advance one day\n"
               << "  events [count]               show recent committed events\n"
@@ -107,7 +112,7 @@ bool execute(WorldService& service, const std::string& line) {
     input >> command;
     if (command.empty() || command[0] == '#') return true;
     if (command == "help") {
-        printHelp();
+        printHelp(service);
     } else if (command == "look") {
         printLook(service);
     } else if (command == "map") {
@@ -187,17 +192,22 @@ bool execute(WorldService& service, const std::string& line) {
 
 int main(int argc, char** argv) {
     std::string scriptPath;
+    std::string contentRoot = ContentPackLoader::defaultRoot();
     std::string profilePath = defaultIntelligenceProfilePath();
     std::string providerOverride = "mock";
     for (int index = 1; index < argc; ++index) {
         const std::string argument = argv[index];
         if (argument == "--script" && index + 1 < argc) scriptPath = argv[++index];
+        else if (argument == "--content-root" && index + 1 < argc) contentRoot = argv[++index];
         else if (argument == "--profile" && index + 1 < argc) profilePath = argv[++index];
         else if (argument == "--provider" && index + 1 < argc) providerOverride = argv[++index];
     }
-    auto service = WorldService::load(ContentPackLoader::defaultRoot(),
-                                      providerFromProfile(profilePath, providerOverride));
-    printHelp();
+    auto service = WorldService::load(contentRoot, providerFromProfile(profilePath, providerOverride));
+    const auto worldName = service.content().instance
+                               ? service.content().instance->displayName
+                               : service.content().worldId;
+    std::cout << "《潮痕》 " << worldName << "\n";
+    printHelp(service);
     std::istream* input = &std::cin;
     std::ifstream script;
     if (!scriptPath.empty()) {

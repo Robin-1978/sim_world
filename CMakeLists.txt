@@ -138,6 +138,12 @@ add_test(NAME glass_orchard_replay
 set_tests_properties(glass_orchard_replay PROPERTIES
     PASS_REGULAR_EXPRESSION "replay: glass_orchard_world"
     FAIL_REGULAR_EXPRESSION "replay error")
+add_test(NAME glass_orchard_text
+    COMMAND tide_marks_text --content-root ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/glass-orchard-pack
+            --script ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/glass-orchard-pack/session.txt --provider mock)
+set_tests_properties(glass_orchard_text PROPERTIES
+    PASS_REGULAR_EXPRESSION "talk to a loaded NPC: orin, kel"
+    FAIL_REGULAR_EXPRESSION "unknown_npc")
 
 set_target_properties(tide_marks_headless tide_marks_client tide_marks_text tide_marks_tests
     PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})

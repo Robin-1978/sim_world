@@ -1,0 +1,5 @@
+look
+talk orin please trade oil for resin
+day
+events 8
+quit

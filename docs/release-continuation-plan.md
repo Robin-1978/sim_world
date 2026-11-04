@@ -5,9 +5,9 @@
 
 ## 当前目标
 
-维护已经完成的三 NPC 小村庄平台与可替换港区实例，并在同一契约上补齐 World Intelligence 的可审计闭环：需求/内驱随游戏时间变化，外部事件和结构约束进入决策上下文，规则或 LLM 产生意图，C++ 校验并提交事实，结果进入 EventLog、Snapshot、Replay 和文本调试界面；异常规则做确定性检测，Scenario Proposal 从同一 Snapshot 对照运行且不污染源世界。下一阶段只推进 P3 的新世界实例与长期余波，不把尚未建模的商店、利率或政策伪装成可计算结果。
+维护三 NPC 小村庄、可替换港区和第三个独立小说实例，并在同一契约上补齐 World Intelligence 的可审计闭环：需求/内驱随游戏时间变化，外部事件和结构约束进入决策上下文，规则或 LLM 产生意图，C++ 校验并提交事实，结果进入 EventLog、Snapshot、Replay 和文本调试界面；异常规则做确定性检测，Scenario Proposal 从同一 Snapshot 对照运行且不污染源世界。P3 的可替换性纵向切片已经完成；后续工作是把同一模型扩展到更多内容与真实领域，不把尚未建模的商店、利率或政策伪装成可计算结果。
 
-当前 P0、P1 与 P2 检查点均已完成。P1 增加了异步决策队列、已注册 operator、港区社会切片和近远场调度基准；P2 增加了内容声明异常检测、反事实场景实验、结果 JSON 审计与 CLI 复现入口。这些能力均保持 P0 的 Runtime Core 契约。
+当前 P0、P1、P2 与 P3 可替换性检查点均已完成。P1 增加了异步决策队列、已注册 operator、港区社会切片和近远场调度基准；P2 增加了内容声明异常检测、反事实场景实验、结果 JSON 审计与 CLI 复现入口；P3 增加了跨区域、双阵营、制度协定、自定义需求域和长期承诺余波的第三个内容实例。这些能力均保持同一 Runtime Core 契约。
 
 ## 当前检查点
 
@@ -20,12 +20,12 @@
 | 文本调试界面和 headless 回放 | 已完成 | `src/text_ui_main.cpp`, `src/headless_main.cpp` |
 | 内容包加载 | 已完成 | `WorldService::load/fromContent`, `data/`, `tests/fixtures/minimal-pack` |
 | 存档 schema 与事件截断点 | 已完成 | `world_state_json.*`, `save_schema_version=14`, `simulation_version=adaptive-runtime-p1.14`, `event_sequence`, `instance_id`, `inventories`, `relationships`, `social_groups`, `NpcActivity` 聚合、`lastSimulationTick/lastDriveTick`、`definition_id` 引用、实例/内容版本校验与可重放 overlay 栈；运行态不复制角色定义 |
-| 内驱/需求模型 | 四域、显式满足配方和有界预期适应已实现；安全事实已支持冲突/威胁/防守/撤离/修复并通过 Stimulus 投射，需求仍由规则链路维护 | `src/npc/drive_system.*`, `NeedContent`, `NeedState`, `need.*` events |
+| 内驱/需求模型 | 需求域是内容定义的标签，村庄默认四域、Glass Orchard 使用 stewardship/ecological；显式满足配方和有界预期适应已实现，安全事实已支持冲突/威胁/防守/撤离/修复并通过 Stimulus 投射 | `src/npc/drive_system.*`, `NeedContent`, `NeedState`, `need.*` events, `tests/fixtures/glass-orchard-pack` |
 | 外驱/结构上下文 | 已实现结构化 Stimulus/Constraint、到期、习惯化和快照；结构演化治理已接入，沙箱留给 P2 | `DecisionContext.stimuli`, `constraints`, `WorldService::projectStimuli`, `src/evolution/evolution.*` |
 | LLM 解释与权衡 | 同步对话/自驱提案、channel 策略、Qwen JSON Schema、缺失 action 回退和异步 TurnQueue 已完成；过期结果只写审计事件 | `IntentProposal`, `IProvider`, `TurnQueue`, `decision_channels`, `WorldService::converse/deliberate/pumpAsyncTurns` |
 | 长过程执行 | 数据驱动时长、单一活动槽、配方声明的输入预留、完成/挂起/恢复事件和 Snapshot 恢复均已实现；挂起释放预留，刺激清除且资源可用时按原计划恢复并顺延完成时间；Goal、Process、FSM、BT 是同一活动的四个投影 | `ProcessExecution`, `NpcActivity`, `reservation_mode`, `WorldService::tickProcesses`, `resumeSuspendedProcesses`, `src/npc/state_machine.*` |
 | 通用资源与实例活动 | 通用资源数量、可选输入预留、实体库存、资源转移、生产、原子交易、承诺和定时 Activity 已实现；Activity 可组合已注册 operator 并在嵌套事务中失败补偿，跨主体抢占仍属于后续工作 | `ResourceContent`, `ResourceState(amount,reserved)`, `WorldState.inventories`, `GameInstanceContent.inventoryInitial`, `reservation_mode`, `tradeResources`, `ActivityContent`；承诺关系增量与重谈时长已由 `promise_policy` 驱动 |
-| 社会关系与组织 | 已实现 NPC/玩家/组织四轴关系、声明式社会组成员与指标、交易和快照恢复；独立潮门港纵向切片已通过可替换 Content Pack 验证，集体驱力和港区扩展内容仍继续扩展 | `NpcState.relationships`, `WorldState.socialGroups`, `SocialGroupContent`, `relationship.adjust`, `trade.execute`, `tests/fixtures/port-pack` |
+| 社会关系与组织 | 已实现 NPC/玩家/组织四轴关系、声明式社会组成员与指标、交易和快照恢复；港区与 Glass Orchard 分别使用自己的组织、阵营和制度事实，没有 Runtime 特例 | `NpcState.relationships`, `WorldState.socialGroups`, `SocialGroupContent`, `relationship.adjust`, `trade.execute`, `tests/fixtures/port-pack`, `tests/fixtures/glass-orchard-pack` |
 | 元动作语义目录 | 已冻结；故事动作 ID 由内容包绑定到通用 operator，行为配方在运行时编译为 BT | `src/world/meta_actions.*`, `src/npc/behavior_recipe.*`, `data/behaviors/village.json` |
 | World Intelligence 演化提案 | 提案持久化、验证、沙箱、版本化 overlay 激活/恢复/栈式回滚、内容声明异常检测和反事实场景实验已完成 | `src/evolution/evolution.*`, `src/evolution/anomaly.*`, `src/evolution/scenario.*`, `src/world/world_service.*`, `data/schemas/evolution-proposal.schema.json`, `data/schemas/scenario-proposal.schema.json`; 校验白名单、禁止 Core mutation、独立审批、快照重放和结果 JSON 审计已覆盖 |
 | 3D 表现和 Blender 场景 | 已有 P0 原型 | 不参与当前平台模型验收 |
@@ -40,22 +40,23 @@
 - 需求缺口会随游戏时间增加，已提交动作会产生 `need.relieved`，跨阈值会产生 `need.critical`，需求状态可保存和恢复。
 - 运行态 NPC 只保存 `definition_id`；快照引用已删除的内容或不同 `content_version` 时会明确拒绝加载。
 - 第二个最小内容实例（`tests/fixtures/minimal-pack`，NPC `sable`）可以独立加载、保存和查询实体投影，证明 Runtime 不依赖村庄角色。
+- 第三个独立小说实例（`tests/fixtures/glass-orchard-pack`）使用自定义需求域、两个区域、两个阵营和一个制度协定运行，并在一天后产生承诺违约的关系余波；headless 的标题、对话 NPC 和回放内容根也从当前实例读取。
 - 承诺的关系轴增量和重谈延长时长来自 `promise_policy`，修改内容即可改变结果。
 - 行为树由 `recipes` 自动构造；Mira、Lorn、Eve 与故事动作没有专用 C++ BT。
 - 对话与自驱由 `decision_channels` 声明；通道属性、话语权限、事件/记忆投影和 Provider 策略不再依赖 trigger 字符串分支。
 - 嵌套配方失败只回滚自己的保存点，不会把所在世界时间步一起恢复；快照回滚不复制不可变事件历史。
-- 40 个核心测试当前在本机以约 4.5 秒完成，单测耗时输出用于防止长期模拟回归。
+- 42 个核心测试和三个独立 `Glass Orchard` CLI 回归当前在本机以约 5 秒完成，单测耗时输出用于防止长期模拟回归。
 
 ## P0 工作顺序
 
 ### P0-J：内驱、外驱与自动适应（已完成）
 
 1. 保持 `NeedDefinition/NeedState -> DriveSystem -> NeedEvent -> GoalSelector` 的确定性链路。
-2. ~~把需求域收口为四域~~ 已完成：内容使用 `domain=physiological|psychological|social|cognitive`，每项具体需求绑定一个或多个可执行满足配方。
+2. ~~把需求域收口~~ 已完成：村庄使用 `physiological|psychological|social|cognitive` 作为默认内容分类；加载器与 Schema 接受任意非空领域标签，每项具体需求仍必须绑定一个或多个可执行满足配方。
 3. ~~实现显式 `relieve_need` 元动作~~ 已完成：由配方和来源事件驱动，LLM 不能直接设置缺口或权重。
 4. ~~把外驱从文本拼接改为 Stimulus~~ 已完成：包含来源、效价、紧迫度、新颖性、可见范围、置信度、到期时间和显著性。
 5. ~~实现有界预期适应~~ 已完成：学习率、步长、冷却期、版本、`drive.adapted` 和 `stimulus.habituated` 均进入 Snapshot/Replay；下一步才增加敏感度学习。
-6. ~~在文本界面显示驱力上下文~~ 已完成：显示四域需求、deficit、drive、临界状态、外驱和约束。
+6. ~~在文本界面显示驱力上下文~~ 已完成：显示所有内容声明的需求域、deficit、drive、临界状态、外驱和约束。
 7. ~~增加需求和适应回归~~ 已完成：覆盖衰减、临界、满足、适应、快照恢复和最小内容包。
 8. ~~清理剩余内容特例，使 P0 行为通过内容包动作和注册规则表达，避免把 NPC ID 写进 Runtime 算法。~~ 已完成；Mock Provider 的关键词也由对白内容声明，Runtime 不按村庄动作 ID 分支。
 9. ~~将当前村庄资源字段收口为通用资源组件/资源存储。~~ 已完成；生产、交易、合同和通信对象的完整语义扩展属于 P1。
@@ -114,7 +115,9 @@ Evolution Proposal Schema、提案库、来源事实、回放沙箱、指标评�
 
 ### P3：可替换世界实例
 
-用同一 Runtime 加载新的小说世界，扩展多区域、阵营、经济和长期余波。现实世界实验只有在定义对应机制、数据边界和校准方法后才进入计划。
+纵向切片已完成。`tests/fixtures/glass-orchard-pack` 使用同一 Runtime 加载新的小说世界：两个命名区域经两条通用拓扑连接，两个阵营与一个制度协定使用社会组事实，资源交换使用通用交易 operator，stewardship/ecological 需求域由内容声明，逾期承诺在一天后改变关系和事件历史。该实例不经过村庄、港区或角色专用代码；Snapshot 恢复和 headless replay 都已接入回归。
+
+下一阶段扩展的是内容尺度和校准，不是替换执行模型：更多区域与组织、任务内容、经济与制度规则需要通过同一 Content Pack / Evolution Proposal 契约加入；现实世界实验必须定义对应实体、数据边界、校准数据和失败标准后才能运行。
 
 ## 剩余目标总表
 
@@ -125,20 +128,21 @@ Evolution Proposal Schema、提案库、来源事实、回放沙箱、指标评�
 | P1-3 | 潮门港社会切片 | 已完成最小切片：交易、组织/阵营关系和近远场模拟形成可回放因果链；家庭、任务和 UI 属于后续内容扩展 |
 | P1-4 | 调度与性能基线 | 已完成：`advance_to` 边界、多个实例离线推进、近/远场唤醒、跳过检查和快照大小有回归基准 |
 | P2-1 | Evolution Sandbox | 已完成：从快照运行候选变化，输出指标、事件差异和来源，不污染原始 Pack |
-| P2-2 | Overlay 激活与回滚 | 已完成：内容/策略版本可审计、可观察，快照恢复后仍可按栈回退 |
+| P2-2 | Overlay 激活与回滚 | 已完成：内容/策略版本可审计、可观察，沙箱与提案必须锁定当前 Revision，快照恢复后仍可按栈回退 |
 | P2-3 | 场景实验 | 已完成当前通用边界：资源、组织指标、NPC 需求的声明式反事实实验；小店、利率、政策等具体机制待其事实模型落地后再接入 |
-| P3 | 新世界实例 | 第二个非村庄内容包完整运行，证明 Runtime 可替换 |
+| P3 | 新世界实例 | 已完成 Glass Orchard 纵向切片：第三个实例、跨区域、阵营、制度、自定义需求域和长期承诺余波均由内容驱动 |
 
 ## 自动化验证命令
 
 ```bash
 cmake --build build -j2
 ctest --test-dir build --output-on-failure
-./build/tide_marks_headless --scenario village --days 2 --provider mock --dump-events
+./build/tide_marks_headless --days 2 --provider mock --dump-events
 ./build/tide_marks_text --script docs/examples/village-session.txt --provider mock
-./build/tide_marks_headless --scenario village --days 0 --profile data/intelligence-profile.json --provider profile
+./build/tide_marks_headless --days 0 --profile data/intelligence-profile.json --provider profile
 ./build/tide_marks_headless --anomalies --days 0
 ./build/tide_marks_headless --content-root tests/fixtures/port-pack --experiment docs/examples/port-morale-scenario.json
+./build/tide_marks_headless --content-root tests/fixtures/glass-orchard-pack --days 1 --provider mock --dump-events
 ```
 
 每次工作包完成后记录：内容版本、规则/模拟版本、Provider/模型（如有）、随机种子、命令、WorldEvent、Snapshot 截断点、Replay 摘要和失败原因。不得把 API Key 写入日志或回放工件。
