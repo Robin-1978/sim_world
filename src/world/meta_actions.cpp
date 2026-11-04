@@ -23,6 +23,9 @@ const std::set<std::string>& MetaActionRegistry::executableOperators() {
         "memory.append",
         "knowledge.assert",
         "experience.record",
+        "promise.create",
+        "promise.transition",
+        "production.execute",
     };
     return operators;
 }

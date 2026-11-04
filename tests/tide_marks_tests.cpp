@@ -843,6 +843,57 @@ void evolution_proposals_are_governed() {
            "LLM cannot approve its own evolution proposal");
 }
 
+void evolution_sandbox_isolated_and_versioned() {
+    auto base = WorldService::load();
+    EvolutionProposal proposal{
+        "overlay.archetype.sandbox", "declarative_capability", "llm", base.content().contentVersion,
+        base.state().revision,
+        Json::array({Json{{"operation", "create_entity_archetype"}, {"id", "market_stall"},
+                         {"kind", "facility"}, {"default_metadata", Json{{"capacity", 12}}}}})};
+    const auto sandbox = EvolutionManager::sandbox(proposal, base, 60);
+    expect(sandbox.passed && sandbox.overlayVersion.find("overlay.archetype.sandbox") != std::string::npos,
+           "an evolution proposal runs in an isolated versioned sandbox");
+    expect(sandbox.baseRevision == base.state().revision,
+           "sandbox records the source world revision");
+    expect(!base.content().entityArchetypes.empty() &&
+               std::none_of(base.content().entityArchetypes.begin(), base.content().entityArchetypes.end(),
+                            [](const auto& item) { return item.id == "market_stall"; }),
+           "sandbox content changes do not mutate the source world");
+    expect(sandbox.metrics.at("events_added").is_number(), "sandbox returns measurable event differences");
+
+    EvolutionProposal approved = proposal;
+    expect(EvolutionManager::approve(approved, "developer", sandbox.passed).valid,
+           "an independently approved sandbox result can activate");
+    const auto sourceVersion = base.content().contentVersion;
+    expect(base.activateOverlay(approved, sandbox).accepted,
+           "an approved sandbox result activates through the world service");
+    expect(base.content().contentVersion == sandbox.overlayVersion &&
+               base.state().activeOverlays.size() == 1,
+           "activation records the exact overlay version on the world instance");
+    expect(base.rollbackOverlay(approved.id).accepted,
+           "an activated overlay can be rolled back");
+    expect(base.content().contentVersion == sourceVersion && base.state().activeOverlays.empty(),
+           "rollback restores the content view without erasing world history");
+    expect(std::any_of(base.state().events.begin(), base.state().events.end(), [](const auto& event) {
+               return event.type == "evolution.overlay_rolled_back";
+           }),
+           "overlay rollback is audited as a world event");
+    auto overlayContent = base.content();
+    const auto activated = EvolutionManager::applyOverlay(overlayContent, approved);
+    expect(activated.valid && overlayContent.contentVersion == sandbox.overlayVersion &&
+               std::any_of(overlayContent.entityArchetypes.begin(), overlayContent.entityArchetypes.end(),
+                                          [](const auto& item) { return item.id == "market_stall"; }),
+           "approved overlay operations can be applied to a versioned content view");
+
+    const auto path = (std::filesystem::temp_directory_path() / "tide_marks_evolution.jsonl").string();
+    std::filesystem::remove(path);
+    EvolutionProposalStore::append(path, approved);
+    const auto loaded = EvolutionProposalStore::load(path);
+    expect(loaded.size() == 1 && loaded.front().id == approved.id,
+           "evolution proposals persist as auditable JSONL records");
+    std::filesystem::remove(path);
+}
+
 void intelligence_profile_configures_decision_budgets() {
     const auto profile = loadIntelligenceProfile(defaultIntelligenceProfilePath());
     expect(profile.id == "village-qwen35-4b-v1", "village runs from an explicit intelligence profile");
@@ -901,6 +952,7 @@ int main() {
     run("runtime_loads_a_world_without_village_identifiers", runtime_loads_a_world_without_village_identifiers);
     run("npc_activity_slot_is_single_owner", npc_activity_slot_is_single_owner);
     run("evolution_proposals_are_governed", evolution_proposals_are_governed);
+    run("evolution_sandbox_isolated_and_versioned", evolution_sandbox_isolated_and_versioned);
     run("intelligence_profile_configures_decision_budgets", intelligence_profile_configures_decision_budgets);
     if (failures != 0) {
         std::cerr << failures << " test assertion(s) failed\n";

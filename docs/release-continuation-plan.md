@@ -146,6 +146,7 @@ ctest --test-dir build --output-on-failure
 - 内驱过于写死：参数、需求、动作满足关系和阈值来自 JSON；新驱动力必须走提案和沙箱，不在 C++ 添加 NPC 特例。
 - LLM 越权：候选动作、结构化 IntentProposal、版本检查和 ActionValidator。
 - 世界事实分叉：单一 WorldState 写入入口、事务、EventLog 和提交后 EventBus。
+- 回滚边界混淆：校验拒绝、复合配方 savepoint、长过程补偿和 Overlay 版本回退分别记录；任何一种都不删除已经提交的历史事件。
 - 内容扩大后性能下降：近场/远端模拟 LOD 和事件唤醒，不让所有实体逐帧模拟。
 
 ### 本地 Qwen 验证记录

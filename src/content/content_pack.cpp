@@ -179,6 +179,15 @@ void collectBehaviorReservations(const BehaviorNodeContent& node,
                 const auto resource = args.value("resource", "");
                 const int amount = args.value("amount", 0);
                 if (!resource.empty() && amount > 0) reservations[resource] += amount;
+            } else if (definition->second.operation == "production.execute") {
+                const auto inputs = args.value("inputs", Json::object());
+                if (inputs.is_object()) {
+                    for (auto it = inputs.begin(); it != inputs.end(); ++it) {
+                        if (it.value().is_number_integer() && it.value().get<int>() > 0) {
+                            reservations[it.key()] += it.value().get<int>();
+                        }
+                    }
+                }
             }
         }
     }
@@ -205,6 +214,20 @@ void validateBehaviorNodeReferences(const BehaviorNodeContent& node, const World
             if (!args.contains("amount") || !args.at("amount").is_number_integer() ||
                 args.at("amount").get<int>() <= 0) {
                 throw std::runtime_error("behavior resource action requires a positive amount in " + path);
+            }
+        } else if (definition->second.operation == "production.execute") {
+            const auto inputs = args.value("inputs", Json::object());
+            const auto outputs = args.value("outputs", Json::object());
+            if (!inputs.is_object() || !outputs.is_object() || (inputs.empty() && outputs.empty())) {
+                throw std::runtime_error("production action needs non-empty inputs or outputs in " + path);
+            }
+            for (const auto* collection : {&inputs, &outputs}) {
+                for (auto it = collection->begin(); it != collection->end(); ++it) {
+                    if (!pack.resources.contains(it.key()) || !it.value().is_number_integer() ||
+                        it.value().get<int>() <= 0) {
+                        throw std::runtime_error("production action references an invalid resource in " + path);
+                    }
+                }
             }
         } else if (definition->second.operation == "link.set_state") {
             const auto link = args.value("link", "");

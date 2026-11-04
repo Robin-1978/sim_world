@@ -1,6 +1,10 @@
 #include "evolution/evolution.hpp"
 #include "world/meta_actions.hpp"
+#include "world/world_service.hpp"
+#include "world/world_state_json.hpp"
 
+#include <algorithm>
+#include <fstream>
 #include <set>
 #include <stdexcept>
 
@@ -11,6 +15,65 @@ std::string requiredString(const Json& value, const char* key) {
         throw std::runtime_error(std::string("evolution proposal requires ") + key);
     }
     return value.at(key).get<std::string>();
+}
+
+BehaviorNodeContent behaviorNodeFromJson(const Json& value) {
+    if (!value.is_object()) throw std::runtime_error("evolution behavior node must be an object");
+    BehaviorNodeContent node;
+    node.type = requiredString(value, "type");
+    node.id = requiredString(value, "id");
+    node.name = value.value("name", "");
+    node.args = value.value("args", Json::object());
+    node.maxTicks = value.value("max_ticks", 0);
+    for (const auto& child : value.value("children", Json::array())) node.children.push_back(behaviorNodeFromJson(child));
+    return node;
+}
+
+bool hasNpc(const WorldContentPack& content, const std::string& id) {
+    return std::any_of(content.npcs.begin(), content.npcs.end(), [&id](const auto& npc) {
+        return npc.definition.id == id;
+    });
+}
+
+EvolutionValidation applyOperations(WorldContentPack& content, const EvolutionProposal& proposal) {
+    for (const auto& operation : proposal.operations) {
+        const auto type = operation.at("operation").get<std::string>();
+        if (type == "create_entity_archetype") {
+            const auto id = requiredString(operation, "id");
+            if (std::any_of(content.entityArchetypes.begin(), content.entityArchetypes.end(), [&id](const auto& item) {
+                    return item.id == id;
+                })) return {false, "duplicate_archetype", "The overlay archetype already exists."};
+            content.entityArchetypes.push_back(EntityArchetypeContent{id, requiredString(operation, "kind"),
+                                                                       operation.value("default_metadata", Json::object())});
+        } else if (type == "overlay_strategy") {
+            const auto id = requiredString(operation, "id");
+            if (!hasNpc(content, operation.value("npc_id", "")) || !hasNpc(content, operation.value("peer_id", ""))) {
+                return {false, "unknown_strategy_actor", "The strategy overlay references an unknown NPC."};
+            }
+            content.strategyRules.push_back(StrategyRuleContent{
+                id, operation.at("npc_id").get<std::string>(), operation.at("peer_id").get<std::string>(),
+                operation.value("min_peer_trust", 0.0), requiredString(operation, "strategy"),
+                operation.value("goal_stage", 0), operation.value("memory", "An overlay changed my strategy."),
+                operation.value("event_type", "strategy.overlay")});
+        } else if (type == "register_behavior_recipe") {
+            const auto id = requiredString(operation, "id");
+            if (std::any_of(content.behaviorRecipes.begin(), content.behaviorRecipes.end(), [&id](const auto& item) {
+                    return item.id == id;
+                })) return {false, "duplicate_behavior_recipe", "The overlay recipe already exists."};
+            BehaviorRecipeContent recipe;
+            recipe.id = id;
+            recipe.planId = operation.value("plan_id", id);
+            recipe.durationMinutes = operation.value("duration_minutes", 0);
+            recipe.interruptible = operation.value("interruptible", true);
+            recipe.interruptSalienceThreshold = operation.value("interrupt_salience_threshold", 1.0);
+            recipe.root = behaviorNodeFromJson(operation.at("root"));
+            BehaviorRecipeRuntime::validate(recipe);
+            content.behaviorRecipes.push_back(std::move(recipe));
+        } else {
+            return {false, "overlay_operation_unsupported", "This operation is not implemented by the declarative overlay engine."};
+        }
+    }
+    return {true, "ok", "Overlay operations applied to the sandbox content view."};
 }
 }
 
@@ -49,6 +112,23 @@ Json EvolutionManager::toJson(const EvolutionProposal& proposal) {
                 {"base_content_version", proposal.baseContentVersion},
                 {"base_world_revision", proposal.baseWorldRevision},
                 {"operations", proposal.operations}, {"status", toString(proposal.status)}};
+}
+
+void EvolutionProposalStore::append(const std::string& path, const EvolutionProposal& proposal) {
+    std::ofstream output(path, std::ios::app);
+    if (!output) throw std::runtime_error("cannot append evolution proposal: " + path);
+    output << EvolutionManager::toJson(proposal).dump() << '\n';
+}
+
+std::vector<EvolutionProposal> EvolutionProposalStore::load(const std::string& path) {
+    std::ifstream input(path);
+    if (!input) throw std::runtime_error("cannot read evolution proposal store: " + path);
+    std::vector<EvolutionProposal> proposals;
+    std::string line;
+    while (std::getline(input, line)) {
+        if (!line.empty()) proposals.push_back(EvolutionManager::fromJson(Json::parse(line)));
+    }
+    return proposals;
 }
 
 EvolutionValidation EvolutionManager::validate(const EvolutionProposal& proposal,
@@ -112,6 +192,83 @@ EvolutionValidation EvolutionManager::approve(EvolutionProposal& proposal,
     }
     proposal.status = EvolutionProposalStatus::Approved;
     return {true, "approved", "Proposal is approved for versioned overlay activation."};
+}
+
+EvolutionValidation EvolutionManager::applyOverlay(WorldContentPack& content,
+                                                    const EvolutionProposal& proposal) {
+    if (proposal.status != EvolutionProposalStatus::Approved) {
+        return {false, "approval_required", "Only an approved proposal can activate an overlay."};
+    }
+    std::string baseVersion = content.contentVersion;
+    const auto overlayMarker = baseVersion.find("+overlay:");
+    if (overlayMarker != std::string::npos) baseVersion.erase(overlayMarker);
+    if (proposal.baseContentVersion != baseVersion) {
+        return {false, "content_version_conflict", "Overlay base content does not match the active content."};
+    }
+    const auto applied = applyOperations(content, proposal);
+    if (!applied.valid) return applied;
+    content.contentVersion = content.contentVersion + "+overlay:" + proposal.id;
+    content.version = content.version + "+overlay:" + proposal.id;
+    if (content.instance) content.instance->contentVersion = content.contentVersion;
+    return {true, "ok", "Approved overlay activated in the content view."};
+}
+
+EvolutionSandboxResult EvolutionManager::sandbox(const EvolutionProposal& proposal,
+                                                 const WorldService& base,
+                                                 std::int64_t advanceMinutes) {
+    EvolutionSandboxResult result;
+    result.proposalId = proposal.id;
+    result.baseRevision = base.state().revision;
+    const auto validation = validate(proposal, base.content(), base.state().revision);
+    if (!validation.valid) {
+        result.code = validation.code;
+        result.message = validation.message;
+        return result;
+    }
+    auto overlay = base.content();
+    const auto overlayVersion = overlay.contentVersion + "+overlay:" + proposal.id;
+    const auto applied = applyOperations(overlay, proposal);
+    if (!applied.valid) {
+        result.code = applied.code;
+        result.message = applied.message;
+        return result;
+    }
+    overlay.contentVersion = overlayVersion;
+    overlay.version = overlay.version + "+overlay:" + proposal.id;
+    if (overlay.instance) overlay.instance->contentVersion = overlayVersion;
+    auto snapshot = base.snapshotJson();
+    snapshot["content_version"] = overlayVersion;
+    try {
+        auto sandboxWorld = WorldService::fromContentSnapshot(overlay, snapshot);
+        const auto beforeEvents = sandboxWorld.state().events.size();
+        if (advanceMinutes > 0) sandboxWorld.advanceMinutes(advanceMinutes);
+        result.finalRevision = sandboxWorld.state().revision;
+        result.snapshot = sandboxWorld.snapshotJson();
+        result.overlayVersion = overlayVersion;
+        result.eventDiff = Json::array();
+        for (std::size_t index = beforeEvents; index < sandboxWorld.state().events.size(); ++index) {
+            result.eventDiff.push_back(worldEventToJson(sandboxWorld.state().events[index]));
+        }
+        Json resources = Json::object();
+        for (const auto& [id, resource] : sandboxWorld.state().resources) resources[id] = resource.amount;
+        std::size_t knowledge = 0;
+        std::size_t experiences = 0;
+        for (const auto& [id, npc] : sandboxWorld.state().npcs) {
+            knowledge += npc.knowledge.size();
+            experiences += npc.experiences.size();
+        }
+        result.metrics = Json{{"events_added", result.eventDiff.size()}, {"final_revision", result.finalRevision},
+                              {"resources", resources}, {"npc_count", sandboxWorld.state().npcs.size()},
+                              {"knowledge_count", knowledge}, {"experience_count", experiences},
+                              {"advance_minutes", advanceMinutes}};
+        result.passed = true;
+        result.code = "ok";
+        result.message = "Sandbox completed without mutating the source world.";
+    } catch (const std::exception& error) {
+        result.code = "sandbox_exception";
+        result.message = error.what();
+    }
+    return result;
 }
 
 }  // namespace tide_marks

@@ -279,6 +279,7 @@ Json worldStateToJson(const WorldState& state) {
                 {"content_version", state.contentVersion}, {"now", state.now.minute},
                 {"revision", state.revision},
                 {"resources", resources}, {"inventories", inventories}, {"security", security},
+                {"active_overlays", state.activeOverlays},
                 {"entities", entities}, {"links", links}, {"npcs", npcs}, {"promises", promises}, {"events", events},
                 {"processed_turn_ids", state.processedTurnIds}};
 }
@@ -314,6 +315,7 @@ WorldState deserializeWorldState(const Json& json) {
             jsonValue<double>(entity.value(), "exposure", 0.0),
             jsonValue<bool>(entity.value(), "evacuated", false)};
     }
+    state.activeOverlays = json.value("active_overlays", std::vector<std::string>{});
     const auto entities = json.value("entities", Json::object());
     for (auto it = entities.begin(); it != entities.end(); ++it) {
         const auto value = it.value();

@@ -19,6 +19,8 @@
 #include <vector>
 
 namespace tide_marks {
+struct EvolutionProposal;
+struct EvolutionSandboxResult;
 struct Command {
     std::string turnId;
     std::string kind;
@@ -60,6 +62,8 @@ public:
     static WorldService fromSnapshot(const Json& json,
                                      std::string contentRoot = ContentPackLoader::defaultRoot(),
                                      std::unique_ptr<IProvider> provider = std::make_unique<MockProvider>());
+    static WorldService fromContentSnapshot(const WorldContentPack& content, const Json& json,
+                                             std::unique_ptr<IProvider> provider = std::make_unique<MockProvider>());
 
     [[nodiscard]] const WorldState& state() const { return state_; }
     [[nodiscard]] const WorldContentPack& content() const { return content_; }
@@ -70,6 +74,7 @@ public:
     [[nodiscard]] DecisionContext decisionContext(const std::string& npcId) const;
 
     void advanceMinutes(std::int64_t minutes);
+    void advanceTo(GameTime target);
     CommandResult submit(const Command& command);
     DialogueTurn converse(const std::string& npcId, const std::string& playerInput,
                           const std::string& turnId);
@@ -99,6 +104,8 @@ public:
     CommandResult moveNpc(const std::string& npcId, const std::string& destination,
                           const std::string& actor = kWorldActor,
                           const std::string& turnId = {});
+    CommandResult activateOverlay(const EvolutionProposal& proposal, const EvolutionSandboxResult& sandbox);
+    CommandResult rollbackOverlay(const std::string& proposalId);
     CommandResult assertKnownFact(const std::string& npcId, const std::string& subject,
                                   const std::string& predicate, const std::string& value,
                                   std::uint64_t sourceSequence, const std::string& scope,
@@ -140,6 +147,7 @@ private:
     std::vector<TransactionFrame> transactionFrames_;
     std::vector<WorldEvent> deferredEvents_;
     std::set<std::string> pendingAsyncTurnIds_;
+    std::map<std::string, WorldContentPack> overlayBackups_;
 
     void beginTransaction();
     void commitTransaction();

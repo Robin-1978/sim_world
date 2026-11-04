@@ -3,6 +3,7 @@
 #include "npc/drive_system.hpp"
 #include "npc/state_machine.hpp"
 #include "world/ids.hpp"
+#include "evolution/evolution.hpp"
 #include <algorithm>
 #include <cstddef>
 #include <cmath>
@@ -49,6 +50,7 @@ WorldState transactionalBackup(const WorldState& state, std::size_t& eventCount)
     backup.resources = state.resources;
     backup.inventories = state.inventories;
     backup.security = state.security;
+    backup.activeOverlays = state.activeOverlays;
     backup.entities = state.entities;
     backup.links = state.links;
     backup.npcs = state.npcs;
@@ -430,6 +432,11 @@ void WorldService::advanceMinutes(std::int64_t minutes) {
     }
     pumpAsyncTurns();
     syncNpcEntityState();
+}
+
+void WorldService::advanceTo(GameTime target) {
+    if (target.minute <= state_.now.minute) return;
+    advanceMinutes(target.minute - state_.now.minute);
 }
 
 void WorldService::processHourBoundary(int day, int hour) {
@@ -1069,6 +1076,56 @@ CommandResult WorldService::moveNpc(const std::string& npcId, const std::string&
                   {"route", planRoute(previous, destination).value_or(std::vector<std::string>{})}});
     syncNpcEntityState();
     return CommandResult{true, "ok", destination, state_.events.back()};
+}
+
+CommandResult WorldService::activateOverlay(const EvolutionProposal& proposal,
+                                            const EvolutionSandboxResult& sandbox) {
+    TransactionScope transaction(*this);
+    if (proposal.status != EvolutionProposalStatus::Approved) {
+        return reject("overlay_not_approved", "Only an approved evolution proposal can activate an overlay.");
+    }
+    if (!sandbox.passed || sandbox.proposalId != proposal.id || sandbox.overlayVersion.empty()) {
+        return reject("overlay_sandbox_required", "A passing sandbox result for this proposal is required.");
+    }
+    if (std::find(state_.activeOverlays.begin(), state_.activeOverlays.end(), proposal.id) != state_.activeOverlays.end()) {
+        return reject("overlay_already_active", "That evolution overlay is already active.");
+    }
+    auto candidate = content_;
+    const auto applied = EvolutionManager::applyOverlay(candidate, proposal);
+    if (!applied.valid) return reject(applied.code, applied.message);
+    if (candidate.contentVersion != sandbox.overlayVersion) {
+        return reject("overlay_version_mismatch", "The sandbox result does not match the activated content version.");
+    }
+    overlayBackups_[proposal.id] = content_;
+    content_ = std::move(candidate);
+    state_.contentVersion = content_.contentVersion;
+    state_.activeOverlays.push_back(proposal.id);
+    addEvent("evolution.overlay_activated", "developer", proposal.id, "An approved content overlay became active",
+             Json{{"proposal_id", proposal.id}, {"overlay_version", content_.contentVersion},
+                  {"base_content_version", overlayBackups_.at(proposal.id).contentVersion},
+                  {"active_overlays", state_.activeOverlays}});
+    rebuildEntityRegistry();
+    return CommandResult{true, "ok", content_.contentVersion, state_.events.back()};
+}
+
+CommandResult WorldService::rollbackOverlay(const std::string& proposalId) {
+    TransactionScope transaction(*this);
+    const auto backup = overlayBackups_.find(proposalId);
+    if (backup == overlayBackups_.end()) {
+        return reject("overlay_backup_missing", "No reversible activation record exists for that overlay.");
+    }
+    const auto active = std::find(state_.activeOverlays.begin(), state_.activeOverlays.end(), proposalId);
+    if (active == state_.activeOverlays.end()) return reject("overlay_not_active", "That overlay is not active.");
+    const auto previousVersion = content_.contentVersion;
+    content_ = backup->second;
+    state_.contentVersion = content_.contentVersion;
+    state_.activeOverlays.erase(active);
+    overlayBackups_.erase(backup);
+    addEvent("evolution.overlay_rolled_back", "developer", proposalId, "An active content overlay was rolled back",
+             Json{{"proposal_id", proposalId}, {"from_version", previousVersion},
+                  {"to_version", content_.contentVersion}, {"active_overlays", state_.activeOverlays}});
+    rebuildEntityRegistry();
+    return CommandResult{true, "ok", content_.contentVersion, state_.events.back()};
 }
 
 CommandResult WorldService::assertKnownFact(const std::string& npcId, const std::string& subject,
@@ -1753,6 +1810,51 @@ bool WorldService::applyMetaAction(const std::string& npcId, const std::string& 
             "recipe:" + npcId + ":" + actionId + ":experience");
         return result.accepted;
     }
+    if (operation == "promise.create") {
+        const auto resolveParty = [&npcId](const std::string& value) {
+            return value == "self" ? npcId : value;
+        };
+        const auto created = createPromise(resolveParty(args.value("from", "self")),
+                                           resolveParty(args.value("to", "")),
+                                           args.value("description", ""), args.value("due_days", 1),
+                                           "recipe:" + npcId + ":" + actionId + ":promise");
+        return created.accepted;
+    }
+    if (operation == "promise.transition") {
+        const auto status = promiseStatusFromString(args.value("status", "proposed"));
+        const auto transitioned = decidePromise(args.value("promise_id", ""), status, npcId,
+                                                "recipe:" + npcId + ":" + actionId + ":promise",
+                                                args.value("detail", ""));
+        return transitioned.accepted;
+    }
+    if (operation == "production.execute") {
+        const auto inputs = args.value("inputs", Json::object());
+        const auto outputs = args.value("outputs", Json::object());
+        if (!inputs.is_object() || !outputs.is_object() || (inputs.empty() && outputs.empty())) return false;
+        for (auto it = inputs.begin(); it != inputs.end(); ++it) {
+            if (!it.value().is_number_integer() || it.value().get<int>() <= 0 ||
+                availableResourceValue(it.key()) < it.value().get<int>()) return false;
+        }
+        for (auto it = outputs.begin(); it != outputs.end(); ++it) {
+            if (!it.value().is_number_integer() || it.value().get<int>() <= 0 || !content_.resources.contains(it.key()) ||
+                resourceValue(it.key()) + it.value().get<int>() > content_.resources.at(it.key()).maximum) return false;
+        }
+        Json consumed = Json::object();
+        Json produced = Json::object();
+        for (auto it = inputs.begin(); it != inputs.end(); ++it) {
+            const int amount = it.value().get<int>();
+            state_.resources[it.key()].amount -= amount;
+            consumed[it.key()] = amount;
+        }
+        for (auto it = outputs.begin(); it != outputs.end(); ++it) {
+            const int amount = it.value().get<int>();
+            state_.resources[it.key()].amount += amount;
+            produced[it.key()] = amount;
+        }
+        addEvent("production.executed", npcId, "world", "A registered production process exchanged inputs and outputs",
+                 Json{{"action_id", actionId}, {"inputs", consumed}, {"outputs", produced}});
+        return true;
+    }
     if (operation == "need.relieve") {
         const auto sourceAction = args.value("action", actionId);
         applyNeedRelief(npcId, sourceAction);
@@ -1989,10 +2091,10 @@ void WorldService::writeReplay(const std::string& path) const {
     for (const auto& event : state_.events) output << Json{{"kind", "event"}, {"event", worldEventToJson(event)}}.dump() << '\n';
 }
 
-WorldService WorldService::fromSnapshot(const Json& json, std::string contentRoot,
-                                        std::unique_ptr<IProvider> provider) {
+WorldService WorldService::fromContentSnapshot(const WorldContentPack& content, const Json& json,
+                                                     std::unique_ptr<IProvider> provider) {
     WorldService service(std::move(provider));
-    service.content_ = ContentPackLoader::load(contentRoot);
+    service.content_ = content;
     const auto& snapshot = json.contains("state") ? json.at("state") : json;
     if (!snapshot.is_object() || !snapshot.contains("save_schema_version") ||
         !snapshot.at("save_schema_version").is_number_integer() ||
@@ -2021,13 +2123,18 @@ WorldService WorldService::fromSnapshot(const Json& json, std::string contentRoo
         throw std::runtime_error("snapshot world " + service.state_.worldId +
                                  " does not match loaded world " + expectedWorldId);
     }
-    if (service.state_.contentVersion.empty() ||
-        service.state_.contentVersion != service.content_.contentVersion) {
+    if (service.state_.contentVersion.empty() || service.state_.contentVersion != service.content_.contentVersion) {
         throw std::runtime_error("snapshot content version " + service.state_.contentVersion +
                                  " does not match loaded content " + service.content_.contentVersion);
     }
     service.rebuildEntityRegistry();
     return service;
+}
+
+WorldService WorldService::fromSnapshot(const Json& json, std::string contentRoot,
+                                        std::unique_ptr<IProvider> provider) {
+    const auto content = ContentPackLoader::load(contentRoot);
+    return fromContentSnapshot(content, json, std::move(provider));
 }
 
 WorldService WorldService::replay(const std::string& path, std::string contentRoot,

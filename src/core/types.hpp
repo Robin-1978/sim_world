@@ -277,6 +277,7 @@ struct WorldState {
     // changed only through registered resource operators.
     std::map<std::string, std::map<std::string, int>> inventories;
     std::map<std::string, SecurityState> security;
+    std::vector<std::string> activeOverlays;
     // Runtime entity identity and lifecycle are authoritative world facts.
     // Typed components remain projected through EntityRegistry and are only
     // mutated by a transaction/system.
