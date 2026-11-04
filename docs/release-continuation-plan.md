@@ -19,14 +19,14 @@
 | NPC 状态机、行为树、全局/局部规划 | 已完成 | `src/npc/state_machine.*`, `src/npc/behavior_tree.*`, `src/navigation/*` |
 | 文本调试界面和 headless 回放 | 已完成 | `src/text_ui_main.cpp`, `src/headless_main.cpp` |
 | 内容包加载 | 已完成 | `WorldService::load/fromContent`, `data/`, `tests/fixtures/minimal-pack` |
-| 存档 schema 与事件截断点 | 已完成 | `world_state_json.*`, `save_schema_version=11`, `simulation_version=adaptive-runtime-p1.11`, `event_sequence`, `instance_id`, `inventories`, `NpcActivity` 聚合、`definition_id` 引用、实例/内容版本校验；运行态不复制角色定义 |
+| 存档 schema 与事件截断点 | 已完成 | `world_state_json.*`, `save_schema_version=12`, `simulation_version=adaptive-runtime-p1.12`, `event_sequence`, `instance_id`, `inventories`, `NpcActivity` 聚合、`definition_id` 引用、实例/内容版本校验与可重放 overlay 栈；运行态不复制角色定义 |
 | 内驱/需求模型 | 四域、显式满足配方和有界预期适应已实现；安全事实已支持冲突/威胁/防守/撤离/修复并通过 Stimulus 投射，需求仍由规则链路维护 | `src/npc/drive_system.*`, `NeedContent`, `NeedState`, `need.*` events |
 | 外驱/结构上下文 | 已实现结构化 Stimulus/Constraint、到期、习惯化和快照；结构演化治理已接入，沙箱留给 P2 | `DecisionContext.stimuli`, `constraints`, `WorldService::projectStimuli`, `src/evolution/evolution.*` |
 | LLM 解释与权衡 | 同步对话/自驱提案、channel 策略、Qwen JSON Schema、缺失 action 回退和异步 TurnQueue 已完成；过期结果只写审计事件 | `IntentProposal`, `IProvider`, `TurnQueue`, `decision_channels`, `WorldService::converse/deliberate/pumpAsyncTurns` |
 | 长过程执行 | 数据驱动时长、单一活动槽、配方声明的输入预留、完成/挂起/恢复事件和 Snapshot 恢复均已实现；挂起释放预留，刺激清除且资源可用时按原计划恢复并顺延完成时间；Goal、Process、FSM、BT 是同一活动的四个投影 | `ProcessExecution`, `NpcActivity`, `reservation_mode`, `WorldService::tickProcesses`, `resumeSuspendedProcesses`, `src/npc/state_machine.*` |
 | 通用资源与实例活动 | 通用资源数量、可选输入预留、实体库存、资源转移、生产、承诺和定时 Activity 已实现；交易结算与跨主体抢占仍属于后续工作 | `ResourceContent`, `ResourceState(amount,reserved)`, `WorldState.inventories`, `reservation_mode`, `ActivityContent`, data-driven schedule effects；承诺关系增量与重谈时长已由 `promise_policy` 驱动 |
 | 元动作语义目录 | 已冻结；故事动作 ID 由内容包绑定到通用 operator，行为配方在运行时编译为 BT | `src/world/meta_actions.*`, `src/npc/behavior_recipe.*`, `data/behaviors/village.json` |
-| World Intelligence 演化提案 | 结构治理已完成，沙箱/激活待 P2 | `src/evolution/evolution.*`, `data/schemas/evolution-proposal.schema.json`; 校验白名单、禁止 Core mutation、独立审批已覆盖 |
+| World Intelligence 演化提案 | 提案持久化、验证、沙箱、版本化 overlay 激活/恢复/栈式回滚已完成；异常检测和场景实验仍在 P2 | `src/evolution/evolution.*`, `src/world/world_service.*`, `data/schemas/evolution-proposal.schema.json`; 校验白名单、禁止 Core mutation、独立审批、快照重放已覆盖 |
 | 3D 表现和 Blender 场景 | 已有 P0 原型 | 不参与当前平台模型验收 |
 
 ## 已完成验证
@@ -109,7 +109,7 @@ P0-K 的提案校验、模型关闭回退、过期提案、重复提案、过程
 
 ### P2：World Intelligence 演化和沙箱
 
-实现 Evolution/Scenario Proposal Schema、提案库、来源事实、回放沙箱、指标评估、审批策略、版本化 overlay、激活、观察和回滚。先支持内容、知识和策略提案，再支持声明式 capability；只有已注册的声明式能力可以在线激活，新增 C++ 能力仍需开发者发布。小店、利率和政策实验放在这一阶段，必须在已有经济/制度事实模型上运行，不能由 LLM 直接生成数值结果。
+Evolution Proposal Schema、提案库、来源事实、回放沙箱、指标评估、审批策略、版本化 overlay、激活、快照恢复和栈式回滚已完成基础闭环。剩余工作是异常检测、Scenario Proposal，以及在已有经济/制度事实模型上的小店、利率和政策实验；不能由 LLM 直接生成数值结果。
 
 ### P3：可替换世界实例
 
@@ -123,8 +123,8 @@ P0-K 的提案校验、模型关闭回退、过期提案、重复提案、过程
 | P1-2 | 资源转移、移动、冲突/安全、承诺/合同、知识和生产 operator | 资源转移、移动、冲突/安全、知识/经验已完成；承诺/合同和生产继续按同一事务/事件契约实现 |
 | P1-3 | 潮门港社会切片 | 交易、组织/阵营关系和近远场模拟形成可回放因果链 |
 | P1-4 | 调度与性能基线 | `advance_to` 边界、事件增长、快照大小和离线推进有基准 |
-| P2-1 | Evolution/Scenario Sandbox | 从快照运行候选变化，输出指标、差异和来源，不污染原始 Pack |
-| P2-2 | Overlay 激活与回滚 | 内容/策略版本可审计、可观察、可回退 |
+| P2-1 | Evolution Sandbox | 已完成：从快照运行候选变化，输出指标、事件差异和来源，不污染原始 Pack |
+| P2-2 | Overlay 激活与回滚 | 已完成：内容/策略版本可审计、可观察，快照恢复后仍可按栈回退 |
 | P2-3 | 场景实验 | 小店、利率、政策只作用于已建模事实，并返回可解释结果 |
 | P3 | 新世界实例 | 第二个非村庄内容包完整运行，证明 Runtime 可替换 |
 

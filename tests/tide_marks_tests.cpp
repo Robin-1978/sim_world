@@ -450,7 +450,7 @@ void snapshot_and_replay_are_deterministic() {
     const auto path = std::filesystem::temp_directory_path() / "tide_marks_test_replay.jsonl";
     service.writeReplay(path.string());
     const auto snapshot = service.snapshotJson();
-    expect(snapshot.at("save_schema_version").get<int>() == 11, "snapshot declares its schema version");
+    expect(snapshot.at("save_schema_version").get<int>() == 12, "snapshot declares its schema version");
     expect(snapshot.at("instance_id") == "tide_marks.village.instance",
            "snapshot records the concrete game instance identity");
     expect(snapshot.at("event_sequence").get<std::size_t>() == service.state().events.size(),
@@ -900,6 +900,18 @@ void evolution_sandbox_isolated_and_versioned() {
     expect(base.content().contentVersion == sandbox.overlayVersion &&
                base.state().activeOverlays.size() == 1,
            "activation records the exact overlay version on the world instance");
+    const auto overlaySnapshot = base.snapshotJson();
+    auto restoredOverlay = WorldService::fromSnapshot(overlaySnapshot);
+    expect(restoredOverlay.state().activeOverlays.size() == 1 &&
+               restoredOverlay.content().contentVersion == sandbox.overlayVersion &&
+               std::any_of(restoredOverlay.content().entityArchetypes.begin(),
+                           restoredOverlay.content().entityArchetypes.end(),
+                           [](const auto& item) { return item.id == "market_stall"; }),
+           "an activated overlay and its operations survive snapshot restore");
+    expect(restoredOverlay.rollbackOverlay(approved.id).accepted &&
+               restoredOverlay.state().activeOverlays.empty() &&
+               restoredOverlay.content().contentVersion == sourceVersion,
+           "a restored overlay can be rolled back without an in-memory backup");
     expect(base.rollbackOverlay(approved.id).accepted,
            "an activated overlay can be rolled back");
     expect(base.content().contentVersion == sourceVersion && base.state().activeOverlays.empty(),
@@ -922,6 +934,36 @@ void evolution_sandbox_isolated_and_versioned() {
     expect(loaded.size() == 1 && loaded.front().id == approved.id,
            "evolution proposals persist as auditable JSONL records");
     std::filesystem::remove(path);
+}
+
+void overlay_stack_restores_and_rolls_back_in_order() {
+    auto base = WorldService::load();
+    const auto rootVersion = base.content().contentVersion;
+    EvolutionProposal first{
+        "overlay.stack.first", "declarative_capability", "llm", rootVersion, base.state().revision,
+        Json::array({Json{{"operation", "create_entity_archetype"}, {"id", "market_stall"},
+                         {"kind", "facility"}}})};
+    const auto firstSandbox = EvolutionManager::sandbox(first, base);
+    expect(firstSandbox.passed && EvolutionManager::approve(first, "developer", true).valid &&
+               base.activateOverlay(first, firstSandbox).accepted,
+           "the first versioned overlay activates");
+    EvolutionProposal second{
+        "overlay.stack.second", "declarative_capability", "llm", base.content().contentVersion,
+        base.state().revision,
+        Json::array({Json{{"operation", "create_entity_archetype"}, {"id", "market_awning"},
+                         {"kind", "facility"}}})};
+    const auto secondSandbox = EvolutionManager::sandbox(second, base);
+    expect(secondSandbox.passed && EvolutionManager::approve(second, "developer", true).valid &&
+               base.activateOverlay(second, secondSandbox).accepted && base.state().activeOverlays.size() == 2,
+           "a proposal binds to the exact active content view and can be layered");
+    auto restored = WorldService::fromSnapshot(base.snapshotJson());
+    expect(restored.state().activeOverlays.size() == 2 && restored.content().contentVersion == secondSandbox.overlayVersion,
+           "the full overlay chain restores from a snapshot");
+    expect(restored.rollbackOverlay(first.id).code == "overlay_not_top",
+           "an older overlay cannot be removed while newer overlays depend on it");
+    expect(restored.rollbackOverlay(second.id).accepted && restored.rollbackOverlay(first.id).accepted &&
+               restored.state().activeOverlays.empty() && restored.content().contentVersion == rootVersion,
+           "stacked overlays roll back in order after restore");
 }
 
 void intelligence_profile_configures_decision_budgets() {
@@ -984,6 +1026,7 @@ int main() {
     run("npc_activity_slot_is_single_owner", npc_activity_slot_is_single_owner);
     run("evolution_proposals_are_governed", evolution_proposals_are_governed);
     run("evolution_sandbox_isolated_and_versioned", evolution_sandbox_isolated_and_versioned);
+    run("overlay_stack_restores_and_rolls_back_in_order", overlay_stack_restores_and_rolls_back_in_order);
     run("intelligence_profile_configures_decision_budgets", intelligence_profile_configures_decision_budgets);
     if (failures != 0) {
         std::cerr << failures << " test assertion(s) failed\n";

@@ -149,6 +149,7 @@ WorldService WorldService::load(std::string contentRoot, std::unique_ptr<IProvid
 WorldService WorldService::fromContent(const WorldContentPack& content,
                                        std::unique_ptr<IProvider> provider) {
     WorldService service(std::move(provider));
+    service.baseContent_ = content;
     service.content_ = content;
     const auto* instance = content.instance ? &*content.instance : nullptr;
     service.state_.worldId = instance != nullptr && !instance->worldId.empty() ? instance->worldId : content.worldId;
@@ -1087,7 +1088,8 @@ CommandResult WorldService::activateOverlay(const EvolutionProposal& proposal,
     if (!sandbox.passed || sandbox.proposalId != proposal.id || sandbox.overlayVersion.empty()) {
         return reject("overlay_sandbox_required", "A passing sandbox result for this proposal is required.");
     }
-    if (std::find(state_.activeOverlays.begin(), state_.activeOverlays.end(), proposal.id) != state_.activeOverlays.end()) {
+    if (std::any_of(state_.activeOverlays.begin(), state_.activeOverlays.end(),
+                    [&proposal](const auto& active) { return active.proposalId == proposal.id; })) {
         return reject("overlay_already_active", "That evolution overlay is already active.");
     }
     auto candidate = content_;
@@ -1096,34 +1098,53 @@ CommandResult WorldService::activateOverlay(const EvolutionProposal& proposal,
     if (candidate.contentVersion != sandbox.overlayVersion) {
         return reject("overlay_version_mismatch", "The sandbox result does not match the activated content version.");
     }
-    overlayBackups_[proposal.id] = content_;
+    const auto previousVersion = content_.contentVersion;
     content_ = std::move(candidate);
     state_.contentVersion = content_.contentVersion;
-    state_.activeOverlays.push_back(proposal.id);
+    state_.activeOverlays.push_back(
+        ActiveOverlayState{proposal.id, proposal.baseContentVersion, content_.contentVersion, proposal.operations});
     addEvent("evolution.overlay_activated", "developer", proposal.id, "An approved content overlay became active",
              Json{{"proposal_id", proposal.id}, {"overlay_version", content_.contentVersion},
-                  {"base_content_version", overlayBackups_.at(proposal.id).contentVersion},
-                  {"active_overlays", state_.activeOverlays}});
+                  {"previous_content_version", previousVersion},
+                  {"base_content_version", proposal.baseContentVersion},
+                  {"active_overlay_ids", overlayIds()}});
     rebuildEntityRegistry();
     return CommandResult{true, "ok", content_.contentVersion, state_.events.back()};
 }
 
+std::vector<std::string> WorldService::overlayIds() const {
+    std::vector<std::string> ids;
+    ids.reserve(state_.activeOverlays.size());
+    for (const auto& overlay : state_.activeOverlays) ids.push_back(overlay.proposalId);
+    return ids;
+}
+
 CommandResult WorldService::rollbackOverlay(const std::string& proposalId) {
     TransactionScope transaction(*this);
-    const auto backup = overlayBackups_.find(proposalId);
-    if (backup == overlayBackups_.end()) {
-        return reject("overlay_backup_missing", "No reversible activation record exists for that overlay.");
-    }
-    const auto active = std::find(state_.activeOverlays.begin(), state_.activeOverlays.end(), proposalId);
+    const auto active = std::find_if(state_.activeOverlays.begin(), state_.activeOverlays.end(),
+                                     [&proposalId](const auto& item) { return item.proposalId == proposalId; });
     if (active == state_.activeOverlays.end()) return reject("overlay_not_active", "That overlay is not active.");
+    if (std::next(active) != state_.activeOverlays.end()) {
+        return reject("overlay_not_top", "Roll back newer overlays before removing an older overlay.");
+    }
     const auto previousVersion = content_.contentVersion;
-    content_ = backup->second;
+    content_ = baseContent_;
+    for (auto record = state_.activeOverlays.begin(); record != active; ++record) {
+        EvolutionProposal replay{record->proposalId, "declarative_capability", "snapshot",
+                                 record->baseContentVersion, 0, record->operations,
+                                 EvolutionProposalStatus::Approved};
+        const auto applied = EvolutionManager::applyOverlay(content_, replay);
+        if (!applied.valid) return reject(applied.code, applied.message);
+        if (content_.contentVersion != record->overlayVersion) {
+            return reject("overlay_rebuild_version_mismatch",
+                          "The persisted overlay stack did not rebuild its recorded version.");
+        }
+    }
     state_.contentVersion = content_.contentVersion;
     state_.activeOverlays.erase(active);
-    overlayBackups_.erase(backup);
     addEvent("evolution.overlay_rolled_back", "developer", proposalId, "An active content overlay was rolled back",
              Json{{"proposal_id", proposalId}, {"from_version", previousVersion},
-                  {"to_version", content_.contentVersion}, {"active_overlays", state_.activeOverlays}});
+                  {"to_version", content_.contentVersion}, {"active_overlay_ids", overlayIds()}});
     rebuildEntityRegistry();
     return CommandResult{true, "ok", content_.contentVersion, state_.events.back()};
 }
@@ -2095,18 +2116,36 @@ void WorldService::writeReplay(const std::string& path) const {
 WorldService WorldService::fromContentSnapshot(const WorldContentPack& content, const Json& json,
                                                      std::unique_ptr<IProvider> provider) {
     WorldService service(std::move(provider));
+    service.baseContent_ = content;
     service.content_ = content;
     const auto& snapshot = json.contains("state") ? json.at("state") : json;
     if (!snapshot.is_object() || !snapshot.contains("save_schema_version") ||
         !snapshot.at("save_schema_version").is_number_integer() ||
-        snapshot.at("save_schema_version").get<int>() != 11) {
-        throw std::runtime_error("unsupported snapshot schema; expected save_schema_version=11");
+        snapshot.at("save_schema_version").get<int>() != 12) {
+        throw std::runtime_error("unsupported snapshot schema; expected save_schema_version=12");
     }
     if (!snapshot.contains("simulation_version") || !snapshot.at("simulation_version").is_string() ||
-        snapshot.at("simulation_version") != "adaptive-runtime-p1.11") {
-        throw std::runtime_error("unsupported snapshot simulation version; expected adaptive-runtime-p1.11");
+        snapshot.at("simulation_version") != "adaptive-runtime-p1.12") {
+        throw std::runtime_error("unsupported snapshot simulation version; expected adaptive-runtime-p1.12");
     }
     service.state_ = deserializeWorldState(snapshot);
+    if (!service.state_.activeOverlays.empty()) {
+        auto rebuilt = content;
+        for (const auto& overlay : service.state_.activeOverlays) {
+            EvolutionProposal replay{overlay.proposalId, "declarative_capability", "snapshot",
+                                     overlay.baseContentVersion, 0, overlay.operations,
+                                     EvolutionProposalStatus::Approved};
+            const auto applied = EvolutionManager::applyOverlay(rebuilt, replay);
+            if (!applied.valid) {
+                throw std::runtime_error("cannot restore overlay " + overlay.proposalId + ": " + applied.message);
+            }
+            if (rebuilt.contentVersion != overlay.overlayVersion) {
+                throw std::runtime_error("restored overlay version does not match its activation record: " +
+                                         overlay.proposalId);
+            }
+        }
+        service.content_ = std::move(rebuilt);
+    }
     for (const auto& [id, npc] : service.state_.npcs) {
         if (npc.definitionId.empty() || service.authoredNpc(npc.definitionId) == nullptr) {
             throw std::runtime_error("snapshot references unknown npc definition: " + npc.definitionId);

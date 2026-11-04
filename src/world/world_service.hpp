@@ -141,14 +141,15 @@ private:
     std::unique_ptr<TurnQueue> turnQueue_;
     EventBus eventBus_;
     EntityRegistry entities_;
+    // Immutable content selected by the game instance before approved
+    // overlays are applied. It is never overwritten by runtime state.
+    WorldContentPack baseContent_;
     WorldContentPack content_;
     // Each nested scope is a savepoint. A failed recipe can roll back its own
     // partial changes without cancelling the enclosing world-time transition.
     std::vector<TransactionFrame> transactionFrames_;
     std::vector<WorldEvent> deferredEvents_;
     std::set<std::string> pendingAsyncTurnIds_;
-    std::map<std::string, WorldContentPack> overlayBackups_;
-
     void beginTransaction();
     void commitTransaction();
     void rollbackTransaction();
@@ -189,6 +190,7 @@ private:
     void releaseReservations(ProcessExecution& process);
     void applyNeedRelief(const std::string& npcId, const std::string& actionId);
     [[nodiscard]] const NpcContent* authoredNpc(const std::string& npcId) const;
+    [[nodiscard]] std::vector<std::string> overlayIds() const;
     [[nodiscard]] int resourceValue(const std::string& resource) const;
     [[nodiscard]] int availableResourceValue(const std::string& resource) const;
     void setResource(const std::string& resource, int value);

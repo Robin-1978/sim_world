@@ -275,13 +275,20 @@ Json worldStateToJson(const WorldState& state) {
                                 {"threat", securityState.threat}, {"exposure", securityState.exposure},
                                 {"evacuated", securityState.evacuated}};
     }
-    return Json{{"save_schema_version", 11}, {"simulation_version", "adaptive-runtime-p1.11"},
+    Json overlays = Json::array();
+    for (const auto& overlay : state.activeOverlays) {
+        overlays.push_back(Json{{"proposal_id", overlay.proposalId},
+                                {"base_content_version", overlay.baseContentVersion},
+                                {"overlay_version", overlay.overlayVersion},
+                                {"operations", overlay.operations}});
+    }
+    return Json{{"save_schema_version", 12}, {"simulation_version", "adaptive-runtime-p1.12"},
                 {"event_sequence", state.events.size()}, {"world_id", state.worldId},
                 {"instance_id", state.instanceId},
                 {"content_version", state.contentVersion}, {"now", state.now.minute},
                 {"revision", state.revision},
                 {"resources", resources}, {"inventories", inventories}, {"security", security},
-                {"active_overlays", state.activeOverlays},
+                {"active_overlays", overlays},
                 {"entities", entities}, {"links", links}, {"npcs", npcs}, {"promises", promises}, {"events", events},
                 {"processed_turn_ids", state.processedTurnIds}};
 }
@@ -317,7 +324,19 @@ WorldState deserializeWorldState(const Json& json) {
             jsonValue<double>(entity.value(), "exposure", 0.0),
             jsonValue<bool>(entity.value(), "evacuated", false)};
     }
-    state.activeOverlays = json.value("active_overlays", std::vector<std::string>{});
+    const auto overlays = json.value("active_overlays", Json::array());
+    if (!overlays.is_array()) throw std::runtime_error("snapshot active_overlays must be an array");
+    for (const auto& value : overlays) {
+        if (!value.is_object() || !value.contains("proposal_id") || !value.at("proposal_id").is_string() ||
+            !value.contains("base_content_version") || !value.at("base_content_version").is_string() ||
+            !value.contains("overlay_version") || !value.at("overlay_version").is_string() ||
+            !value.contains("operations") || !value.at("operations").is_array()) {
+            throw std::runtime_error("snapshot active overlay is incomplete");
+        }
+        state.activeOverlays.push_back(ActiveOverlayState{
+            value.at("proposal_id").get<std::string>(), value.at("base_content_version").get<std::string>(),
+            value.at("overlay_version").get<std::string>(), value.at("operations")});
+    }
     const auto entities = json.value("entities", Json::object());
     for (auto it = entities.begin(); it != entities.end(); ++it) {
         const auto value = it.value();

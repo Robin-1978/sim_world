@@ -265,6 +265,16 @@ struct WorldEvent {
     Json data = Json::object();
 };
 
+// Active declarative overlays are runtime state. Their operations must travel
+// with a snapshot so a restored world can rebuild the exact content view and
+// retain a rollback path without trusting process-local memory.
+struct ActiveOverlayState {
+    std::string proposalId;
+    std::string baseContentVersion;
+    std::string overlayVersion;
+    Json operations = Json::array();
+};
+
 struct WorldState {
     std::string worldId{"world"};
     // The concrete Game Instance is part of runtime identity.  A snapshot may
@@ -278,7 +288,7 @@ struct WorldState {
     // changed only through registered resource operators.
     std::map<std::string, std::map<std::string, int>> inventories;
     std::map<std::string, SecurityState> security;
-    std::vector<std::string> activeOverlays;
+    std::vector<ActiveOverlayState> activeOverlays;
     // Runtime entity identity and lifecycle are authoritative world facts.
     // Typed components remain projected through EntityRegistry and are only
     // mutated by a transaction/system.

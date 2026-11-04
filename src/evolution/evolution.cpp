@@ -199,10 +199,7 @@ EvolutionValidation EvolutionManager::applyOverlay(WorldContentPack& content,
     if (proposal.status != EvolutionProposalStatus::Approved) {
         return {false, "approval_required", "Only an approved proposal can activate an overlay."};
     }
-    std::string baseVersion = content.contentVersion;
-    const auto overlayMarker = baseVersion.find("+overlay:");
-    if (overlayMarker != std::string::npos) baseVersion.erase(overlayMarker);
-    if (proposal.baseContentVersion != baseVersion) {
+    if (proposal.baseContentVersion != content.contentVersion) {
         return {false, "content_version_conflict", "Overlay base content does not match the active content."};
     }
     const auto applied = applyOperations(content, proposal);
@@ -238,6 +235,10 @@ EvolutionSandboxResult EvolutionManager::sandbox(const EvolutionProposal& propos
     if (overlay.instance) overlay.instance->contentVersion = overlayVersion;
     auto snapshot = base.snapshotJson();
     snapshot["content_version"] = overlayVersion;
+    // The sandbox content view already includes the candidate operation. Do
+    // not ask fromContentSnapshot to replay the source world's active stack on
+    // top of that view; activation persists the stack separately.
+    snapshot["active_overlays"] = Json::array();
     try {
         auto sandboxWorld = WorldService::fromContentSnapshot(overlay, snapshot);
         const auto beforeEvents = sandboxWorld.state().events.size();
