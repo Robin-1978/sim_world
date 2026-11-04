@@ -84,6 +84,10 @@ int main(int argc, char** argv) {
         std::cerr << "--checkpoint-every-minutes requires --durable-checkpoint PATH\n";
         return 2;
     }
+    if (checkpointDaily && durableCheckpointPath.empty()) {
+        std::cerr << "--checkpoint-daily requires --durable-checkpoint PATH\n";
+        return 2;
+    }
     if (checkpointDaily && checkpointIntervalMinutes > 0) {
         std::cerr << "--checkpoint-daily and --checkpoint-every-minutes are mutually exclusive\n";
         return 2;
