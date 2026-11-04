@@ -245,6 +245,35 @@ void validateBehaviorNodeReferences(const BehaviorNodeContent& node, const World
                              [&link](const auto& item) { return item.id == link; })) {
                 throw std::runtime_error("behavior action references an unknown link: " + link);
             }
+        } else if (definition->second.operation == "exchange.create") {
+            const auto offered = args.value("offered", Json::object());
+            const auto requested = args.value("requested", Json::object());
+            if (!offered.is_object() || !requested.is_object() || offered.empty() || requested.empty()) {
+                throw std::runtime_error("exchange.create needs non-empty terms on both sides in " + path);
+            }
+            for (const auto* terms : {&offered, &requested}) {
+                for (auto term = terms->begin(); term != terms->end(); ++term) {
+                    if (!pack.resources.contains(term.key()) || !term.value().is_number_integer() ||
+                        term.value().get<int>() <= 0) {
+                        throw std::runtime_error("exchange.create references invalid terms in " + path);
+                    }
+                }
+            }
+            if (args.value("counterparty", "").empty() || !args.contains("due_minutes") ||
+                !args.at("due_minutes").is_number_integer() || args.at("due_minutes").get<int>() <= 0) {
+                throw std::runtime_error("exchange.create needs a counterparty and positive due_minutes in " + path);
+            }
+        } else if (definition->second.operation == "exchange.transition" ||
+                   definition->second.operation == "exchange.settle") {
+            if (args.value("contract_id", "").empty()) {
+                throw std::runtime_error("exchange transition needs contract_id in " + path);
+            }
+            if (definition->second.operation == "exchange.transition") {
+                const auto status = args.value("status", "");
+                if (status != "accepted" && status != "rejected" && status != "cancelled") {
+                    throw std::runtime_error("exchange.transition has an invalid status in " + path);
+                }
+            }
         }
     }
     for (const auto& child : node.children) validateBehaviorNodeReferences(child, pack, path);
