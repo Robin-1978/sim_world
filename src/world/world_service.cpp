@@ -778,7 +778,7 @@ std::size_t WorldService::pumpAsyncTurns() {
 }
 
 std::size_t WorldService::pendingAsyncTurns() const {
-    return WorldIntelligenceSystem(*const_cast<WorldService*>(this)).pendingAsyncTurns();
+    return WorldIntelligenceSystem::pendingAsyncTurns(*this);
 }
 
 std::size_t WorldService::waitForAsyncTurns(std::int64_t timeoutMilliseconds) {

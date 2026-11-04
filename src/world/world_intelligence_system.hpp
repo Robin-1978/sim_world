@@ -32,6 +32,7 @@ public:
                                const std::string& channelId = {});
     std::size_t pumpAsyncTurns();
     [[nodiscard]] std::size_t pendingAsyncTurns() const;
+    [[nodiscard]] static std::size_t pendingAsyncTurns(const WorldService& world);
     std::size_t waitForAsyncTurns(std::int64_t timeoutMilliseconds);
 
 private:

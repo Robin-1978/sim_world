@@ -446,6 +446,10 @@ std::size_t WorldIntelligenceSystem::pendingAsyncTurns() const {
     return world_.intelligence_ ? world_.intelligence_->pending() : 0;
 }
 
+std::size_t WorldIntelligenceSystem::pendingAsyncTurns(const WorldService& world) {
+    return world.intelligence_ ? world.intelligence_->pending() : 0;
+}
+
 std::size_t WorldIntelligenceSystem::waitForAsyncTurns(std::int64_t timeoutMilliseconds) {
     if (timeoutMilliseconds <= 0 || !world_.intelligence_) return pumpAsyncTurns();
     const auto deadline = std::chrono::steady_clock::now() +
