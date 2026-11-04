@@ -3,6 +3,7 @@
 #include "world/npc_simulation_system.hpp"
 #include "world/behavior_execution_system.hpp"
 #include "world/command_dispatcher.hpp"
+#include "world/world_intelligence_system.hpp"
 #include "world/resource_system.hpp"
 #include "world/social_system.hpp"
 #include "world/meta_action_executor.hpp"
@@ -1080,12 +1081,12 @@ std::optional<std::vector<std::string>> WorldService::planRoute(const std::strin
 
 DialogueTurn WorldService::converse(const std::string& npcId, const std::string& playerInput,
                                     const std::string& turnId) {
-    return executeTurn(npcId, playerInput, turnId, content_.conversationChannelId, "player_input");
+    return WorldIntelligenceSystem(*this).converse(npcId, playerInput, turnId);
 }
 
 DialogueTurn WorldService::deliberate(const std::string& npcId, const std::string& trigger,
                                       const std::string& turnId) {
-    return executeTurn(npcId, {}, turnId, content_.autonomousChannelId, trigger);
+    return WorldIntelligenceSystem(*this).deliberate(npcId, trigger, turnId);
 }
 
 ProviderResponse WorldService::requestEvolutionProposal(const std::string& evolutionLevel,
@@ -1146,432 +1147,35 @@ ProviderResponse WorldService::requestEvolutionProposal(const std::string& evolu
 
 TurnRequest WorldService::makeTurnRequest(const std::string& npcId, const std::string& input,
                                           const std::string& turnId, const std::string& channelId,
-                                          const std::string& trigger) const {
-    TurnRequest request;
-    request.turnId = turnId;
-    request.npcId = npcId;
-    request.channelId = channelId;
-    request.trigger = trigger;
-    request.playerInput = input;
-    request.contentVersion = content_.contentVersion;
-    request.npcStateVersion = state_.npcs.at(npcId).stateVersion;
-    request.createdAt = state_.now;
-    const auto channel = content_.decisionChannels.find(channelId);
-    request.context = decisionContext(npcId);
-    request.context.channel = channelId;
-    request.context.providerPolicy = channel->second.providerPolicy;
-    request.context.trigger = trigger;
-    request.context.promptVersion =
-        "tide-marks-intent-v2:" + content_.contentVersion + ":" + content_.id;
-    request.context.runtimeMetadata["channel_id"] = channelId;
-    request.context.runtimeMetadata["trigger"] = trigger;
-    request.context.runtimeMetadata["prompt_version"] = request.context.promptVersion;
-    request.promptVersion = request.context.promptVersion;
-    request.coalescePending = !channel->second.conversation &&
-                              content_.npcDeliberation.coalescePending;
-    request.deadline = GameTime{state_.now.minute + content_.npcDeliberation.maxDecisionAgeMinutes};
-    if (channel->second.conversation && channel->second.classifySpeechAct) {
-        // Semantic interpretation belongs exclusively to the provider. Runtime
-        // supplies the content-authored speech-act vocabulary and validates the
-        // returned identifier; it never inspects player text for keywords.
-        request.context.speechAct.clear();
-        request.context.worldActionAllowed = false;
-        request.context.speechActClassificationRequired = true;
-        for (const auto& rule : content_.conversationPolicy.rules) {
-            request.context.speechActs.push_back(
-                SpeechActPermissionView{toString(rule.act), rule.description, rule.worldActionAllowed});
-        }
-    } else {
-        request.context.speechAct = channel->second.defaultSpeechAct;
-        request.context.worldActionAllowed = channel->second.defaultWorldActionAllowed;
-    }
-    request.worldRevision = request.context.worldRevision;
-    return request;
+                                          const std::string& trigger) {
+    return WorldIntelligenceSystem(*this).makeTurnRequest(npcId, input, turnId, channelId, trigger);
 }
 
 DialogueTurn WorldService::executeTurn(const std::string& npcId, const std::string& input,
                                        const std::string& turnId, const std::string& channelId,
                                        const std::string& trigger) {
-    DialogueTurn result;
-    result.npcId = npcId;
-    result.provider = provider_->name();
-    if (!hasNpc(npcId)) {
-        result.error = "unknown_npc";
-        return result;
-    }
-    if (!turnId.empty() && state_.processedTurnIds.contains(turnId)) {
-        result.error = "duplicate_turn";
-        return result;
-    }
-    if (!content_.decisionChannels.contains(channelId)) {
-        result.error = "unknown_decision_channel";
-        return result;
-    }
-    auto request = makeTurnRequest(npcId, input, turnId, channelId, trigger);
-    auto response = provider_->decide(request.context, input);
-    auto turnResult = commitTurn(request, response);
-    // A provider response can be structurally valid while its parameters do
-    // not satisfy the authored plan contract. Give the real LLM one bounded,
-    // structured repair opportunity. Resource, permission, revision and
-    // topology failures remain closed: retrying those would merely repeat an
-    // impossible world action and increase player latency.
-    const auto retryable = [](const std::string& code) {
-        return code == "missing_action_parameter" || code == "unknown_action_parameter" ||
-               code == "invalid_action_parameter_type" || code == "unexpected_action_parameters" ||
-               code == "invalid_action_parameters" || code == "invalid_action_parameter_value";
-    };
-    if (!turnResult.accepted && response.ok && provider_->name() == "llama.cpp" && retryable(turnResult.error)) {
-        const Json feedback{{"attempt", 1},
-                            {"code", turnResult.error},
-                            {"message", "Runtime rejected the proposed action parameters; repair only the declared plan input."},
-                            {"previous_action_id", response.proposal.actionId},
-                            {"previous_parameters", response.proposal.parameters}};
-        auto repaired = provider_->decide(request.context, input, feedback);
-        if (repaired.ok) turnResult = commitTurn(request, std::move(repaired));
-    }
-    return turnResult;
+    return WorldIntelligenceSystem(*this).executeTurn(npcId, input, turnId, channelId, trigger);
 }
 
 DialogueTurn WorldService::commitTurn(const TurnRequest& request, ProviderResponse response) {
-    TransactionScope transaction(*this);
-    DialogueTurn result;
-    result.npcId = request.npcId;
-    result.provider = provider_->name();
-    if (!hasNpc(request.npcId)) {
-        result.error = "unknown_npc";
-        return result;
-    }
-    if (!request.turnId.empty() && state_.processedTurnIds.contains(request.turnId)) {
-        result.error = "duplicate_turn";
-        return result;
-    }
-    if (request.deadline.minute > 0 && state_.now.minute > request.deadline.minute) {
-        result.error = "decision_expired";
-        return result;
-    }
-    const auto channel = content_.decisionChannels.find(request.channelId);
-    if (channel == content_.decisionChannels.end()) {
-        result.error = "unknown_decision_channel";
-        return result;
-    }
-    const auto& npc = state_.npcs.at(request.npcId);
-    const bool worldRevisionChanged = state_.revision != request.worldRevision;
-    if (request.contentVersion != content_.contentVersion ||
-        request.promptVersion != request.context.promptVersion ||
-        (worldRevisionChanged && !channel->second.allowInterveningWorldChanges) ||
-        npc.stateVersion != request.npcStateVersion) {
-        result.error = "stale_intent_proposal";
-        return result;
-    }
-    const auto& context = request.context;
-    if (!response.ok) {
-        // The provider is the decision authority.  Runtime never silently
-        // substitutes a deterministic choice when an LLM fails, because that
-        // would make an apparently autonomous world advance without the
-        // intelligence profile that the run was configured to use.  Tests and
-        // offline tools can still inject MockProvider explicitly.
-        result.error = response.error.empty() ? "provider_unavailable" : response.error;
-        return result;
-    }
-    const std::string effectiveSpeechAct = channel->second.conversation
-                                               ? (response.proposal.speechAct.empty()
-                                                      ? request.context.speechAct
-                                                      : response.proposal.speechAct)
-                                               : request.context.speechAct;
-    const auto parsedSpeechAct = speechActFromString(effectiveSpeechAct);
-    if (channel->second.conversation && context.speechActClassificationRequired &&
-        parsedSpeechAct == SpeechAct::Unknown) {
-        result.error = "invalid_speech_act";
-        return result;
-    }
-    const bool worldActionAllowed =
-        channel->second.conversation && context.speechActClassificationRequired
-            ? permitsWorldAction(parsedSpeechAct, content_.conversationPolicy)
-            : channel->second.defaultWorldActionAllowed;
-    // Autonomous channels must produce an action. Conversation channels may
-    // validly refuse or answer without one, so their empty action_id is kept.
-    if (response.ok && !channel->second.conversation && worldActionAllowed &&
-        response.proposal.actionId.empty()) {
-        result.error = "world_action_required";
-        return result;
-    }
-    if (response.proposal.worldRevision != context.worldRevision ||
-        response.proposal.npcStateVersion != context.npcStateVersion) {
-        result.error = "stale_intent_proposal";
-        return result;
-    }
-    if (response.proposal.confidence < 0.0 || response.proposal.confidence > 1.0) {
-        result.error = "invalid_intent_confidence";
-        return result;
-    }
-    for (const auto& stimulusId : response.proposal.citedStimulusIds) {
-        const auto foundStimulus = std::find_if(context.stimuli.begin(), context.stimuli.end(),
-                                                [&stimulusId](const auto& stimulus) { return stimulus.id == stimulusId; });
-        if (foundStimulus == context.stimuli.end()) {
-            result.error = "unknown_stimulus_citation";
-            return result;
-        }
-    }
-    for (const auto& [needId, expected] : response.proposal.expectedRelief) {
-        if (expected < 0.0 || expected > 1.0 || !state_.npcs.at(request.npcId).needs.contains(needId)) {
-            result.error = "invalid_expected_relief";
-            return result;
-        }
-    }
-    if (response.proposal.actionId.empty()) {
-        if (worldActionAllowed && response.proposal.worldActionRequested) {
-            result.error = "world_action_required";
-            return result;
-        }
-        auto& mutableNpc = state_.npcs.at(request.npcId);
-        if (!request.turnId.empty()) state_.processedTurnIds.insert(request.turnId);
-        ++mutableNpc.stateVersion;
-        mutableNpc.memories.push_back(Memory{channel->second.memoryKind, request.playerInput, state_.now,
-                                             response.proposal.confidence});
-        const auto target = channel->second.eventTarget == "player" ? kPlayerId :
-                            channel->second.eventTarget == "self" ? "self" : channel->second.eventTarget;
-        const auto event = addEvent(
-            channel->second.eventType, request.npcId, target, response.dialogue,
-            Json{{"turn_id", request.turnId}, {"action_id", ""}, {"trigger", request.trigger},
-                 {"speech_act", effectiveSpeechAct}, {"world_action_requested", false},
-                 {"utterance_understanding", response.proposal.utteranceUnderstanding},
-                 {"process_status", "conversation_only"}, {"provider", result.provider},
-                 {"context_world_revision", response.proposal.worldRevision},
-                 {"context_npc_state_version", response.proposal.npcStateVersion}});
-        result.accepted = true;
-        result.intent = response.proposal.intent;
-        result.motivation = response.proposal.rationale;
-        result.dialogue = response.dialogue;
-        result.event = event;
-        syncNpcEntityState();
-        return result;
-    }
-    if (!worldActionAllowed) {
-        result.error = "speech_act_disallows_world_action";
-        return result;
-    }
-    const auto validation = ActionValidator::validate(context, response.proposal.actionId,
-                                                      response.proposal.parameters);
-    if (!validation.valid) {
-        result.error = validation.code;
-        return result;
-    }
-    const auto candidate = std::find_if(context.candidates.begin(), context.candidates.end(),
-                                        [&response](const auto& item) {
-                                            return item.actionId == response.proposal.actionId;
-                                        });
-    if (candidate == context.candidates.end()) {
-        result.error = "unknown_action_id";
-        return result;
-    }
-    auto& mutableNpc = state_.npcs.at(request.npcId);
-    if (mutableNpc.activity.process) {
-        double incomingSalience = channel->second.conversation ? 1.0 : 0.0;
-        for (const auto& stimulus : context.stimuli) {
-            incomingSalience = std::max(incomingSalience, stimulus.effectiveSalience);
-        }
-        if (!mutableNpc.activity.process->interruptible ||
-            incomingSalience < mutableNpc.activity.process->interruptSalienceThreshold) {
-            result.error = "npc_busy";
-            return result;
-        }
-        cancelProcess(request.npcId, *mutableNpc.activity.process, request.trigger);
-        mutableNpc.activity = NpcActivity{};
-    }
-    std::map<std::string, int> reservations = candidate->reservationMode == "input_resources"
-                                                   ? candidate->reservations
-                                                   : std::map<std::string, int>{};
-    const std::string processId =
-        "process:" + request.npcId + ":" +
-        (request.turnId.empty() ? std::to_string(state_.events.size() + 1) : request.turnId);
-    if (candidate->preemptionPolicy == "lower_priority") {
-        // Plan all suspensions before mutating state, then apply one
-        // deterministic arbitration decision. This prevents an impossible
-        // request from leaving some victims suspended.
-        const auto victims = planResourcePreemption(request.npcId, reservations, candidate->priority);
-        if (!victims) {
-            transaction.rollback();
-            result.error = "insufficient_resource";
-            return result;
-        }
-        for (const auto& victimId : *victims) {
-            auto& victim = state_.npcs.at(victimId);
-            suspendProcess(victimId, *victim.activity.process, "resource_preempted",
-                           Json{{"preempted_by", request.npcId},
-                                {"preempting_process_id", processId},
-                                {"preempting_priority", candidate->priority}});
-        }
-    }
-    for (const auto& [resource, amount] : reservations) {
-        if (availableResourceValue(resource) < amount) {
-            transaction.rollback();
-            result.error = "insufficient_resource";
-            return result;
-        }
-    }
-    if (candidate->durationMinutes <= 0 &&
-        !applyActionEffects(request.npcId, candidate->actionId, nullptr, &response.proposal.parameters)) {
-        transaction.rollback();
-        result.error = "insufficient_resource";
-        return result;
-    }
-    result.accepted = true;
-    if (!request.turnId.empty()) state_.processedTurnIds.insert(request.turnId);
-    ++mutableNpc.stateVersion;
-    if (candidate->durationMinutes > 0) {
-        for (const auto& [resource, amount] : reservations) state_.resources[resource].reserved += amount;
-        const std::string goalId = "goal:" + request.npcId + ":" + processId.substr(processId.find(':') + 1);
-        mutableNpc.activity.goal = GoalState{goalId, response.proposal.intent, candidate->actionId,
-                                             response.proposal.confidence, GoalStatus::Active, state_.now,
-                                             GameTime{state_.now.minute + candidate->durationMinutes},
-                                             response.proposal.rationale};
-        ProcessExecution process;
-        process.id = processId;
-        process.goalId = goalId;
-        process.actionId = candidate->actionId;
-        process.recipeId = candidate->recipeId;
-        process.planId = candidate->planId;
-        process.trigger = request.trigger;
-        process.startedAt = state_.now;
-        process.completesAt = GameTime{state_.now.minute + candidate->durationMinutes};
-        process.behaviorNodeId = candidate->planId;
-        process.parameters = response.proposal.parameters;
-        process.interruptible = candidate->interruptible;
-        process.interruptSalienceThreshold = candidate->interruptSalienceThreshold;
-        process.reservationMode = candidate->reservationMode;
-        process.reservedResources = reservations;
-        process.requiredResources = reservations;
-        process.priority = candidate->priority;
-        process.preemptionPolicy = candidate->preemptionPolicy;
-        process.proposalWorldRevision = response.proposal.worldRevision;
-        process.proposalNpcStateVersion = response.proposal.npcStateVersion;
-        mutableNpc.activity.process = std::move(process);
-        setActivityStatus(mutableNpc.activity, ActivityStatus::Active);
-        applyNpcSignal(mutableNpc, NpcSignal::StartProcess);
-    }
-    mutableNpc.memories.push_back(Memory{channel->second.memoryKind,
-                                         request.playerInput.empty() ? response.proposal.intent : request.playerInput,
-                                         state_.now, 1.0});
-    const auto target = channel->second.eventTarget == "player" ? kPlayerId :
-                        channel->second.eventTarget == "self" ? "self" : channel->second.eventTarget;
-    const auto event = addEvent(
-        channel->second.eventType, request.npcId, target, response.dialogue,
-        Json{{"turn_id", request.turnId}, {"process_id", processId},
-             {"action_id", response.proposal.actionId}, {"trigger", request.trigger},
-             {"speech_act", effectiveSpeechAct},
-             {"utterance_understanding", response.proposal.utteranceUnderstanding},
-             {"duration_minutes", candidate->durationMinutes},
-             {"process_status", candidate->durationMinutes > 0 ? "running" : "completed"},
-             {"intent", response.proposal.intent}, {"motivation", response.proposal.rationale},
-             {"expected_outcome", response.proposal.expectedOutcome},
-             {"cited_stimulus_ids", response.proposal.citedStimulusIds},
-             {"tradeoffs", response.proposal.tradeoffs},
-             {"expected_relief", response.proposal.expectedRelief},
-             {"parameters", response.proposal.parameters},
-             {"utility_score", candidate->utilityScore},
-             {"utility_contributions", candidate->utilityContributions},
-             {"confidence", response.proposal.confidence}, {"provider", result.provider},
-             {"context_world_revision", response.proposal.worldRevision},
-             {"context_npc_state_version", response.proposal.npcStateVersion}});
-    result.actionId = response.proposal.actionId;
-    result.intent = response.proposal.intent;
-    result.motivation = response.proposal.rationale;
-    result.dialogue = response.dialogue;
-    result.event = event;
-    syncNpcEntityState();
-    return result;
+    return WorldIntelligenceSystem(*this).commitTurn(request, std::move(response));
 }
 
 void WorldService::enqueueAutonomousTurn(const std::string& npcId, const std::string& trigger,
                                          const std::string& channelId) {
-    if (!hasNpc(npcId)) return;
-    const std::string selectedChannel = channelId.empty() ? content_.autonomousChannelId : channelId;
-    if (!content_.decisionChannels.contains(selectedChannel)) return;
-    const std::string turnId = "autonomous:" + npcId + ":" + std::to_string(state_.now.minute) + ":" +
-                               std::to_string(state_.revision);
-    if (intelligence_->isTracked(turnId)) return;
-    const auto request = makeTurnRequest(npcId, {}, turnId, selectedChannel, trigger);
-    const auto submitted = intelligence_->submit(request);
-    if (!submitted.accepted) return;
-    intelligence_->track(turnId);
-    state_.npcs.at(npcId).lastAutonomousTurn = state_.now;
+    WorldIntelligenceSystem(*this).enqueueAutonomousTurn(npcId, trigger, channelId);
 }
 
 std::size_t WorldService::pumpAsyncTurns() {
-    if (!intelligence_) return 0;
-    const auto results = intelligence_->drain();
-    std::size_t consumed = 0;
-    for (auto& queued : results) {
-        ++consumed;
-        intelligence_->forget(queued.request.turnId);
-        const auto turn = commitTurn(queued.request, std::move(queued.response));
-        if (turn.accepted) continue;
-        const auto retryable = [](const std::string& code) {
-            return code == "missing_action_parameter" || code == "unknown_action_parameter" ||
-                   code == "invalid_action_parameter_type" || code == "unexpected_action_parameters" ||
-                   code == "invalid_action_parameters" || code == "invalid_action_parameter_value";
-        };
-        const auto queuedChannel = content_.decisionChannels.find(queued.request.channelId);
-        const bool allowInterveningWorldChanges =
-            queuedChannel != content_.decisionChannels.end() &&
-            queuedChannel->second.allowInterveningWorldChanges;
-        if (queued.provider == "llama.cpp" && queued.request.validationFeedback.empty() && retryable(turn.error) &&
-            (!allowInterveningWorldChanges || state_.revision >= queued.request.worldRevision) &&
-            hasNpc(queued.request.npcId) &&
-            state_.npcs.at(queued.request.npcId).stateVersion == queued.request.npcStateVersion) {
-            auto repair = queued.request;
-            repair.validationFeedback = Json{
-                {"attempt", 1},
-                {"code", turn.error},
-                {"message", "Runtime rejected the proposed action parameters; repair only the declared plan input."},
-                {"previous_turn_id", queued.request.turnId}};
-            const auto submitted = intelligence_->submit(std::move(repair));
-            if (submitted.accepted) {
-                intelligence_->track(queued.request.turnId);
-                continue;
-            }
-        }
-        // An asynchronous result is observable even when it arrives too late
-        // or fails validation. This is an audit fact, not a world mutation.
-        TransactionScope transaction(*this);
-        const bool expired = turn.error == "stale_intent_proposal" ||
-                             turn.error == "decision_expired" ||
-                             (!allowInterveningWorldChanges &&
-                              state_.revision != queued.request.worldRevision) ||
-                             !hasNpc(queued.request.npcId) ||
-                             state_.npcs.at(queued.request.npcId).stateVersion != queued.request.npcStateVersion;
-        addEvent(expired ? "npc.intent_expired" : "npc.intent_rejected", queued.request.npcId, "self",
-                 expired ? "An asynchronous intent arrived after its decision context expired."
-                         : "An asynchronous intent was rejected by the runtime validator.",
-                 Json{{"turn_id", queued.request.turnId}, {"channel", queued.request.channelId},
-                      {"trigger", queued.request.trigger}, {"error", turn.error},
-                      {"request_world_revision", queued.request.worldRevision},
-                      {"current_world_revision", state_.revision},
-                      {"request_npc_state_version", queued.request.npcStateVersion},
-                      {"created_at", queued.request.createdAt.minute},
-                      {"deadline", queued.request.deadline.minute},
-                      {"current_minute", state_.now.minute},
-                      {"provider", queued.provider}});
-    }
-    return consumed;
+    return WorldIntelligenceSystem(*this).pumpAsyncTurns();
 }
 
 std::size_t WorldService::pendingAsyncTurns() const {
-    return intelligence_ ? intelligence_->pending() : 0;
+    return WorldIntelligenceSystem(*const_cast<WorldService*>(this)).pendingAsyncTurns();
 }
 
 std::size_t WorldService::waitForAsyncTurns(std::int64_t timeoutMilliseconds) {
-    if (timeoutMilliseconds <= 0 || !intelligence_) return pumpAsyncTurns();
-    const auto deadline = std::chrono::steady_clock::now() +
-                          std::chrono::milliseconds(timeoutMilliseconds);
-    std::size_t consumed = 0;
-    while (intelligence_->pending() > 0 && std::chrono::steady_clock::now() < deadline) {
-        consumed += pumpAsyncTurns();
-        if (intelligence_->pending() == 0) break;
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
-    }
-    consumed += pumpAsyncTurns();
-    return consumed;
+    return WorldIntelligenceSystem(*this).waitForAsyncTurns(timeoutMilliseconds);
 }
 
 int WorldService::resourceValue(const std::string& resource) const {

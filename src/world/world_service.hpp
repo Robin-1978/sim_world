@@ -32,6 +32,7 @@ class ContractSystem;
 class NpcSimulationSystem;
 class BehaviorExecutionSystem;
 class CommandDispatcher;
+class WorldIntelligenceSystem;
 struct Command {
     std::string turnId;
     std::string kind;
@@ -199,6 +200,7 @@ private:
     friend class NpcSimulationSystem;
     friend class BehaviorExecutionSystem;
     friend class CommandDispatcher;
+    friend class WorldIntelligenceSystem;
     class TransactionScope {
     public:
         explicit TransactionScope(WorldService& service);
@@ -252,7 +254,7 @@ private:
                                const std::string& channelId = {});
     [[nodiscard]] TurnRequest makeTurnRequest(const std::string& npcId, const std::string& input,
                                               const std::string& turnId, const std::string& channelId,
-                                              const std::string& trigger) const;
+                                              const std::string& trigger);
     DialogueTurn commitTurn(const TurnRequest& request, ProviderResponse response);
     CommandResult applySecurityOperator(const std::string& operation, const std::string& actor,
                                         const std::string& target, const Json& args,
