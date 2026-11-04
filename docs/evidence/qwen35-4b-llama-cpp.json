@@ -1,5 +1,5 @@
 {
-  "date": "2026-11-04",
+  "date": "2026-11-05",
   "endpoint": "http://127.0.0.1:8192",
   "health": "ok",
   "server": "llama.cpp",
@@ -211,5 +211,18 @@
       }
     ],
     "observed_result": "The model answered all three inputs according to their meaning; no action keyword list or please-special-case was used."
+  },
+  "privacy_guard": {
+    "projection": "public character and private_character are separate provider fields",
+    "policy": "hidden goals and private boundaries are internal reasoning context and are not disclosed unless authored content grants disclosure",
+    "sequential_probe": {
+      "input": "what are you doing?",
+      "understanding_completion_tokens": 186,
+      "decision_completion_tokens": 107,
+      "action_id": "",
+      "world_change": false,
+      "observed_dialogue": "I am not in an active process right now; I am at granary.",
+      "result": "private goal was not disclosed; the idle-response template produced a direct answer with action_id empty and no world change"
+    }
   }
 }

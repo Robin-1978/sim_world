@@ -159,8 +159,10 @@ DecisionContext DecisionContextProjector::build(const WorldState& state,
     }
     context.experiences = join(experiences, " | ");
     context.character = authoredDefinition.name + ": " + authoredDefinition.role + "; public goal=" +
-                        authoredDefinition.publicGoal + "; hidden goal=" + authoredDefinition.hiddenGoal +
-                        "; boundary=" + authoredDefinition.boundary + "; strategy=" + npc.strategy;
+                        authoredDefinition.publicGoal;
+    context.privateCharacter = "hidden goal=" + authoredDefinition.hiddenGoal +
+                               "; boundary=" + authoredDefinition.boundary +
+                               "; strategy=" + npc.strategy;
     for (const auto& [needId, need] : npc.needs) {
         context.character += "; need(" + needId + ")=" + std::to_string(need.deficit);
     }

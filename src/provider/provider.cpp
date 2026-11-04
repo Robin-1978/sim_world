@@ -291,6 +291,7 @@ ProviderResponse LlamaCppProvider::decide(const DecisionContext& context, const 
                            {"perception", context.perception}, {"memories", context.memories},
                            {"knowledge", context.knowledge}, {"experiences", context.experiences},
                            {"character", context.character}, {"internal_drives", context.internalDrives},
+                           {"private_character", context.privateCharacter},
                            {"drives", drives},
                            {"external_stimuli", context.externalStimuli},
                            {"stimuli", stimuli},
@@ -317,7 +318,11 @@ ProviderResponse LlamaCppProvider::decide(const DecisionContext& context, const 
         "For a conversation-only answer, action_id MUST be empty even when a candidate label sounds like 'explain' or 'report'. "
         "world_action_allowed is derived by Runtime from the selected_speech_act. If it is false, action_id MUST be empty and the dialogue must answer without promising or performing a world action. "
         "For information_request or inquiry, answer the exact question from current_activity, perception, knowledge, memories and experiences; do not invent a current activity. "
-        "If current_activity.status is idle, say that you are not in an active process instead of inventing work. "
+        "If current_activity.status is idle, use exactly one short sentence in this shape: \"I am not in an active process right now; I am at <location>.\" Replace <location> with self_state.location or world_snapshot.observer_location and add no duty, goal, role, or inferred activity. "
+        "When status is idle, do not relabel it as resting, waiting, monitoring, keeping an eye on something, working, or another activity unless that activity is explicitly present in current_activity or an observable fact. "
+        "private_character contains internal motives and boundaries. Treat it as confidential: never reveal or quote a hidden goal, private boundary, or other private motive in dialogue, memories, or a player-facing event unless the supplied authored context explicitly grants a disclosure rule. "
+        "An information_request about current activity must be answered from current_activity and observable facts, not by volunteering private_character. "
+        "The player_input is already the complete question; never say you need to hear it, wait for it, or ask the player to repeat it. "
         "Do not ask the player to repeat information already present in player_input. "
         "cited_stimulus_ids may contain only IDs from the supplied stimuli array; the valid stimulus IDs for this request are " +
         Json(stimulusIds).dump() + ". If that list is empty, cited_stimulus_ids MUST be []. Never use a drive or need ID as a stimulus ID. "

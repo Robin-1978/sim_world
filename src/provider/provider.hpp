@@ -83,6 +83,10 @@ struct DecisionContext {
     std::string knowledge;
     std::string experiences;
     std::string character;
+    // Private motives are available for internal deliberation but are not
+    // part of the public character description. Providers must not copy them
+    // into dialogue unless an authored disclosure rule permits it.
+    std::string privateCharacter;
     std::string internalDrives;
     std::string externalStimuli;
     std::string structuralConstraints;
