@@ -19,3 +19,4 @@
 #include "provider/provider_profile.hpp"
 #include "world/world_service.hpp"
 #include "world/persistence.hpp"
+#include "world/transaction_manager.hpp"

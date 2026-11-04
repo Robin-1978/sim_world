@@ -87,6 +87,7 @@ add_library(tide_marks_core
     src/provider/turn_queue.cpp
     src/world/meta_actions.cpp
         src/world/persistence.cpp
+    src/world/transaction_manager.cpp
     src/world/world_service.cpp
     src/world/world_state_json.cpp
 )

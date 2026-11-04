@@ -82,41 +82,6 @@ bool actorIsActive(const WorldState& state, const std::string& actorId) {
     return entity != state.entities.end() && entity->second.lifecycle == EntityLifecycle::Active;
 }
 
-WorldState transactionalBackup(const WorldState& state, std::size_t& eventCount) {
-    eventCount = state.events.size();
-    // Build the rollback image field-by-field so the immutable event history
-    // is never copied into every minute transaction.  A default WorldState
-    // copy would still copy the complete JSON event log before clearing it,
-    // turning a long offline advance into O(history^2) work.
-    WorldState backup;
-    backup.worldId = state.worldId;
-    backup.instanceId = state.instanceId;
-    backup.contentVersion = state.contentVersion;
-    backup.now = state.now;
-    backup.revision = state.revision;
-    backup.resources = state.resources;
-    backup.inventories = state.inventories;
-    backup.security = state.security;
-    backup.activeOverlays = state.activeOverlays;
-    backup.entities = state.entities;
-    backup.links = state.links;
-    backup.npcs = state.npcs;
-    backup.socialGroups = state.socialGroups;
-    backup.promises = state.promises;
-    backup.exchangeContracts = state.exchangeContracts;
-    backup.processedTurnIds = state.processedTurnIds;
-    return backup;
-}
-
-void restoreTransactionalBackup(WorldState& state, WorldState backup,
-                                std::size_t eventCount) {
-    std::vector<WorldEvent> committed;
-    const auto end = std::min(eventCount, state.events.size());
-    committed.assign(state.events.begin(), state.events.begin() + static_cast<std::ptrdiff_t>(end));
-    state = std::move(backup);
-    state.events = std::move(committed);
-}
-
 Json replayFactJson(const WorldState& state, std::size_t eventSequence) {
     Json json = worldStateToJson(state);
     json.erase("events");
@@ -210,54 +175,19 @@ private:
 };
 
 void WorldService::beginTransaction() {
-    TransactionFrame frame;
-    frame.backup = transactionalBackup(state_, frame.backupEventCount);
-    frame.backupDeferredEventCount = deferredEvents_.size();
-    if (transactionFrames_.empty()) {
-        frame.correlationId = "correlation:" + std::to_string(state_.events.size() + 1);
-        frame.lastEventSequence = 0;
-    } else {
-        const auto& parent = transactionFrames_.back();
-        frame.correlationId = parent.correlationId;
-        frame.lastEventSequence = parent.lastEventSequence;
-    }
-    transactionFrames_.push_back(std::move(frame));
+    transactionManager_.begin(state_);
 }
 
 void WorldService::commitTransaction() {
-    if (transactionFrames_.empty()) throw std::logic_error("transaction commit without an active scope");
-    auto completed = std::move(transactionFrames_.back());
-    const auto completedLastEventSequence = completed.lastEventSequence;
-    transactionFrames_.pop_back();
-    if (!transactionFrames_.empty()) {
-        // A nested savepoint is part of the enclosing causal chain only after
-        // it commits. A rolled-back child never advances its parent's link.
-        transactionFrames_.back().lastEventSequence = completedLastEventSequence;
-        return;
-    }
-    if (completed.changed) ++state_.revision;
-    rebuildEntityRegistry();
-    auto events = std::move(deferredEvents_);
-    deferredEvents_.clear();
-    for (const auto& event : events) eventBus_.publish(event);
-    eventBus_.dispatch();
+    transactionManager_.commit(state_, eventBus_, [this] { rebuildEntityRegistry(); });
 }
 
 void WorldService::markTransactionChanged() {
-    if (transactionFrames_.empty()) {
-        ++state_.revision;
-        return;
-    }
-    transactionFrames_.front().changed = true;
+    transactionManager_.markChanged(state_);
 }
 
 void WorldService::rollbackTransaction() {
-    if (transactionFrames_.empty()) throw std::logic_error("transaction rollback without an active scope");
-    auto frame = std::move(transactionFrames_.back());
-    transactionFrames_.pop_back();
-    restoreTransactionalBackup(state_, std::move(frame.backup), frame.backupEventCount);
-    deferredEvents_.resize(std::min(frame.backupDeferredEventCount, deferredEvents_.size()));
-    rebuildEntityRegistry();
+    transactionManager_.rollback(state_, [this] { rebuildEntityRegistry(); });
 }
 
 namespace {
@@ -462,7 +392,7 @@ DecisionContext WorldService::decisionContext(const std::string& npcId) const {
     // A decision may be captured inside the transaction that advances the
     // clock. Bind it to the revision that transaction will commit, otherwise
     // the just-created request is stale before the transaction closes.
-    context.worldRevision = state_.revision + (transactionFrames_.empty() ? 0 : 1);
+    context.worldRevision = state_.revision + (transactionManager_.active() ? 1 : 0);
     context.npcStateVersion = npc.stateVersion;
     std::ostringstream resources;
     for (const auto& [id, resourceDefinition] : content_.resources) {
@@ -3308,27 +3238,20 @@ WorldEvent WorldService::addEvent(std::string type, std::string actor, std::stri
     // A root transaction already owns the new world revision. Direct event
     // creation (bootstrap and other non-transactional paths) gets its own
     // generation here.
-    if (transactionFrames_.empty()) ++state_.revision;
+    const bool inTransaction = transactionManager_.active();
+    if (!inTransaction) ++state_.revision;
     else markTransactionChanged();
-    const auto committedRevision = state_.revision + (transactionFrames_.empty() ? 0 : 1);
+    const auto committedRevision = state_.revision + (inTransaction ? 1 : 0);
     const auto sequence = state_.events.size() + 1;
-    std::string correlationId;
-    std::uint64_t causationSequence = 0;
-    if (!transactionFrames_.empty()) {
-        auto& frame = transactionFrames_.back();
-        correlationId = frame.correlationId;
-        causationSequence = frame.lastEventSequence;
-    } else {
-        correlationId = "correlation:" + std::to_string(sequence);
-    }
-    state_.events.push_back(WorldEvent{kWorldEventSchemaVersion, sequence, state_.now, std::move(type), std::move(actor),
-                                       std::move(target), std::move(detail), committedRevision, std::move(data),
-                                       "event:" + std::to_string(sequence), std::move(correlationId),
-                                       causationSequence, state_.contentVersion, kSimulationVersion});
-    if (!transactionFrames_.empty()) transactionFrames_.back().lastEventSequence = sequence;
-    const WorldEvent committed = state_.events.back();
-    if (!transactionFrames_.empty()) {
-        deferredEvents_.push_back(committed);
+    const auto correlationId = inTransaction ? transactionManager_.currentCorrelation()
+                                             : "correlation:" + std::to_string(sequence);
+    const auto causationSequence = inTransaction ? transactionManager_.currentCausationSequence() : 0;
+    const WorldEvent committed{kWorldEventSchemaVersion, sequence, state_.now, std::move(type), std::move(actor),
+                               std::move(target), std::move(detail), committedRevision, std::move(data),
+                               "event:" + std::to_string(sequence), correlationId, causationSequence,
+                               state_.contentVersion, kSimulationVersion};
+    transactionManager_.recordEvent(state_, committed);
+    if (inTransaction) {
         projectStimuli(committed);
     } else {
         projectStimuli(committed);

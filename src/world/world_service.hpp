@@ -12,6 +12,7 @@
 #include "provider/turn_queue.hpp"
 #include "world/components.hpp"
 #include "world/persistence.hpp"
+#include "world/transaction_manager.hpp"
 #include "world/ids.hpp"
 #include <memory>
 #include <optional>
@@ -172,17 +173,6 @@ public:
 private:
     class TransactionScope;
 
-    struct TransactionFrame {
-        WorldState backup;
-        std::size_t backupEventCount{0};
-        std::size_t backupDeferredEventCount{0};
-        std::string correlationId;
-        std::uint64_t lastEventSequence{0};
-        bool changed{false};
-        bool parentChanged{false};
-    };
-
-
     WorldState state_;
     std::unique_ptr<IProvider> provider_;
     std::unique_ptr<TurnQueue> turnQueue_;
@@ -193,10 +183,9 @@ private:
     // overlays are applied. It is never overwritten by runtime state.
     WorldContentPack baseContent_;
     WorldContentPack content_;
+    TransactionManager transactionManager_;
     // Each nested scope is a savepoint. A failed recipe can roll back its own
     // partial changes without cancelling the enclosing world-time transition.
-    std::vector<TransactionFrame> transactionFrames_;
-    std::vector<WorldEvent> deferredEvents_;
     Json replayBaseline_ = Json::object();
     std::vector<WorldEvent> replayBaselineEvents_;
     std::set<std::string> pendingAsyncTurnIds_;
