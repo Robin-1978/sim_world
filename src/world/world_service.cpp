@@ -249,9 +249,11 @@ std::string join(const std::vector<std::string>& values, std::string_view separa
 }
 
 }  // namespace
-WorldService::WorldService(std::unique_ptr<IProvider> provider)
+WorldService::WorldService(std::unique_ptr<IProvider> provider,
+                           std::unique_ptr<IWorldPersistence> persistence)
     : provider_(provider ? std::move(provider) : std::make_unique<MockProvider>()),
-      turnQueue_(std::make_unique<TurnQueue>(*provider_)) {}
+      turnQueue_(std::make_unique<TurnQueue>(*provider_)),
+      persistence_(persistence ? std::move(persistence) : std::make_unique<JsonFilePersistence>()) {}
 
 WorldService WorldService::load(std::string contentRoot, std::unique_ptr<IProvider> provider) {
     return fromContent(ContentPackLoader::load(contentRoot), std::move(provider));
@@ -2938,31 +2940,11 @@ WorldEvent WorldService::addEvent(std::string type, std::string actor, std::stri
 Json WorldService::snapshotJson() const { return worldStateToJson(state_); }
 
 void WorldService::saveSnapshot(const std::string& path) const {
-    const std::string temporaryPath = path + ".tmp";
-    std::ofstream output(temporaryPath, std::ios::trunc);
-    if (!output) throw std::runtime_error("cannot write snapshot: " + path);
-    output << snapshotJson().dump(2) << '\n';
-    output.flush();
-    if (!output) {
-        output.close();
-        std::error_code ignored;
-        std::filesystem::remove(temporaryPath, ignored);
-        throw std::runtime_error("cannot flush snapshot: " + path);
-    }
-    output.close();
-    std::error_code error;
-    std::filesystem::rename(temporaryPath, path, error);
-    if (error) {
-        std::error_code ignored;
-        std::filesystem::remove(temporaryPath, ignored);
-        throw std::runtime_error("cannot replace snapshot: " + path + ": " + error.message());
-    }
+    persistence_->saveSnapshot(path, snapshotJson());
 }
 
 void WorldService::writeReplay(const std::string& path) const {
-    const std::string temporaryPath = path + ".tmp";
-    std::ofstream output(temporaryPath, std::ios::trunc);
-    if (!output) throw std::runtime_error("cannot write replay: " + path);
+    std::vector<Json> lines;
     Json baseline = replayBaseline_.is_object() && !replayBaseline_.empty() ? replayBaseline_ : snapshotJson();
     const auto baselineRevision = baseline.at("world_revision").get<std::uint64_t>();
     Json baselineFact = baseline;
@@ -2970,33 +2952,18 @@ void WorldService::writeReplay(const std::string& path) const {
     const Json currentFact = replayFactJson(state_, state_.events.size());
     const auto patch = Json::diff(baselineFact, currentFact);
     const bool hasChanges = !patch.empty() || state_.events.size() > replayBaselineEvents_.size();
-    output << Json{{"kind", "replay_header"}, {"schema_version", 2}, {"state", baseline},
-                   {"transaction_count", hasChanges ? 1U : 0U}}.dump() << '\n';
+    lines.push_back(Json{{"kind", "replay_header"}, {"schema_version", 2}, {"state", baseline},
+                         {"transaction_count", hasChanges ? 1U : 0U}});
     if (hasChanges) {
         Json events = Json::array();
         for (std::size_t index = replayBaselineEvents_.size(); index < state_.events.size(); ++index) {
             events.push_back(worldEventToJson(state_.events[index]));
         }
-        output << Json{{"kind", "transaction"}, {"base_world_revision", baselineRevision},
-                       {"world_revision", state_.revision}, {"patch", patch}, {"events", events},
-                       {"state_digest", stateDigest(currentFact)}}.dump()
-                << '\n';
+        lines.push_back(Json{{"kind", "transaction"}, {"base_world_revision", baselineRevision},
+                             {"world_revision", state_.revision}, {"patch", patch}, {"events", events},
+                             {"state_digest", stateDigest(currentFact)}});
     }
-    output.flush();
-    if (!output) {
-        output.close();
-        std::error_code ignored;
-        std::filesystem::remove(temporaryPath, ignored);
-        throw std::runtime_error("cannot flush replay: " + path);
-    }
-    output.close();
-    std::error_code error;
-    std::filesystem::rename(temporaryPath, path, error);
-    if (error) {
-        std::error_code ignored;
-        std::filesystem::remove(temporaryPath, ignored);
-        throw std::runtime_error("cannot replace replay: " + path + ": " + error.message());
-    }
+    persistence_->saveReplay(path, lines);
 }
 
 WorldService WorldService::fromContentSnapshot(const WorldContentPack& content, const Json& json,

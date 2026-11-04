@@ -11,6 +11,7 @@
 #include "provider/provider.hpp"
 #include "provider/turn_queue.hpp"
 #include "world/components.hpp"
+#include "world/persistence.hpp"
 #include "world/ids.hpp"
 #include <memory>
 #include <optional>
@@ -60,7 +61,8 @@ struct SimulationMetrics {
 
 class WorldService {
 public:
-    explicit WorldService(std::unique_ptr<IProvider> provider = std::make_unique<MockProvider>());
+    explicit WorldService(std::unique_ptr<IProvider> provider = std::make_unique<MockProvider>(),
+                          std::unique_ptr<IWorldPersistence> persistence = nullptr);
 
     static WorldService load(std::string contentRoot = ContentPackLoader::defaultRoot(),
                              std::unique_ptr<IProvider> provider = std::make_unique<MockProvider>());
@@ -176,6 +178,7 @@ private:
     WorldState state_;
     std::unique_ptr<IProvider> provider_;
     std::unique_ptr<TurnQueue> turnQueue_;
+    std::unique_ptr<IWorldPersistence> persistence_;
     EventBus eventBus_;
     EntityRegistry entities_;
     // Immutable content selected by the game instance before approved

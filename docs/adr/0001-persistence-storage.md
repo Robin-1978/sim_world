@@ -6,7 +6,7 @@ Accepted for the current prototype; SQLite is a planned persistence adapter, not
 
 ## Decision
 
-The P0-P3 prototype uses the existing JSON Snapshot and JSONL Replay formats. Writes use a temporary file, flush, and replacement so an interrupted write does not leave a half-written target. The runtime still treats `WorldState` and `EventLog` as one semantic commit boundary; the current file format is a single-process artifact, not a claim of cross-file database atomicity.
+The P0-P3 prototype uses the existing JSON Snapshot and JSONL Replay formats behind `IWorldPersistence`. `JsonFilePersistence` writes through a temporary file, flush, and replacement so an interrupted write does not leave a half-written target. The runtime still treats `WorldState` and `EventLog` as one semantic commit boundary; the current file format is a single-process artifact, not a claim of cross-file database atomicity.
 
 Snapshots and replays are written outside `data/`, preferably under `var/runs/<instance-id>/<run-id>/`. Source content, game-instance definitions and intelligence profiles remain immutable inputs.
 
@@ -28,4 +28,4 @@ The target adapter should keep `WorldService` as the semantic authority and use 
 - world revision and command idempotency records;
 - active overlay records and run metadata.
 
-SQLite would replace the persistence mechanism, not create a second mutable world model. JSON Snapshot/Replay should remain import/export and test artifacts.
+SQLite would implement the same persistence boundary, not create a second mutable world model. JSON Snapshot/Replay should remain import/export and test artifacts. The adapter is injectable at `WorldService` construction, so tests can verify the serialized contract without touching disk.

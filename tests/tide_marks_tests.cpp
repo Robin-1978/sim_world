@@ -50,6 +50,23 @@ private:
     int& calls_;
 };
 
+class RecordingPersistence final : public IWorldPersistence {
+public:
+    void saveSnapshot(const std::string& path, const Json& snapshot) const override {
+        snapshotPath = path;
+        snapshotValue = snapshot;
+    }
+    void saveReplay(const std::string& path, const std::vector<Json>& lines) const override {
+        replayPath = path;
+        replayLines = lines;
+    }
+
+    mutable std::string snapshotPath;
+    mutable Json snapshotValue;
+    mutable std::string replayPath;
+    mutable std::vector<Json> replayLines;
+};
+
 class DelayedProvider final : public IProvider {
 public:
     explicit DelayedProvider(std::chrono::milliseconds delay) : delay_(delay) {}
@@ -1066,6 +1083,20 @@ void snapshot_and_replay_are_deterministic() {
     std::filesystem::remove(snapshotPath);
     const auto restored = WorldService::fromSnapshot(service.snapshotJson());
     expect(summarize(service.state()) == summarize(restored.state()), "snapshot restores identical state");
+}
+
+void persistence_adapter_receives_committed_representations() {
+    auto persistence = std::make_unique<RecordingPersistence>();
+    auto* persistenceRaw = persistence.get();
+    auto service = WorldService(std::make_unique<MockProvider>(), std::move(persistence));
+    service.saveSnapshot("memory://snapshot");
+    service.writeReplay("memory://replay");
+    expect(persistenceRaw->snapshotPath == "memory://snapshot" &&
+               persistenceRaw->snapshotValue.at("world_revision") == service.state().revision,
+           "WorldService sends a committed Snapshot through the persistence boundary");
+    expect(persistenceRaw->replayPath == "memory://replay" && persistenceRaw->replayLines.size() == 1 &&
+               persistenceRaw->replayLines.front().at("kind") == "replay_header",
+           "WorldService sends Replay lines through the same injectable persistence boundary");
 }
 
 void event_history_has_causal_identity() {
@@ -2183,6 +2214,8 @@ int main() {
     run("promise_policy_comes_from_content", promise_policy_comes_from_content);
     run("promises_cover_accept_renegotiate_refuse_and_break", promises_cover_accept_renegotiate_refuse_and_break);
     run("snapshot_and_replay_are_deterministic", snapshot_and_replay_are_deterministic);
+    run("persistence_adapter_receives_committed_representations",
+        persistence_adapter_receives_committed_representations);
     run("event_history_has_causal_identity", event_history_has_causal_identity);
     run("physics_events_are_deterministic_and_drained", physics_events_are_deterministic_and_drained);
     run("event_bus_is_ordered_and_filterable", event_bus_is_ordered_and_filterable);
