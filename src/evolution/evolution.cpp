@@ -66,6 +66,32 @@ bool hasNpc(const WorldContentPack& content, const std::string& id) {
     });
 }
 
+EvolutionValidation validateParameterSchema(const Json& schema) {
+    if (!schema.is_object()) {
+        return {false, "invalid_behavior_parameters", "Behavior recipe parameters must be a JSON Schema object."};
+    }
+    if (schema.empty()) return {true, "ok", "The behavior recipe declares no decision parameters."};
+    if (schema.value("type", "") != "object") {
+        return {false, "invalid_behavior_parameters", "Behavior recipe parameters must declare type=object."};
+    }
+    if (schema.contains("properties") && !schema.at("properties").is_object()) {
+        return {false, "invalid_behavior_parameters", "Behavior recipe parameter properties must be an object."};
+    }
+    if (schema.contains("required") && !schema.at("required").is_array()) {
+        return {false, "invalid_behavior_parameters", "Behavior recipe parameter required must be an array."};
+    }
+    if (schema.contains("additionalProperties") && !schema.at("additionalProperties").is_boolean()) {
+        return {false, "invalid_behavior_parameters", "Behavior recipe additionalProperties must be boolean."};
+    }
+    static const std::set<std::string> fields{"type", "properties", "required", "additionalProperties", "title", "description"};
+    for (auto it = schema.begin(); it != schema.end(); ++it) {
+        if (!fields.contains(it.key())) {
+            return {false, "invalid_behavior_parameters", "Unknown JSON Schema keyword in behavior parameters: " + it.key()};
+        }
+    }
+    return {true, "ok", "Behavior recipe parameter schema is bounded."};
+}
+
 EvolutionValidation applyOperations(WorldContentPack& content, const EvolutionProposal& proposal) {
     for (const auto& operation : proposal.operations) {
         const auto type = operation.at("operation").get<std::string>();
@@ -86,6 +112,36 @@ EvolutionValidation applyOperations(WorldContentPack& content, const EvolutionPr
                 operation.value("min_peer_trust", 0.0), requiredString(operation, "strategy"),
                 operation.value("goal_stage", 0), operation.value("memory", "An overlay changed my strategy."),
                 operation.value("event_type", "strategy.overlay")});
+        } else if (type == "overlay_schedule") {
+            const auto npcId = requiredString(operation, "npc_id");
+            if (!hasNpc(content, npcId)) {
+                return {false, "unknown_schedule_actor", "The schedule overlay references an unknown NPC."};
+            }
+            const auto slots = operation.value("slots", Json::array());
+            if (!slots.is_array() || slots.empty()) {
+                return {false, "schedule_slots_missing", "A schedule overlay needs at least one slot."};
+            }
+            auto npc = std::find_if(content.npcs.begin(), content.npcs.end(),
+                                    [&npcId](const auto& item) { return item.definition.id == npcId; });
+            std::vector<ScheduleSlot> replacement;
+            for (const auto& slot : slots) {
+                if (!slot.is_object() || !slot.contains("start_minute") || !slot.contains("end_minute") ||
+                    !slot.at("start_minute").is_number_integer() || !slot.at("end_minute").is_number_integer() ||
+                    !slot.contains("location") || !slot.at("location").is_string()) {
+                    return {false, "invalid_schedule_slot", "Every schedule slot needs integer bounds and a location."};
+                }
+                const int start = slot.at("start_minute").get<int>();
+                const int end = slot.at("end_minute").get<int>();
+                const auto location = slot.at("location").get<std::string>();
+                if (start < 0 || start >= static_cast<int>(kMinutesPerDay) ||
+                    end < 0 || end >= static_cast<int>(kMinutesPerDay) || location.empty() ||
+                    std::none_of(content.spatialEntities.begin(), content.spatialEntities.end(),
+                                 [&location](const auto& item) { return item.id == location; })) {
+                    return {false, "invalid_schedule_slot", "A schedule slot has an invalid time or location."};
+                }
+                replacement.push_back(ScheduleSlot{start, end, location});
+            }
+            npc->schedule = std::move(replacement);
         } else if (type == "register_behavior_recipe") {
             const auto id = requiredString(operation, "id");
             if (std::any_of(content.behaviorRecipes.begin(), content.behaviorRecipes.end(), [&id](const auto& item) {
@@ -95,6 +151,8 @@ EvolutionValidation applyOperations(WorldContentPack& content, const EvolutionPr
             recipe.id = id;
             recipe.planId = operation.value("plan_id", id);
             recipe.parameterSchema = operation.value("parameters", Json::object());
+            const auto parameterValidation = validateParameterSchema(recipe.parameterSchema);
+            if (!parameterValidation.valid) return parameterValidation;
             const auto actors = operation.value("available_to", Json::array());
             if (!actors.is_array() || actors.empty()) {
                 return {false, "behavior_recipe_actors_missing",
@@ -227,7 +285,7 @@ EvolutionProposalRequestResult EvolutionManager::propose(const WorldService& wor
         std::string proposalKind = normalized.value("proposal_kind", "");
         if (!proposalKinds.contains(proposalKind)) proposalKind = normalized.value("kind", "");
         if (!proposalKinds.contains(proposalKind)) {
-            proposalKind = operationKind == "overlay_strategy" ? "strategy"
+            proposalKind = (operationKind == "overlay_strategy" || operationKind == "overlay_schedule") ? "strategy"
                           : operationKind == "register_behavior_recipe" ? "declarative_capability"
                                                                           : "content";
         }
@@ -326,7 +384,7 @@ EvolutionValidation EvolutionManager::validate(const EvolutionProposal& proposal
         return {false, "empty_operations", "A proposal must contain at least one operation."};
     }
     static const std::set<std::string> allowed{
-        "create_entity_archetype", "register_behavior_recipe", "overlay_strategy"};
+        "create_entity_archetype", "register_behavior_recipe", "overlay_strategy", "overlay_schedule"};
     static const std::set<std::string> forbidden{
         "runtime_core_mutation", "load_script", "inject_code", "json_patch",
         "change_event_schema", "change_transaction_rules"};
@@ -340,6 +398,13 @@ EvolutionValidation EvolutionManager::validate(const EvolutionProposal& proposal
         if (!allowed.contains(type)) return {false, "operation_not_allowed", "The operation is outside the declarative capability allowlist."};
         if (proposal.evolutionLevel == "level1" && type == "create_entity_archetype") {
             return {false, "level_operation_mismatch", "Level 1 may change an NPC strategy or behavior capability, not world content."};
+        }
+        if (proposal.evolutionLevel == "level1" && type == "overlay_schedule") {
+            // A schedule is an individual strategy/availability overlay. It
+            // is intentionally kept out of Level 2's world-foundation lane.
+        }
+        if (proposal.evolutionLevel == "level2" && type == "overlay_schedule") {
+            return {false, "level_operation_mismatch", "Level 2 may change world content or behavior capability, not one NPC schedule."};
         }
         if (proposal.evolutionLevel == "level2" && type == "overlay_strategy") {
             return {false, "level_operation_mismatch", "Level 2 may change world content or behavior capability, not one NPC strategy."};
@@ -358,6 +423,9 @@ EvolutionValidation EvolutionManager::validate(const EvolutionProposal& proposal
         } else if (type == "overlay_strategy") {
             for (const auto& field : {"npc_id", "peer_id", "min_peer_trust", "strategy", "goal_stage",
                                       "memory", "event_type"}) fields.insert(field);
+        } else if (type == "overlay_schedule") {
+            fields.insert("npc_id");
+            fields.insert("slots");
         } else if (type == "register_behavior_recipe") {
             for (const auto& field : {"plan_id", "duration_minutes", "interruptible",
                                       "interrupt_salience_threshold", "reservation_mode", "priority",
@@ -386,6 +454,15 @@ EvolutionValidation EvolutionManager::validate(const EvolutionProposal& proposal
                 }
             }
         }
+        if (type == "overlay_schedule") {
+            if (!operation.contains("npc_id") || !operation.at("npc_id").is_string() ||
+                operation.at("npc_id").get<std::string>().empty()) {
+                return {false, "schedule_actor_missing", "A schedule overlay needs npc_id."};
+            }
+            if (!operation.contains("slots") || !operation.at("slots").is_array() || operation.at("slots").empty()) {
+                return {false, "schedule_slots_missing", "A schedule overlay needs a non-empty slots array."};
+            }
+        }
         if (type == "register_behavior_recipe") {
             try {
                 if (!operation.contains("root") || !operation.at("root").is_object()) {
@@ -395,9 +472,8 @@ EvolutionValidation EvolutionManager::validate(const EvolutionProposal& proposal
                 recipe.id = operation.at("id").get<std::string>();
                 recipe.planId = operation.value("plan_id", recipe.id);
                 recipe.parameterSchema = operation.value("parameters", Json::object());
-                if (!recipe.parameterSchema.is_object()) {
-                    return {false, "invalid_behavior_parameters", "Behavior recipe parameters must be an object schema."};
-                }
+                const auto parameterValidation = validateParameterSchema(recipe.parameterSchema);
+                if (!parameterValidation.valid) return parameterValidation;
                 const auto actors = operation.value("available_to", Json::array());
                 if (!actors.is_array() || actors.empty()) {
                     return {false, "behavior_recipe_actors_missing",

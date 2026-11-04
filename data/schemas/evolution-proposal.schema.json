@@ -23,7 +23,7 @@
         "type": "object",
         "required": ["operation", "id"],
         "properties": {
-          "operation": {"type": "string", "enum": ["create_entity_archetype", "register_behavior_recipe", "overlay_strategy"]},
+          "operation": {"type": "string", "enum": ["create_entity_archetype", "register_behavior_recipe", "overlay_strategy", "overlay_schedule"]},
           "id": {"type": "string", "minLength": 1},
           "kind": {"type": "string"},
           "available_to": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
@@ -35,13 +35,60 @@
           "priority": {"type": "integer", "minimum": 0},
           "preemption_policy": {"enum": ["none", "lower_priority"]},
           "parameters": {"type": "object"},
+          "root": {"$ref": "#/$defs/behavior_node"},
+          "npc_id": {"type": "string", "minLength": 1},
+          "peer_id": {"type": "string", "minLength": 1},
+          "min_peer_trust": {"type": "number", "minimum": 0, "maximum": 1},
+          "strategy": {"type": "string", "minLength": 1},
+          "goal_stage": {"type": "integer", "minimum": 0},
+          "memory": {"type": "string"},
+          "event_type": {"type": "string", "minLength": 1},
+          "slots": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "required": ["start_minute", "end_minute", "location"],
+              "properties": {
+                "start_minute": {"type": "integer", "minimum": 0, "maximum": 1439},
+                "end_minute": {"type": "integer", "minimum": 0, "maximum": 1439},
+                "location": {"type": "string", "minLength": 1}
+              },
+              "additionalProperties": false
+            }
+          },
           "meta_actions": {"type": "array", "items": {"type": "string"}}
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "allOf": [
+          {"if": {"properties": {"operation": {"const": "create_entity_archetype"}}},
+           "then": {"required": ["kind"]}},
+          {"if": {"properties": {"operation": {"const": "register_behavior_recipe"}}},
+           "then": {"required": ["plan_id", "duration_minutes", "interruptible", "interrupt_salience_threshold", "reservation_mode", "priority", "preemption_policy", "parameters", "available_to", "root"]}},
+          {"if": {"properties": {"operation": {"const": "overlay_strategy"}}},
+           "then": {"required": ["npc_id", "peer_id", "min_peer_trust", "strategy", "goal_stage", "memory", "event_type"]}},
+          {"if": {"properties": {"operation": {"const": "overlay_schedule"}}},
+           "then": {"required": ["npc_id", "slots"]}}
+        ]
       }
     },
     "status": {"type": "string", "enum": ["proposed", "validated", "approved", "rejected"]}
     ,"evolution_level": {"type": "string", "enum": ["level1", "level2"]}
   },
-  "additionalProperties": false
+  "additionalProperties": false,
+  "$defs": {
+    "behavior_node": {
+      "type": "object",
+      "required": ["type", "id"],
+      "properties": {
+        "type": {"enum": ["sequence", "selector", "condition", "meta_action", "interruptible", "timeout"]},
+        "id": {"type": "string", "minLength": 1},
+        "name": {"type": "string"},
+        "args": {"type": "object"},
+        "max_ticks": {"type": "integer", "minimum": 0},
+        "children": {"type": "array", "items": {"$ref": "#/$defs/behavior_node"}}
+      },
+      "additionalProperties": false
+    }
+  }
 }

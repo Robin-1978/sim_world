@@ -65,7 +65,7 @@ void TurnQueue::run() {
 
         ProviderResponse response;
         try {
-            response = provider_.decide(request.context, request.playerInput);
+            response = provider_.decide(request.context, request.playerInput, request.validationFeedback);
         } catch (const std::exception& error) {
             response = ProviderResponse{false, {}, {}, std::string("provider_exception:") + error.what()};
         } catch (...) {

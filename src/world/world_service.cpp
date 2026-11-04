@@ -2292,7 +2292,7 @@ ProviderResponse WorldService::requestEvolutionProposal(const std::string& evolu
                         {"experience_count", npc.experiences.size()}};
     }
     Json allowedOperations = evolutionLevel == "level1"
-                                 ? Json::array({"overlay_strategy", "register_behavior_recipe"})
+                                 ? Json::array({"overlay_strategy", "overlay_schedule", "register_behavior_recipe"})
                                  : Json::array({"create_entity_archetype", "register_behavior_recipe"});
     Json contentSummary{
         {"content_id", content_.id}, {"content_version", content_.contentVersion},
@@ -2675,6 +2675,26 @@ std::size_t WorldService::pumpAsyncTurns() {
         pendingAsyncTurnIds_.erase(queued.request.turnId);
         const auto turn = commitTurn(queued.request, std::move(queued.response));
         if (turn.accepted) continue;
+        const auto retryable = [](const std::string& code) {
+            return code == "missing_action_parameter" || code == "unknown_action_parameter" ||
+                   code == "invalid_action_parameter_type" || code == "unexpected_action_parameters" ||
+                   code == "invalid_action_parameters" || code == "invalid_action_parameter_value";
+        };
+        if (queued.provider == "llama.cpp" && queued.request.validationFeedback.empty() && retryable(turn.error) &&
+            state_.revision == queued.request.worldRevision && hasNpc(queued.request.npcId) &&
+            state_.npcs.at(queued.request.npcId).stateVersion == queued.request.npcStateVersion) {
+            auto repair = queued.request;
+            repair.validationFeedback = Json{
+                {"attempt", 1},
+                {"code", turn.error},
+                {"message", "Runtime rejected the proposed action parameters; repair only the declared plan input."},
+                {"previous_turn_id", queued.request.turnId}};
+            const auto submitted = turnQueue_->submit(std::move(repair));
+            if (submitted.accepted) {
+                pendingAsyncTurnIds_.insert(queued.request.turnId);
+                continue;
+            }
+        }
         // An asynchronous result is observable even when it arrives too late
         // or fails validation. This is an audit fact, not a world mutation.
         TransactionScope transaction(*this);

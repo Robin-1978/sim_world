@@ -196,8 +196,12 @@ public:
     ProviderResponse decide(const DecisionContext& context, const std::string&,
                             const Json& validationFeedback) override {
         ++calls;
-        sawFeedback = !validationFeedback.empty();
-        return makeProposal(context, "rest", Json::object());
+        sawFeedback = sawFeedback || !validationFeedback.empty();
+        return validationFeedback.empty()
+                   ? makeProposal(context, context.candidates.empty() ? "" : context.candidates.front().actionId,
+                                  Json{{"unexpected", true}})
+                   : makeProposal(context, context.candidates.empty() ? "" : context.candidates.front().actionId,
+                                  Json::object());
     }
 
     [[nodiscard]] std::string name() const override { return "llama.cpp"; }
@@ -721,6 +725,29 @@ void async_turn_queue_commits_results_with_current_context() {
            "an accepted autonomous proposal creates a persistent NPC activity");
 }
 
+void async_llm_action_validation_retries_without_blocking_world_tick() {
+    auto content = ContentPackLoader::load(ContentPackLoader::defaultRoot());
+    content.npcDeliberation.minStimulusSalience = 0.0;
+    content.npcDeliberation.minDrivePressure = 0.0;
+    auto provider = std::make_unique<RepairingLlamaProvider>();
+    auto* raw = provider.get();
+    auto service = WorldService::fromContent(content, std::move(provider));
+    const auto before = service.state().now.minute;
+    service.advanceMinutes(60);
+    expect(service.state().now.minute == before + 60,
+           "the asynchronous repair path never holds the world tick for a model call");
+    for (int attempt = 0; attempt < 20 && service.pendingAsyncTurns() > 0; ++attempt) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        service.pumpAsyncTurns();
+    }
+    expect(raw->calls >= 2 && raw->sawFeedback,
+           "an asynchronous LLM action receives one structured validator repair request");
+    expect(std::any_of(service.state().events.begin(), service.state().events.end(), [](const auto& event) {
+               return event.type == "npc.intent";
+           }),
+           "the repaired asynchronous proposal commits through the ordinary intent path");
+}
+
 void async_turn_queue_coalesces_pending_requests_per_npc_and_channel() {
     BlockingProvider provider;
     TurnQueue queue(provider);
@@ -924,9 +951,9 @@ void llm_action_validation_returns_bounded_repair_feedback() {
     auto* raw = provider.get();
     auto service = WorldService::load(ContentPackLoader::defaultRoot(), std::move(provider));
     const auto turn = service.deliberate("mira", "test_invalid_parameters", "llm-repair");
-    expect(turn.accepted && turn.actionId == "rest" && raw->calls == 2 && raw->sawFeedback,
+    expect(turn.accepted && !turn.actionId.empty() && raw->calls == 2 && raw->sawFeedback,
            "a real LLM action validation error is returned once for a bounded repair");
-    expect(service.state().events.back().data.at("action_id") == "rest",
+    expect(service.state().events.back().data.at("action_id") == turn.actionId,
            "the repaired proposal is the only action committed to the event log");
 }
 
@@ -2299,6 +2326,36 @@ void evolved_behavior_recipe_is_bound_to_declared_npcs() {
            "an evolved behavior is visible only to the NPCs declared by the overlay");
 }
 
+void llm_schedule_overlay_is_versioned_and_content_driven() {
+    auto service = WorldService::load(ContentPackLoader::defaultRoot(), std::make_unique<MockProvider>());
+    const auto baseVersion = service.content().contentVersion;
+    EvolutionProposal proposal{
+        "overlay.schedule.lorn", "strategy", "llm", baseVersion, service.state().revision,
+        Json::array({Json{{"operation", "overlay_schedule"}, {"id", "lorn.night.watch"},
+                         {"npc_id", "lorn"},
+                         {"slots", Json::array({Json{{"start_minute", 0}, {"end_minute", 360},
+                                                       {"location", "lorn_house"}},
+                                                  Json{{"start_minute", 360}, {"end_minute", 1080},
+                                                       {"location", "ferry_dock"}},
+                                                  Json{{"start_minute", 1080}, {"end_minute", 0},
+                                                       {"location", "lorn_house"}}})}}})};
+    proposal.evolutionLevel = "level1";
+    proposal.evidenceEventSequences = {service.state().events.back().sequence};
+    expect(EvolutionManager::validate(proposal, service.content(), service.state()).valid,
+           "Level 1 schedule evolution validates only authored locations and bounded time slots");
+    const auto sandbox = EvolutionManager::sandbox(proposal, service);
+    proposal.status = EvolutionProposalStatus::Validated;
+    expect(sandbox.passed && EvolutionManager::approve(proposal, "world_designer", true).valid &&
+               service.activateOverlay(proposal, sandbox).accepted,
+           "a schedule proposal follows the same sandbox and independent approval chain");
+    const auto restored = WorldService::fromSnapshot(service.snapshotJson());
+    const auto lorn = std::find_if(restored.content().npcs.begin(), restored.content().npcs.end(),
+                                   [](const auto& npc) { return npc.definition.id == "lorn"; });
+    expect(lorn != restored.content().npcs.end() && lorn->schedule.size() == 3 &&
+               restored.content().contentVersion.find("overlay.schedule.lorn") != std::string::npos,
+           "the schedule overlay is persisted through the active overlay stack and snapshot restore");
+}
+
 void overlay_stack_restores_and_rolls_back_in_order() {
     auto base = WorldService::load(ContentPackLoader::defaultRoot(), std::make_unique<MockProvider>());
     const auto rootVersion = base.content().contentVersion;
@@ -2406,6 +2463,8 @@ int main() {
     run("async_turn_queue_does_not_commit_expired_results", async_turn_queue_does_not_commit_expired_results);
     run("async_turn_queue_commits_results_with_current_context",
         async_turn_queue_commits_results_with_current_context);
+    run("async_llm_action_validation_retries_without_blocking_world_tick",
+        async_llm_action_validation_retries_without_blocking_world_tick);
     run("async_turn_queue_coalesces_pending_requests_per_npc_and_channel",
         async_turn_queue_coalesces_pending_requests_per_npc_and_channel);
     run("async_turn_queue_rejects_decisions_past_game_deadline",
@@ -2460,6 +2519,8 @@ int main() {
     run("evolution_sandbox_isolated_and_versioned", evolution_sandbox_isolated_and_versioned);
     run("evolved_behavior_recipe_is_bound_to_declared_npcs",
         evolved_behavior_recipe_is_bound_to_declared_npcs);
+    run("llm_schedule_overlay_is_versioned_and_content_driven",
+        llm_schedule_overlay_is_versioned_and_content_driven);
     run("overlay_stack_restores_and_rolls_back_in_order", overlay_stack_restores_and_rolls_back_in_order);
     run("llm_proposes_level_one_and_level_two_evolution",
         llm_proposes_level_one_and_level_two_evolution);

@@ -406,7 +406,7 @@ ProviderResponse LlamaCppProvider::proposeEvolution(const Json& context,
         "You are the World Intelligence evolution proposer. Return exactly one JSON object and no prose. "
         "Propose a bounded declarative change for the supplied evolution level. "
         "Use only operation names and registered references from the context. "
-        "For level1, the operation MUST be overlay_strategy or register_behavior_recipe. For level2, the operation MUST be "
+        "For level1, the operation MUST be overlay_strategy, overlay_schedule, or register_behavior_recipe. For level2, the operation MUST be "
         "create_entity_archetype or register_behavior_recipe; never use overlay_strategy for level2. "
         "Cite only evidence event sequences present in the context. "
         "Never request Runtime Core mutation, arbitrary code, scripts, permissions, transactions, event schemas, "
@@ -434,7 +434,9 @@ ProviderResponse LlamaCppProvider::proposeEvolution(const Json& context,
         "create_entity_archetype operation containing operation, id, kind and default_metadata; do not retain "
         "npc_id, peer_id, strategy, memory or event_type fields. If feedback says invalid_behavior_recipe, use a "
         "single meta_action root with a registered name from content.registered_meta_actions and children=[]; do not "
-        "invent a node name or create an empty sequence/selector.";
+        "invent a node name or create an empty sequence/selector. If feedback says invalid_behavior_parameters, "
+        "replace parameters with a JSON Schema such as {\"type\":\"object\",\"properties\":{},\"additionalProperties\":false}; "
+        "never put a runtime parameter value such as destination directly beside type.";
     Json responseSchema = Json::object();
     responseSchema["type"] = "object";
     responseSchema["additionalProperties"] = false;
@@ -481,6 +483,22 @@ ProviderResponse LlamaCppProvider::proposeEvolution(const Json& context,
         {"memory", Json{{"type", "string"}}},
         {"event_type", Json{{"type", "string"}, {"minLength", 1}}}};
 
+    Json scheduleOperation = Json::object();
+    scheduleOperation["type"] = "object";
+    scheduleOperation["additionalProperties"] = false;
+    scheduleOperation["required"] = Json::array({"operation", "id", "npc_id", "slots"});
+    Json scheduleSlot = Json{{"type", "object"}, {"additionalProperties", false},
+                              {"required", Json::array({"start_minute", "end_minute", "location"})}};
+    scheduleSlot["properties"] = Json{
+        {"start_minute", Json{{"type", "integer"}, {"minimum", 0}, {"maximum", 1439}}},
+        {"end_minute", Json{{"type", "integer"}, {"minimum", 0}, {"maximum", 1439}}},
+        {"location", Json{{"type", "string"}, {"minLength", 1}}}};
+    scheduleOperation["properties"] = Json{
+        {"operation", Json{{"const", "overlay_schedule"}}},
+        {"id", Json{{"type", "string"}, {"minLength", 1}}},
+        {"npc_id", Json{{"type", "string"}, {"minLength", 1}}},
+        {"slots", Json{{"type", "array"}, {"minItems", 1}, {"items", scheduleSlot}}}};
+
     Json node = Json::object();
     node["type"] = "object";
     node["additionalProperties"] = false;
@@ -526,7 +544,7 @@ ProviderResponse LlamaCppProvider::proposeEvolution(const Json& context,
 
     Json operationItems = Json::object();
     operationItems["oneOf"] = evolutionLevel == "level1"
-                                    ? Json::array({strategyOperation, recipeOperation})
+                                    ? Json::array({strategyOperation, scheduleOperation, recipeOperation})
                                     : Json::array({createOperation, recipeOperation});
     responseSchema["properties"]["operations"] = Json::object();
     responseSchema["properties"]["operations"]["type"] = "array";

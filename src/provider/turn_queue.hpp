@@ -28,6 +28,10 @@ struct TurnRequest {
     GameTime createdAt;
     GameTime deadline;
     bool coalescePending{false};
+    // Empty for the first call. A validator may attach one bounded repair
+    // hint before the request is resubmitted; it is never persisted as world
+    // state or treated as model authority.
+    Json validationFeedback = Json::object();
     DecisionContext context;
 };
 
