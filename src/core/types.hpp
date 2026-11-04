@@ -235,6 +235,27 @@ struct Promise {
     int version{0};
 };
 
+enum class ExchangeContractStatus { Proposed, Accepted, Settled, Rejected, Cancelled, Expired };
+std::string toString(ExchangeContractStatus status);
+ExchangeContractStatus exchangeContractStatusFromString(const std::string& value);
+
+// A contract is a durable agreement between two actors. `offered` is sent by
+// the proposer; `requested` is sent by the counterparty. Neither side's
+// resources move before settlement.
+struct ExchangeContract {
+    std::string id;
+    std::string proposer;
+    std::string counterparty;
+    std::map<std::string, int> offered;
+    std::map<std::string, int> requested;
+    GameTime created;
+    GameTime due;
+    GameTime settledAt{-1};
+    ExchangeContractStatus status{ExchangeContractStatus::Proposed};
+    int version{0};
+    std::string reason;
+};
+
 enum class EntityLifecycle { Active, Dormant, Destroyed };
 
 struct WorldEntityState {
@@ -320,6 +341,7 @@ struct WorldState {
     std::map<std::string, NpcState> npcs;
     std::map<std::string, SocialGroupState> socialGroups;
     std::map<std::string, Promise> promises;
+    std::map<std::string, ExchangeContract> exchangeContracts;
     std::vector<WorldEvent> events;
     std::set<std::string> processedTurnIds;
 };

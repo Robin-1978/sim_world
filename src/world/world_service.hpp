@@ -99,6 +99,15 @@ public:
     CommandResult decidePromise(const std::string& promiseId, PromiseStatus decision,
                                 const std::string& actor, const std::string& turnId,
                                 const std::string& detail = {});
+    CommandResult proposeExchange(const std::string& proposer, const std::string& counterparty,
+                                  std::map<std::string, int> offered,
+                                  std::map<std::string, int> requested, int dueInMinutes,
+                                  const std::string& actor, const std::string& turnId = {});
+    CommandResult decideExchange(const std::string& contractId, ExchangeContractStatus decision,
+                                 const std::string& actor, const std::string& turnId = {},
+                                 const std::string& reason = {});
+    CommandResult settleExchange(const std::string& contractId, const std::string& actor,
+                                 const std::string& turnId = {});
     CommandResult createEntity(const std::string& id, const std::string& archetypeId,
                                Json metadata = Json::object(), const std::string& turnId = {});
     CommandResult setEntityLifecycle(const std::string& id, EntityLifecycle lifecycle,
@@ -227,6 +236,7 @@ private:
     void processDayBoundary(int day, const std::set<std::string>& dueNpcIds);
     void reviseNpcStrategies(int day);
     void applyPromiseDeadline();
+    void applyExchangeDeadlines();
     CommandResult reject(std::string code, std::string message) const;
 };
 

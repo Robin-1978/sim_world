@@ -344,6 +344,55 @@ void resource_preemption_is_declared_and_atomic() {
            "an unfulfillable plan emits no partial preemption event");
 }
 
+void exchange_contracts_are_durable_and_atomic() {
+    auto service = WorldService::load(TIDE_MARKS_TEST_DATA_DIR "/port-pack",
+                                      std::make_unique<MockProvider>());
+    const auto proposed = service.proposeExchange("sable", "rhea", {{"energy", 1}},
+                                                 {{"coolant", 1}}, 30, "sable", "contract-propose");
+    expect(proposed.accepted, "a configured exchange proposal is recorded");
+    const auto accepted = service.decideExchange(proposed.message, ExchangeContractStatus::Accepted,
+                                                 "rhea", "contract-accept");
+    expect(accepted.accepted && service.state().exchangeContracts.at(proposed.message).status ==
+               ExchangeContractStatus::Accepted,
+           "the counterparty can accept a live exchange");
+    const auto settled = service.settleExchange(proposed.message, "rhea", "contract-settle");
+    expect(settled.accepted && service.state().exchangeContracts.at(proposed.message).status ==
+               ExchangeContractStatus::Settled,
+           "an accepted exchange settles through the atomic transfer path");
+    expect(service.state().inventories.at("npc:sable").at("energy") == 2 &&
+               service.state().inventories.at("npc:sable").at("coolant") == 1 &&
+               service.state().inventories.at("npc:rhea").at("energy") == 1 &&
+               service.state().inventories.at("npc:rhea").at("coolant") == 1,
+           "settlement exchanges both sides without partial ownership changes");
+    auto restored = WorldService::fromSnapshot(service.snapshotJson(),
+                                               TIDE_MARKS_TEST_DATA_DIR "/port-pack",
+                                               std::make_unique<MockProvider>());
+    expect(restored.state().exchangeContracts.at(proposed.message).status ==
+               ExchangeContractStatus::Settled,
+           "contract status survives snapshot restore");
+
+    auto insufficient = WorldService::load(TIDE_MARKS_TEST_DATA_DIR "/port-pack",
+                                           std::make_unique<MockProvider>());
+    const auto impossible = insufficient.proposeExchange("sable", "rhea", {{"energy", 99}},
+                                                         {{"coolant", 1}}, 30, "sable", "contract-bad");
+    expect(impossible.accepted, "a contract can be proposed before delivery is possible");
+    expect(insufficient.decideExchange(impossible.message, ExchangeContractStatus::Accepted,
+                                       "rhea", "contract-bad-accept").accepted,
+           "the counterparty can accept the contract before settlement");
+    const auto failed = insufficient.settleExchange(impossible.message, "rhea", "contract-bad-settle");
+    expect(!failed.accepted && failed.code == "insufficient_resource",
+           "settlement rejects when a party lacks its delivery terms");
+    expect(insufficient.state().inventories.at("npc:sable").at("energy") == 3 &&
+               insufficient.state().inventories.at("npc:rhea").at("coolant") == 2 &&
+               insufficient.state().exchangeContracts.at(impossible.message).status ==
+                   ExchangeContractStatus::Accepted,
+           "failed settlement preserves both inventories and the accepted contract");
+    insufficient.advanceMinutes(30);
+    expect(insufficient.state().exchangeContracts.at(impossible.message).status ==
+               ExchangeContractStatus::Expired,
+           "unsettled contracts expire at their authored deadline");
+}
+
 void autonomous_deliberation_is_triggered_not_per_tick() {
     int providerCalls = 0;
     auto content = ContentPackLoader::load(ContentPackLoader::defaultRoot());
@@ -556,6 +605,9 @@ void meta_actions_are_loaded_from_content() {
     expect(!content.metaActions.contains("transfer_resource"),
            "an undeclared action is absent rather than supplied by C++");
     expect(MetaActionRegistry::executableOperators().contains("trade.execute") &&
+               MetaActionRegistry::executableOperators().contains("exchange.create") &&
+               MetaActionRegistry::executableOperators().contains("exchange.transition") &&
+               MetaActionRegistry::executableOperators().contains("exchange.settle") &&
                MetaActionRegistry::executableOperators().contains("group.metric_adjust") &&
                MetaActionRegistry::executableOperators().contains("group.membership_adjust"),
            "social and exchange operators are registered execution capabilities");
@@ -709,7 +761,7 @@ void snapshot_and_replay_are_deterministic() {
     const auto path = std::filesystem::temp_directory_path() / "tide_marks_test_replay.jsonl";
     service.writeReplay(path.string());
     const auto snapshot = service.snapshotJson();
-    expect(snapshot.at("save_schema_version").get<int>() == 14, "snapshot declares its schema version");
+    expect(snapshot.at("save_schema_version").get<int>() == 15, "snapshot declares its schema version");
     expect(snapshot.at("instance_id") == "tide_marks.village.instance",
            "snapshot records the concrete game instance identity");
     expect(snapshot.at("event_sequence").get<std::size_t>() == service.state().events.size(),
@@ -1729,6 +1781,7 @@ int main() {
     run("high_salience_stimulus_interrupts_and_releases_reservations", high_salience_stimulus_interrupts_and_releases_reservations);
     run("reservation_policy_is_authored_per_process", reservation_policy_is_authored_per_process);
     run("resource_preemption_is_declared_and_atomic", resource_preemption_is_declared_and_atomic);
+    run("exchange_contracts_are_durable_and_atomic", exchange_contracts_are_durable_and_atomic);
     run("behavior_tree_supports_sequence_timeout_and_interrupt", behavior_tree_supports_sequence_timeout_and_interrupt);
     run("provider_and_action_validation_are_safe", provider_and_action_validation_are_safe);
     run("meta_actions_are_loaded_from_content", meta_actions_are_loaded_from_content);

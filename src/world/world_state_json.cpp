@@ -267,6 +267,17 @@ Json worldStateToJson(const WorldState& state) {
                             {"description", promise.description}, {"due", promise.due.minute},
                             {"status", toString(promise.status)}, {"version", promise.version}};
     }
+    Json exchanges = Json::object();
+    for (const auto& [id, contract] : state.exchangeContracts) {
+        exchanges[id] = Json{{"id", contract.id}, {"proposer", contract.proposer},
+                             {"counterparty", contract.counterparty},
+                             {"offered", [&contract] { Json values = Json::object(); for (const auto& [resource, amount] : contract.offered) values[resource] = amount; return values; }()},
+                             {"requested", [&contract] { Json values = Json::object(); for (const auto& [resource, amount] : contract.requested) values[resource] = amount; return values; }()},
+                             {"created", contract.created.minute}, {"due", contract.due.minute},
+                             {"settled_at", contract.settledAt.minute},
+                             {"status", toString(contract.status)}, {"version", contract.version},
+                             {"reason", contract.reason}};
+    }
     Json socialGroups = Json::object();
     for (const auto& [id, group] : state.socialGroups) {
         Json relations = Json::object();
@@ -300,7 +311,7 @@ Json worldStateToJson(const WorldState& state) {
                                 {"overlay_version", overlay.overlayVersion},
                                 {"operations", overlay.operations}});
     }
-    return Json{{"save_schema_version", 14}, {"simulation_version", "adaptive-runtime-p1.14"},
+    return Json{{"save_schema_version", 15}, {"simulation_version", "adaptive-runtime-p1.15"},
                 {"event_sequence", state.events.size()}, {"world_id", state.worldId},
                 {"instance_id", state.instanceId},
                 {"content_version", state.contentVersion}, {"now", state.now.minute},
@@ -308,7 +319,7 @@ Json worldStateToJson(const WorldState& state) {
                 {"resources", resources}, {"inventories", inventories}, {"security", security},
                 {"active_overlays", overlays},
                 {"entities", entities}, {"links", links}, {"npcs", npcs}, {"social_groups", socialGroups},
-                {"promises", promises}, {"events", events},
+                {"promises", promises}, {"exchange_contracts", exchanges}, {"events", events},
                 {"processed_turn_ids", state.processedTurnIds}};
 }
 
@@ -465,6 +476,33 @@ WorldState deserializeWorldState(const Json& json) {
             GameTime{jsonValue<std::int64_t>(value, "due", 0)},
             promiseStatusFromString(jsonValue<std::string>(value, "status", "proposed")),
             jsonValue<int>(value, "version", 0)};
+    }
+    const auto exchanges = json.value("exchange_contracts", Json::object());
+    if (!exchanges.is_object()) throw std::runtime_error("snapshot exchange_contracts must be an object");
+    for (auto it = exchanges.begin(); it != exchanges.end(); ++it) {
+        const auto value = it.value();
+        ExchangeContract contract;
+        contract.id = jsonValue<std::string>(value, "id", it.key());
+        contract.proposer = jsonValue<std::string>(value, "proposer", "");
+        contract.counterparty = jsonValue<std::string>(value, "counterparty", "");
+        const auto offered = value.value("offered", Json::object());
+        const auto requested = value.value("requested", Json::object());
+        if (!offered.is_object() || !requested.is_object()) {
+            throw std::runtime_error("snapshot exchange terms must be objects");
+        }
+        for (auto term = offered.begin(); term != offered.end(); ++term) {
+            contract.offered[term.key()] = term.value().get<int>();
+        }
+        for (auto term = requested.begin(); term != requested.end(); ++term) {
+            contract.requested[term.key()] = term.value().get<int>();
+        }
+        contract.created = GameTime{jsonValue<std::int64_t>(value, "created", 0)};
+        contract.due = GameTime{jsonValue<std::int64_t>(value, "due", 0)};
+        contract.settledAt = GameTime{jsonValue<std::int64_t>(value, "settled_at", -1)};
+        contract.status = exchangeContractStatusFromString(jsonValue<std::string>(value, "status", "proposed"));
+        contract.version = jsonValue<int>(value, "version", 0);
+        contract.reason = jsonValue<std::string>(value, "reason", "");
+        state.exchangeContracts[it.key()] = std::move(contract);
     }
     for (const auto& event : json.value("events", Json::array())) state.events.push_back(worldEventFromJson(event));
     for (const auto& turn : json.value("processed_turn_ids", std::vector<std::string>{})) {

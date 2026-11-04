@@ -66,6 +66,27 @@ PromiseStatus promiseStatusFromString(const std::string& value) {
     return PromiseStatus::Proposed;
 }
 
+std::string toString(ExchangeContractStatus status) {
+    switch (status) {
+        case ExchangeContractStatus::Proposed: return "proposed";
+        case ExchangeContractStatus::Accepted: return "accepted";
+        case ExchangeContractStatus::Settled: return "settled";
+        case ExchangeContractStatus::Rejected: return "rejected";
+        case ExchangeContractStatus::Cancelled: return "cancelled";
+        case ExchangeContractStatus::Expired: return "expired";
+    }
+    return "unknown";
+}
+
+ExchangeContractStatus exchangeContractStatusFromString(const std::string& value) {
+    if (value == "accepted") return ExchangeContractStatus::Accepted;
+    if (value == "settled") return ExchangeContractStatus::Settled;
+    if (value == "rejected") return ExchangeContractStatus::Rejected;
+    if (value == "cancelled") return ExchangeContractStatus::Cancelled;
+    if (value == "expired") return ExchangeContractStatus::Expired;
+    return ExchangeContractStatus::Proposed;
+}
+
 std::string toString(ProcessStatus status) {
     switch (status) {
         case ProcessStatus::Running: return "running";

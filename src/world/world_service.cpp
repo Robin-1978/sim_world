@@ -35,6 +35,12 @@ Json mergedBehaviorArgs(const MetaActionDefinition& definition, const BehaviorNo
     return result;
 }
 
+Json quantityMapJson(const std::map<std::string, int>& quantities) {
+    Json result = Json::object();
+    for (const auto& [resource, amount] : quantities) result[resource] = amount;
+    return result;
+}
+
 WorldState transactionalBackup(const WorldState& state, std::size_t& eventCount) {
     eventCount = state.events.size();
     // Build the rollback image field-by-field so the immutable event history
@@ -56,6 +62,7 @@ WorldState transactionalBackup(const WorldState& state, std::size_t& eventCount)
     backup.npcs = state.npcs;
     backup.socialGroups = state.socialGroups;
     backup.promises = state.promises;
+    backup.exchangeContracts = state.exchangeContracts;
     backup.processedTurnIds = state.processedTurnIds;
     return backup;
 }
@@ -499,6 +506,7 @@ void WorldService::advanceMinutes(std::int64_t minutes) {
         }
         if (state_.now.minute % kMinutesPerDay == 0) processDayBoundary(state_.now.day(), dueNpcIds);
         applyPromiseDeadline();
+        applyExchangeDeadlines();
     }
     pumpAsyncTurns();
     syncNpcEntityState();
@@ -923,6 +931,191 @@ void WorldService::applyPromiseDeadline() {
     }
 }
 
+void WorldService::applyExchangeDeadlines() {
+    for (auto& [id, contract] : state_.exchangeContracts) {
+        if ((contract.status != ExchangeContractStatus::Proposed &&
+             contract.status != ExchangeContractStatus::Accepted) ||
+            state_.now.minute < contract.due.minute) {
+            continue;
+        }
+        contract.status = ExchangeContractStatus::Expired;
+        ++contract.version;
+        contract.reason = "deadline_reached";
+        addEvent("exchange.expired", kWorldActor, contract.counterparty,
+                 "An exchange contract reached its deadline before settlement",
+                 Json{{"contract_id", id}, {"proposer", contract.proposer},
+                      {"counterparty", contract.counterparty}, {"due", contract.due.minute}});
+    }
+}
+
+CommandResult WorldService::proposeExchange(const std::string& proposer,
+                                            const std::string& counterparty,
+                                            std::map<std::string, int> offered,
+                                            std::map<std::string, int> requested,
+                                            int dueInMinutes, const std::string& actor,
+                                            const std::string& turnId) {
+    TransactionScope transaction(*this);
+    if (!turnId.empty() && state_.processedTurnIds.contains(turnId)) {
+        return reject("duplicate_turn", "The exchange proposal was already applied.");
+    }
+    const auto canonicalActor = [this](const std::string& value) {
+        if (value == kWorldActor || value == kPlayerId || state_.npcs.contains(value)) return value;
+        if (value.starts_with("npc:")) {
+            const auto npcId = value.substr(4);
+            if (state_.npcs.contains(npcId)) return npcId;
+        }
+        return std::string{};
+    };
+    const auto proposerId = canonicalActor(proposer);
+    const auto counterpartyId = canonicalActor(counterparty);
+    const auto actorId = canonicalActor(actor);
+    if (proposerId.empty() || counterpartyId.empty() || proposerId == counterpartyId) {
+        return reject("unknown_exchange_party", "An exchange needs two distinct active parties.");
+    }
+    if (actorId != kWorldActor && actorId != proposerId) {
+        return reject("unauthorized", "Only the proposer or world authority may create this exchange.");
+    }
+    const auto activeParty = [this](const std::string& id) {
+        if (id == kWorldActor) return true;
+        const auto entityId = id == kPlayerId ? id : npcEntityId(id);
+        const auto entity = state_.entities.find(entityId);
+        return entity != state_.entities.end() && entity->second.lifecycle == EntityLifecycle::Active;
+    };
+    if (!activeParty(proposerId) || !activeParty(counterpartyId)) {
+        return reject("inactive_exchange_party", "Both exchange parties must be active.");
+    }
+    if (dueInMinutes <= 0) {
+        return reject("invalid_exchange_deadline", "An exchange deadline must be positive.");
+    }
+    const auto validTerms = [this](const std::map<std::string, int>& terms) {
+        return std::all_of(terms.begin(), terms.end(), [this](const auto& term) {
+            return content_.resources.contains(term.first) && term.second > 0;
+        });
+    };
+    if (offered.empty() || requested.empty() || !validTerms(offered) || !validTerms(requested)) {
+        return reject("invalid_exchange_terms",
+                      "An exchange needs positive terms on both sides using known resources.");
+    }
+    std::size_t sequence = state_.exchangeContracts.size() + 1;
+    std::string id = "exchange-" + std::to_string(sequence);
+    while (state_.exchangeContracts.contains(id)) {
+        id = "exchange-" + std::to_string(++sequence);
+    }
+    ExchangeContract contract{id, proposerId, counterpartyId, std::move(offered), std::move(requested),
+                              state_.now, GameTime{state_.now.minute + dueInMinutes}, GameTime{-1},
+                              ExchangeContractStatus::Proposed, 0, "awaiting_counterparty"};
+    state_.exchangeContracts.emplace(id, contract);
+    if (!turnId.empty()) state_.processedTurnIds.insert(turnId);
+    const auto event = addEvent(
+        "exchange.proposed", proposerId, counterpartyId,
+        "An actor proposed an atomic two-party exchange",
+        Json{{"contract_id", id}, {"offered", quantityMapJson(contract.offered)},
+             {"requested", quantityMapJson(contract.requested)}, {"due", contract.due.minute}});
+    return CommandResult{true, "ok", id, event};
+}
+
+CommandResult WorldService::decideExchange(const std::string& contractId,
+                                           ExchangeContractStatus decision,
+                                           const std::string& actor,
+                                           const std::string& turnId,
+                                           const std::string& reason) {
+    TransactionScope transaction(*this);
+    if (!turnId.empty() && state_.processedTurnIds.contains(turnId)) {
+        return reject("duplicate_turn", "The exchange transition was already applied.");
+    }
+    const auto found = state_.exchangeContracts.find(contractId);
+    if (found == state_.exchangeContracts.end()) return reject("unknown_exchange", "That exchange does not exist.");
+    auto& contract = found->second;
+    if (state_.now.minute >= contract.due.minute || contract.status == ExchangeContractStatus::Expired) {
+        return reject("exchange_expired", "The exchange deadline has passed.");
+    }
+    const auto actorId = actor.starts_with("npc:") ? actor.substr(4) : actor;
+    const bool authority = actorId == kWorldActor;
+    const bool isProposer = actorId == contract.proposer;
+    const bool isCounterparty = actorId == contract.counterparty;
+    if (!authority && !isProposer && !isCounterparty) {
+        return reject("unauthorized", "The actor is not a party to this exchange.");
+    }
+    if ((decision == ExchangeContractStatus::Accepted || decision == ExchangeContractStatus::Rejected) &&
+        !authority && !isCounterparty) {
+        return reject("counterparty_required", "Only the counterparty may accept or reject an exchange.");
+    }
+    if (decision == ExchangeContractStatus::Cancelled && !authority &&
+        contract.status != ExchangeContractStatus::Proposed &&
+        contract.status != ExchangeContractStatus::Accepted) {
+        return reject("invalid_exchange_transition", "Only a live exchange can be cancelled.");
+    }
+    if (decision == ExchangeContractStatus::Accepted && contract.status == ExchangeContractStatus::Proposed) {
+        contract.status = ExchangeContractStatus::Accepted;
+    } else if (decision == ExchangeContractStatus::Rejected && contract.status == ExchangeContractStatus::Proposed) {
+        contract.status = ExchangeContractStatus::Rejected;
+    } else if (decision == ExchangeContractStatus::Cancelled &&
+               (contract.status == ExchangeContractStatus::Proposed ||
+                contract.status == ExchangeContractStatus::Accepted)) {
+        contract.status = ExchangeContractStatus::Cancelled;
+    } else {
+        return reject("invalid_exchange_transition", "The requested exchange transition is not legal.");
+    }
+    contract.reason = reason;
+    ++contract.version;
+    if (!turnId.empty()) state_.processedTurnIds.insert(turnId);
+    const auto eventType = decision == ExchangeContractStatus::Accepted ? "exchange.accepted"
+                          : decision == ExchangeContractStatus::Rejected ? "exchange.rejected"
+                                                                          : "exchange.cancelled";
+    const auto event = addEvent(eventType, actorId, contractId,
+                                reason.empty() ? "An exchange lifecycle state changed" : reason,
+                                Json{{"contract_id", contractId}, {"status", toString(contract.status)}});
+    return CommandResult{true, "ok", contractId, event};
+}
+
+CommandResult WorldService::settleExchange(const std::string& contractId,
+                                           const std::string& actor,
+                                           const std::string& turnId) {
+    TransactionScope transaction(*this);
+    if (!turnId.empty() && state_.processedTurnIds.contains(turnId)) {
+        return reject("duplicate_turn", "The exchange settlement was already applied.");
+    }
+    const auto found = state_.exchangeContracts.find(contractId);
+    if (found == state_.exchangeContracts.end()) return reject("unknown_exchange", "That exchange does not exist.");
+    auto& contract = found->second;
+    if (contract.status != ExchangeContractStatus::Accepted) {
+        return reject("invalid_exchange_transition", "Only an accepted exchange can settle.");
+    }
+    if (state_.now.minute >= contract.due.minute) {
+        return reject("exchange_expired", "The exchange deadline has passed.");
+    }
+    const auto actorId = actor.starts_with("npc:") ? actor.substr(4) : actor;
+    if (actorId != kWorldActor && actorId != contract.proposer && actorId != contract.counterparty) {
+        return reject("unauthorized", "The actor is not a party to this exchange.");
+    }
+    for (const auto& [resource, amount] : contract.offered) {
+        const auto transfer = transferResource(contract.proposer, contract.counterparty, resource, amount, actorId);
+        if (!transfer.accepted) {
+            transaction.rollback();
+            return reject(transfer.code, transfer.message);
+        }
+    }
+    for (const auto& [resource, amount] : contract.requested) {
+        const auto transfer = transferResource(contract.counterparty, contract.proposer, resource, amount, actorId);
+        if (!transfer.accepted) {
+            transaction.rollback();
+            return reject(transfer.code, transfer.message);
+        }
+    }
+    contract.status = ExchangeContractStatus::Settled;
+    contract.settledAt = state_.now;
+    contract.reason = "settled";
+    ++contract.version;
+    if (!turnId.empty()) state_.processedTurnIds.insert(turnId);
+    const auto event = addEvent(
+        "exchange.settled", actorId, contractId,
+        "Both parties delivered their contractual resources atomically",
+        Json{{"contract_id", contractId}, {"proposer", contract.proposer},
+             {"counterparty", contract.counterparty}, {"offered", quantityMapJson(contract.offered)},
+             {"requested", quantityMapJson(contract.requested)}});
+    return CommandResult{true, "ok", contractId, event};
+}
+
 CommandResult WorldService::reject(std::string code, std::string message) const {
     return CommandResult{false, std::move(code), std::move(message), std::nullopt};
 }
@@ -1071,6 +1264,44 @@ CommandResult WorldService::submit(const Command& command) {
         } catch (...) {
             return reject("invalid_trade", "Trade detail must be valid JSON.");
         }
+    }
+    if (command.kind == "exchange_propose") {
+        try {
+            const Json args = command.detail.empty() ? Json::object() : Json::parse(command.detail);
+            const auto parseTerms = [](const Json& value) {
+                std::map<std::string, int> terms;
+                if (!value.is_object()) throw std::runtime_error("exchange terms must be objects");
+                for (auto it = value.begin(); it != value.end(); ++it) {
+                    if (!it.value().is_number_integer()) throw std::runtime_error("exchange quantities must be integers");
+                    terms[it.key()] = it.value().get<int>();
+                }
+                return terms;
+            };
+            const auto proposer = args.value("proposer", command.actor);
+            return proposeExchange(proposer, args.value("counterparty", command.target),
+                                   parseTerms(args.value("offered", Json::object())),
+                                   parseTerms(args.value("requested", Json::object())),
+                                   args.value("due_minutes", 0), command.actor, command.turnId);
+        } catch (...) {
+            return reject("invalid_exchange", "Exchange proposal detail must contain valid JSON terms.");
+        }
+    }
+    if (command.kind == "exchange_transition") {
+        try {
+            const Json args = command.detail.empty() ? Json::object() : Json::parse(command.detail);
+            const auto status = exchangeContractStatusFromString(args.value("status", ""));
+            if (status == ExchangeContractStatus::Proposed || status == ExchangeContractStatus::Settled ||
+                status == ExchangeContractStatus::Expired) {
+                return reject("invalid_exchange_transition", "Use accept, reject or cancel for a transition.");
+            }
+            return decideExchange(args.value("contract_id", command.target), status, command.actor,
+                                  command.turnId, args.value("reason", ""));
+        } catch (...) {
+            return reject("invalid_exchange", "Exchange transition detail must be valid JSON.");
+        }
+    }
+    if (command.kind == "exchange_settle") {
+        return settleExchange(command.target, command.actor, command.turnId);
     }
     return reject("unknown_command", "The command is not part of the registered action vocabulary.");
 }
@@ -2257,6 +2488,48 @@ bool WorldService::applyMetaAction(const std::string& npcId, const std::string& 
             "recipe:" + npcId + ":" + actionId);
         return result.accepted;
     }
+    if (operation == "exchange.create") {
+        const auto parseTerms = [](const Json& value, std::map<std::string, int>& terms) {
+            if (!value.is_object()) return false;
+            for (auto it = value.begin(); it != value.end(); ++it) {
+                if (!it.value().is_number_integer()) return false;
+                terms[it.key()] = it.value().get<int>();
+            }
+            return true;
+        };
+        std::map<std::string, int> offered;
+        std::map<std::string, int> requested;
+        if (!parseTerms(args.value("offered", Json::object()), offered) ||
+            !parseTerms(args.value("requested", Json::object()), requested)) {
+            return false;
+        }
+        const auto resolveParty = [&npcId](const std::string& value) {
+            return value == "self" ? npcId : value;
+        };
+        const auto result = proposeExchange(
+            resolveParty(args.value("proposer", "self")),
+            resolveParty(args.value("counterparty", "")), std::move(offered), std::move(requested),
+            args.value("due_minutes", 0), npcId,
+            "recipe:" + npcId + ":" + actionId + ":exchange");
+        return result.accepted;
+    }
+    if (operation == "exchange.transition") {
+        const auto status = exchangeContractStatusFromString(args.value("status", ""));
+        if (status == ExchangeContractStatus::Proposed || status == ExchangeContractStatus::Settled ||
+            status == ExchangeContractStatus::Expired) {
+            return false;
+        }
+        const auto result = decideExchange(
+            args.value("contract_id", ""), status, npcId,
+            "recipe:" + npcId + ":" + actionId + ":exchange", args.value("reason", ""));
+        return result.accepted;
+    }
+    if (operation == "exchange.settle") {
+        const auto result = settleExchange(
+            args.value("contract_id", ""), npcId,
+            "recipe:" + npcId + ":" + actionId + ":exchange");
+        return result.accepted;
+    }
     if (operation == "group.metric_adjust") {
         const auto result = adjustGroupMetric(
             args.value("group", ""), args.value("metric", ""), args.value("delta", 0.0), npcId,
@@ -2520,12 +2793,12 @@ WorldService WorldService::fromContentSnapshot(const WorldContentPack& content, 
     const auto& snapshot = json.contains("state") ? json.at("state") : json;
     if (!snapshot.is_object() || !snapshot.contains("save_schema_version") ||
         !snapshot.at("save_schema_version").is_number_integer() ||
-        snapshot.at("save_schema_version").get<int>() != 14) {
-        throw std::runtime_error("unsupported snapshot schema; expected save_schema_version=14");
+        snapshot.at("save_schema_version").get<int>() != 15) {
+        throw std::runtime_error("unsupported snapshot schema; expected save_schema_version=15");
     }
     if (!snapshot.contains("simulation_version") || !snapshot.at("simulation_version").is_string() ||
-        snapshot.at("simulation_version") != "adaptive-runtime-p1.14") {
-        throw std::runtime_error("unsupported snapshot simulation version; expected adaptive-runtime-p1.14");
+        snapshot.at("simulation_version") != "adaptive-runtime-p1.15") {
+        throw std::runtime_error("unsupported snapshot simulation version; expected adaptive-runtime-p1.15");
     }
     service.state_ = deserializeWorldState(snapshot);
     if (!service.state_.activeOverlays.empty()) {

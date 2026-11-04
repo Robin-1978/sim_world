@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Adaptive world exchange contract",
+  "type": "object",
+  "required": ["kind", "schema_version", "id", "proposer", "counterparty", "offered", "requested", "created", "due", "status"],
+  "properties": {
+    "kind": {"const": "exchange_contract"},
+    "schema_version": {"const": 1},
+    "id": {"type": "string", "minLength": 1},
+    "proposer": {"type": "string", "minLength": 1},
+    "counterparty": {"type": "string", "minLength": 1},
+    "offered": {"$ref": "#/$defs/quantities"},
+    "requested": {"$ref": "#/$defs/quantities"},
+    "created": {"type": "integer", "minimum": 0},
+    "due": {"type": "integer", "minimum": 1},
+    "settled_at": {"type": "integer", "minimum": -1},
+    "status": {"enum": ["proposed", "accepted", "settled", "rejected", "cancelled", "expired"]},
+    "version": {"type": "integer", "minimum": 0},
+    "reason": {"type": "string"}
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "quantities": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {"type": "integer", "exclusiveMinimum": 0}
+    }
+  }
+}

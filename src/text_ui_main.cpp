@@ -3,6 +3,7 @@
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
+#include <map>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -35,6 +36,9 @@ void printHelp(const WorldService& service) {
               << "  events [count]               show recent committed events\n"
               << "  promise <from> <to> <days> <text>\n"
               << "  accept|refuse|renegotiate|fulfill <id> <actor>\n"
+              << "  exchange <from> <to> <minutes> <offered-json> <requested-json>\n"
+              << "  exchange-accept|exchange-reject|exchange-cancel <id> <actor>\n"
+              << "  exchange-settle <id> <actor>\n"
               << "  save <path>                  write a JSON snapshot\n"
               << "  replay <path>                write a JSONL replay\n"
               << "  help                         show this help\n"
@@ -173,6 +177,44 @@ bool execute(WorldService& service, const std::string& line) {
         if (command == "fulfill") status = PromiseStatus::Fulfilled;
         const auto result = service.decidePromise(id, status, actor,
                                                   "text-promise-decision-" + std::to_string(service.state().events.size() + 1));
+        std::cout << (result.accepted ? result.message : result.code + ": " + result.message) << "\n";
+    } else if (command == "exchange") {
+        std::string from;
+        std::string to;
+        int minutes = 0;
+        std::string offeredText;
+        std::string requestedText;
+        input >> from >> to >> minutes >> offeredText >> requestedText;
+        try {
+            const auto offered = Json::parse(offeredText);
+            const auto requested = Json::parse(requestedText);
+            std::map<std::string, int> offeredTerms;
+            std::map<std::string, int> requestedTerms;
+            for (auto it = offered.begin(); it != offered.end(); ++it) offeredTerms[it.key()] = it.value().get<int>();
+            for (auto it = requested.begin(); it != requested.end(); ++it) requestedTerms[it.key()] = it.value().get<int>();
+            const auto result = service.proposeExchange(
+                from, to, std::move(offeredTerms), std::move(requestedTerms), minutes, "player",
+                "text-exchange-propose-" + std::to_string(service.state().events.size() + 1));
+            std::cout << (result.accepted ? "created " + result.message : result.code + ": " + result.message) << "\n";
+        } catch (const std::exception& error) {
+            std::cout << "invalid_exchange: " << error.what() << "\n";
+        }
+    } else if (command == "exchange-accept" || command == "exchange-reject" || command == "exchange-cancel") {
+        std::string id;
+        std::string actor;
+        input >> id >> actor;
+        const auto status = command == "exchange-accept" ? ExchangeContractStatus::Accepted
+                           : command == "exchange-reject" ? ExchangeContractStatus::Rejected
+                                                            : ExchangeContractStatus::Cancelled;
+        const auto result = service.decideExchange(id, status, actor,
+                                                   "text-exchange-decision-" + std::to_string(service.state().events.size() + 1));
+        std::cout << (result.accepted ? result.message : result.code + ": " + result.message) << "\n";
+    } else if (command == "exchange-settle") {
+        std::string id;
+        std::string actor;
+        input >> id >> actor;
+        const auto result = service.settleExchange(id, actor,
+                                                   "text-exchange-settle-" + std::to_string(service.state().events.size() + 1));
         std::cout << (result.accepted ? result.message : result.code + ": " + result.message) << "\n";
     } else if (command == "save" || command == "replay") {
         std::string path;
