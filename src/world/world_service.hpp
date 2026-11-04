@@ -31,6 +31,7 @@ struct EvolutionSandboxResult;
 class ContractSystem;
 class NpcSimulationSystem;
 class BehaviorExecutionSystem;
+class CommandDispatcher;
 struct Command {
     std::string turnId;
     std::string kind;
@@ -197,6 +198,7 @@ private:
     friend class ContractSystem;
     friend class NpcSimulationSystem;
     friend class BehaviorExecutionSystem;
+    friend class CommandDispatcher;
     class TransactionScope {
     public:
         explicit TransactionScope(WorldService& service);
