@@ -108,6 +108,7 @@ add_library(tide_marks_core
     src/world/stimulus_system.cpp
     src/world/entity_projection_system.cpp
     src/world/world_service.cpp
+    src/world/world_service_persistence.cpp
     src/world/world_state_json.cpp
 )
 target_include_directories(tide_marks_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
