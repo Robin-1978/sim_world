@@ -503,7 +503,7 @@ P0 必须支持：任意最小内容包启动；NPC 无玩家继续运行；需�
 
 ### P1：潮门港内容和集体驱力
 
-已完成一个可替换的潮门港纵向切片：独立 Content Pack 声明市场、两名 NPC、组织成员和集体指标；Game Instance 声明两方库存；定时 Activity 通过注册的 `trade.execute`、`group.metric_adjust` 和 `relationship.adjust` 形成“交换→组织士气→跨 NPC 信任”的事件链，并能从 Snapshot 恢复。近远场节奏和 `advance_to` 基准也已覆盖。家庭、失踪任务、完整 UI、物理机关和内容迁移仍是后续港区扩展，不进入 Runtime Core。
+已完成一个可替换的潮门港纵向切片：独立 Content Pack 声明市场、两名 NPC、组织成员和集体指标；Game Instance 声明两方库存；定时 Activity 通过注册的 `trade.execute`、`group.metric_adjust` 和 `relationship.adjust` 形成“交换→组织士气→跨 NPC 信任”的事件链，`ExchangeContract` 还覆盖提案、接受、两侧原子结算和过期，并能从 Snapshot 恢复。近远场节奏和 `advance_to` 基准也已覆盖。家庭、失踪任务、完整 UI、物理机关和内容迁移仍是后续港区扩展，不进入 Runtime Core。
 
 ### P2：World Intelligence 演化和沙箱
 
