@@ -582,8 +582,18 @@ DecisionContext WorldService::decisionContext(const std::string& npcId) const {
         {"visible_links", Json::array()},
         {"active_stimuli", Json::array()}};
     for (const auto& [resourceId, resource] : state_.resources) {
+        const auto definition = content_.resources.find(resourceId);
+        if (definition == content_.resources.end()) continue;
+        const auto& authoredResource = definition->second;
+        const bool locationVisible = authoredResource.location.empty() || authoredResource.location == npc.location;
+        const bool ownerVisible = authoredResource.owner.empty() || authoredResource.owner == "world" ||
+                                  authoredResource.owner == "village" || authoredResource.owner == npcId ||
+                                  authoredResource.owner == npcEntityId(npcId);
+        if (!locationVisible || !ownerVisible) continue;
         context.worldSnapshot["public_resources"][resourceId] =
-            Json{{"amount", resource.amount}, {"reserved", resource.reserved}};
+            Json{{"amount", resource.amount}, {"reserved", resource.reserved},
+                 {"location", authoredResource.location}, {"unit", authoredResource.unit},
+                 {"kind", authoredResource.kind}};
     }
     for (const auto& [peerId, peer] : state_.npcs) {
         if (peerId == npcId || peer.location != npc.location) continue;

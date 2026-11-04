@@ -955,6 +955,20 @@ void provider_and_action_validation_are_safe() {
            "Runtime passes the semantic vocabulary to the provider without preclassifying player text");
 }
 
+void decision_context_projects_location_relevant_resources() {
+    auto service = WorldService::load(ContentPackLoader::defaultRoot(), std::make_unique<MockProvider>());
+    const auto mira = service.decisionContext("mira");
+    const auto lorn = service.decisionContext("lorn");
+    expect(mira.worldSnapshot["public_resources"].contains("grain") &&
+               !mira.worldSnapshot["public_resources"].contains("boat_integrity") &&
+               lorn.worldSnapshot["public_resources"].contains("boat_integrity") &&
+               !lorn.worldSnapshot["public_resources"].contains("grain"),
+           "LLM world snapshots project resources at the NPC location instead of dumping every location");
+    expect(mira.worldSnapshot["public_resources"].contains("cooperation") &&
+               mira.worldSnapshot["public_resources"].at("grain").at("location") == "granary",
+           "locationless collective resources remain visible and resource provenance stays explicit");
+}
+
 void llm_action_validation_returns_bounded_repair_feedback() {
     auto provider = std::make_unique<RepairingLlamaProvider>();
     auto* raw = provider.get();
@@ -2537,6 +2551,8 @@ int main() {
     run("exchange_contracts_are_durable_and_atomic", exchange_contracts_are_durable_and_atomic);
     run("behavior_tree_supports_sequence_timeout_and_interrupt", behavior_tree_supports_sequence_timeout_and_interrupt);
     run("provider_and_action_validation_are_safe", provider_and_action_validation_are_safe);
+    run("decision_context_projects_location_relevant_resources",
+        decision_context_projects_location_relevant_resources);
     run("llm_action_validation_returns_bounded_repair_feedback",
         llm_action_validation_returns_bounded_repair_feedback);
     run("meta_actions_are_loaded_from_content", meta_actions_are_loaded_from_content);
