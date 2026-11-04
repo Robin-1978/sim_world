@@ -4,6 +4,8 @@
 #include "world/behavior_execution_system.hpp"
 #include "world/command_dispatcher.hpp"
 #include "world/world_intelligence_system.hpp"
+#include "world/world_evolution_system.hpp"
+#include "world/security_system.hpp"
 #include "world/resource_system.hpp"
 #include "world/social_system.hpp"
 #include "world/meta_action_executor.hpp"
@@ -743,79 +745,11 @@ CommandResult WorldService::moveNpc(const std::string& npcId, const std::string&
 
 CommandResult WorldService::activateOverlay(const EvolutionProposal& proposal,
                                             const EvolutionSandboxResult& sandbox) {
-    TransactionScope transaction(*this);
-    if (proposal.status != EvolutionProposalStatus::Approved) {
-        return reject("overlay_not_approved", "Only an approved evolution proposal can activate an overlay.");
-    }
-    if (!sandbox.passed || sandbox.proposalId != proposal.id || sandbox.overlayVersion.empty()) {
-        return reject("overlay_sandbox_required", "A passing sandbox result for this proposal is required.");
-    }
-    if (sandbox.baseContentVersion != proposal.baseContentVersion ||
-        sandbox.baseRevision != state_.revision || proposal.baseWorldRevision != state_.revision) {
-        return reject("overlay_sandbox_stale",
-                      "The sandbox and proposal must target the current content version and world revision.");
-    }
-    if (std::any_of(state_.activeOverlays.begin(), state_.activeOverlays.end(),
-                    [&proposal](const auto& active) { return active.proposalId == proposal.id; })) {
-        return reject("overlay_already_active", "That evolution overlay is already active.");
-    }
-    auto candidate = content_;
-    const auto applied = EvolutionManager::applyOverlay(candidate, proposal);
-    if (!applied.valid) return reject(applied.code, applied.message);
-    if (candidate.contentVersion != sandbox.overlayVersion) {
-        return reject("overlay_version_mismatch", "The sandbox result does not match the activated content version.");
-    }
-    const auto previousVersion = content_.contentVersion;
-    content_ = std::move(candidate);
-    state_.contentVersion = content_.contentVersion;
-    state_.activeOverlays.push_back(
-        ActiveOverlayState{proposal.id, proposal.baseContentVersion, content_.contentVersion, proposal.operations});
-    const auto event = addEvent(
-        "evolution.overlay_activated", "developer", proposal.id, "An approved content overlay became active",
-        Json{{"proposal_id", proposal.id}, {"overlay_version", content_.contentVersion},
-             {"previous_content_version", previousVersion},
-             {"base_content_version", proposal.baseContentVersion},
-             {"active_overlay_ids", overlayIds()}});
-    rebuildEntityRegistry();
-    return CommandResult{true, "ok", content_.contentVersion, event};
-}
-
-std::vector<std::string> WorldService::overlayIds() const {
-    std::vector<std::string> ids;
-    ids.reserve(state_.activeOverlays.size());
-    for (const auto& overlay : state_.activeOverlays) ids.push_back(overlay.proposalId);
-    return ids;
+    return WorldEvolutionSystem(*this).activateOverlay(proposal, sandbox);
 }
 
 CommandResult WorldService::rollbackOverlay(const std::string& proposalId) {
-    TransactionScope transaction(*this);
-    const auto active = std::find_if(state_.activeOverlays.begin(), state_.activeOverlays.end(),
-                                     [&proposalId](const auto& item) { return item.proposalId == proposalId; });
-    if (active == state_.activeOverlays.end()) return reject("overlay_not_active", "That overlay is not active.");
-    if (std::next(active) != state_.activeOverlays.end()) {
-        return reject("overlay_not_top", "Roll back newer overlays before removing an older overlay.");
-    }
-    const auto previousVersion = content_.contentVersion;
-    content_ = baseContent_;
-    for (auto record = state_.activeOverlays.begin(); record != active; ++record) {
-        EvolutionProposal replay{record->proposalId, "declarative_capability", "snapshot",
-                                 record->baseContentVersion, 0, record->operations,
-                                 EvolutionProposalStatus::Approved, {}};
-        const auto applied = EvolutionManager::applyOverlay(content_, replay);
-        if (!applied.valid) return reject(applied.code, applied.message);
-        if (content_.contentVersion != record->overlayVersion) {
-            return reject("overlay_rebuild_version_mismatch",
-                          "The persisted overlay stack did not rebuild its recorded version.");
-        }
-    }
-    state_.contentVersion = content_.contentVersion;
-    state_.activeOverlays.erase(active);
-    const auto event = addEvent(
-        "evolution.overlay_rolled_back", "developer", proposalId, "An active content overlay was rolled back",
-        Json{{"proposal_id", proposalId}, {"from_version", previousVersion},
-             {"to_version", content_.contentVersion}, {"active_overlay_ids", overlayIds()}});
-    rebuildEntityRegistry();
-    return CommandResult{true, "ok", content_.contentVersion, event};
+    return WorldEvolutionSystem(*this).rollbackOverlay(proposalId);
 }
 
 CommandResult WorldService::assertKnownFact(const std::string& npcId, const std::string& subject,
@@ -921,144 +855,7 @@ CommandResult WorldService::recordExperience(const std::string& npcId, const std
 CommandResult WorldService::applySecurityOperator(const std::string& operation, const std::string& actor,
                                                   const std::string& target, const Json& args,
                                                   const std::string& turnId) {
-    TransactionScope transaction(*this);
-    if (!turnId.empty() && state_.processedTurnIds.contains(turnId)) {
-        return reject("duplicate_turn", "The security action was already applied.");
-    }
-    const auto resolve = [this](const std::string& value) -> std::string {
-        if (value == "world" || value == kWorldActor) return kWorldActor;
-        if (state_.entities.contains(value)) return value;
-        if (state_.npcs.contains(value)) return npcEntityId(value);
-        return {};
-    };
-    const auto actorEntity = resolve(actor);
-    const auto requestedTarget = target.empty() ? actor : target;
-    const auto targetEntity = resolve(requestedTarget == "self" ? actor : requestedTarget);
-    const auto operatorKind = MetaActionRegistry::securityOperatorKind(operation);
-    if (operatorKind == MetaActionRegistry::SecurityOperatorKind::Unknown) {
-        return reject("unknown_security_operator", "The security operator is not registered.");
-    }
-    if (actorEntity.empty() || targetEntity.empty() ||
-        (actorEntity == targetEntity &&
-         (operatorKind == MetaActionRegistry::SecurityOperatorKind::Conflict ||
-          operatorKind == MetaActionRegistry::SecurityOperatorKind::Threaten))) {
-        return reject("invalid_security_target", "Security actions need distinct active actor and target entities.");
-    }
-    const auto active = [this](const std::string& id) {
-        if (id == kWorldActor) return true;
-        const auto found = state_.entities.find(id);
-        return found != state_.entities.end() && found->second.lifecycle == EntityLifecycle::Active;
-    };
-    if (!active(actorEntity) || !active(targetEntity)) return reject("inactive_security_target", "The security target is not active.");
-    if (operatorKind == MetaActionRegistry::SecurityOperatorKind::Conflict ||
-        operatorKind == MetaActionRegistry::SecurityOperatorKind::Threaten) {
-        if (actorEntity == kWorldActor) return reject("invalid_security_actor", "A conflict action needs a concrete actor.");
-    }
-    auto& security = state_.security[targetEntity];
-    const auto bounded = [](double value) { return std::clamp(value, 0.0, 1.0); };
-    const double integrityBefore = security.integrity;
-    const double availabilityBefore = security.availability;
-    const double threatBefore = security.threat;
-    const double exposureBefore = security.exposure;
-    const bool evacuatedBefore = security.evacuated;
-    const auto configured = std::find_if(
-        content_.metaActions.begin(), content_.metaActions.end(),
-        [&operation](const auto& entry) { return entry.second.operation == operation; });
-    if (configured == content_.metaActions.end()) {
-        return reject("security_operator_unconfigured",
-                      "The security operator has no content-defined parameter policy.");
-    }
-    Json effectiveArgs = configured->second.defaultArgs;
-    for (auto it = args.begin(); it != args.end(); ++it) effectiveArgs[it.key()] = it.value();
-    const auto number = [&effectiveArgs](const char* key) -> std::optional<double> {
-        if (!effectiveArgs.contains(key) || !effectiveArgs.at(key).is_number()) return std::nullopt;
-        const auto value = effectiveArgs.at(key).get<double>();
-        return std::isfinite(value) ? std::optional<double>{value} : std::nullopt;
-    };
-    const auto requiredNumber = [&number](const char* key) -> std::optional<double> {
-        const auto value = number(key);
-        if (!value.has_value()) return std::nullopt;
-        return value;
-    };
-    const auto missing = [&operation](const char* key) {
-        return CommandResult{false, "invalid_security_parameters",
-                              "The content-defined " + operation + " operator needs numeric '" + key + "'.", std::nullopt};
-    };
-    switch (operatorKind) {
-    case MetaActionRegistry::SecurityOperatorKind::Conflict: {
-        const auto damage = requiredNumber("integrity_loss");
-        const auto availabilityLoss = requiredNumber("availability_loss");
-        const auto threatGain = requiredNumber("threat_gain");
-        const auto exposureGain = requiredNumber("exposure_gain");
-        if (!damage.has_value()) return missing("integrity_loss");
-        if (!availabilityLoss.has_value()) return missing("availability_loss");
-        if (!threatGain.has_value()) return missing("threat_gain");
-        if (!exposureGain.has_value()) return missing("exposure_gain");
-        security.integrity = bounded(security.integrity - *damage);
-        security.availability = bounded(security.availability - *availabilityLoss);
-        security.threat = bounded(security.threat + *threatGain);
-        security.exposure = bounded(security.exposure + *exposureGain);
-        break;
-    }
-    case MetaActionRegistry::SecurityOperatorKind::Threaten: {
-        const auto threatGain = requiredNumber("threat_gain");
-        const auto exposureGain = requiredNumber("exposure_gain");
-        if (!threatGain.has_value()) return missing("threat_gain");
-        if (!exposureGain.has_value()) return missing("exposure_gain");
-        security.threat = bounded(security.threat + *threatGain);
-        security.exposure = bounded(security.exposure + *exposureGain);
-        break;
-    }
-    case MetaActionRegistry::SecurityOperatorKind::Defend: {
-        const auto threatReduction = requiredNumber("threat_reduction");
-        const auto exposureReduction = requiredNumber("exposure_reduction");
-        if (!threatReduction.has_value()) return missing("threat_reduction");
-        if (!exposureReduction.has_value()) return missing("exposure_reduction");
-        security.threat = bounded(security.threat - *threatReduction);
-        security.exposure = bounded(security.exposure - *exposureReduction);
-        break;
-    }
-    case MetaActionRegistry::SecurityOperatorKind::Evacuate: {
-        const auto exposureReduction = requiredNumber("exposure_reduction");
-        if (!exposureReduction.has_value()) return missing("exposure_reduction");
-        security.evacuated = true;
-        security.exposure = bounded(security.exposure - *exposureReduction);
-        break;
-    }
-    case MetaActionRegistry::SecurityOperatorKind::Repair: {
-        const auto integrityRestore = requiredNumber("integrity_restore");
-        const auto availabilityRestore = requiredNumber("availability_restore");
-        const auto threatReduction = requiredNumber("threat_reduction");
-        if (!integrityRestore.has_value()) return missing("integrity_restore");
-        if (!availabilityRestore.has_value()) return missing("availability_restore");
-        if (!threatReduction.has_value()) return missing("threat_reduction");
-        const auto resource = effectiveArgs.value("resource", "");
-        const int cost = effectiveArgs.value("amount", 0);
-        if (resource.empty() || cost <= 0 || availableResourceValue(resource) < cost) {
-            return reject("insufficient_resource", "Security repair lacks its authored repair resource.");
-        }
-        state_.resources[resource].amount -= cost;
-        security.integrity = bounded(security.integrity + *integrityRestore);
-        security.availability = bounded(security.availability + *availabilityRestore);
-        security.threat = bounded(security.threat - *threatReduction);
-        security.evacuated = false;
-        break;
-    }
-    case MetaActionRegistry::SecurityOperatorKind::Unknown:
-        return reject("unknown_security_operator", "The security operator is not registered.");
-    }
-    if (!turnId.empty()) state_.processedTurnIds.insert(turnId);
-    const auto eventActor = actorEntity.starts_with("npc:") ? actorEntity.substr(4) : actorEntity;
-    const auto eventTarget = targetEntity.starts_with("npc:") ? targetEntity.substr(4) : targetEntity;
-    const auto event = addEvent(
-        operation, eventActor, eventTarget, "A registered security operator changed target security facts",
-        Json{{"operation", operation}, {"actor_entity", actorEntity}, {"target_entity", targetEntity},
-             {"integrity_before", integrityBefore}, {"integrity_after", security.integrity},
-             {"availability_before", availabilityBefore}, {"availability_after", security.availability},
-             {"threat_before", threatBefore}, {"threat_after", security.threat},
-             {"exposure_before", exposureBefore}, {"exposure_after", security.exposure},
-             {"evacuated_before", evacuatedBefore}, {"evacuated_after", security.evacuated}});
-    return CommandResult{true, "ok", operation, event};
+    return SecuritySystem(*this).applyOperator(operation, actor, target, args, turnId);
 }
 
 std::optional<std::vector<std::string>> WorldService::planRoute(const std::string& from,
@@ -1092,57 +889,8 @@ DialogueTurn WorldService::deliberate(const std::string& npcId, const std::strin
 ProviderResponse WorldService::requestEvolutionProposal(const std::string& evolutionLevel,
                                                          const std::string& trigger,
                                                          const Json& validationFeedback) const {
-    if (evolutionLevel != "level1" && evolutionLevel != "level2") {
-        return ProviderResponse{false, {}, {}, "invalid_evolution_level", Json::object()};
-    }
-    Json events = Json::array();
-    const std::size_t first = state_.events.size() > 32 ? state_.events.size() - 32 : 0;
-    for (std::size_t index = first; index < state_.events.size(); ++index) {
-        const auto& event = state_.events[index];
-        events.push_back(Json{{"sequence", event.sequence}, {"at", event.at.minute},
-                              {"type", event.type}, {"actor", event.actor}, {"target", event.target},
-                              {"detail", event.detail}, {"data", event.data}});
-    }
-    Json resources = Json::object();
-    for (const auto& [id, resource] : state_.resources) {
-        resources[id] = Json{{"amount", resource.amount}, {"reserved", resource.reserved}};
-    }
-    Json npcs = Json::object();
-    for (const auto& [id, npc] : state_.npcs) {
-        Json needs = Json::object();
-        for (const auto& [needId, need] : npc.needs) {
-            needs[needId] = Json{{"deficit", need.deficit}, {"sensitivity", need.sensitivity},
-                                  {"confidence", need.evidenceConfidence}};
-        }
-        npcs[id] = Json{{"location", npc.location}, {"strategy", npc.strategy}, {"goal_stage", npc.goalStage},
-                        {"needs", needs}, {"active_process", npc.activity.process.has_value()},
-                        {"memory_count", npc.memories.size()}, {"knowledge_count", npc.knowledge.size()},
-                        {"experience_count", npc.experiences.size()}};
-    }
-    Json allowedOperations = evolutionLevel == "level1"
-                                 ? Json::array({"overlay_strategy", "overlay_schedule", "register_behavior_recipe"})
-                                 : Json::array({"create_entity_archetype", "register_behavior_recipe"});
-    Json contentSummary{
-        {"content_id", content_.id}, {"content_version", content_.contentVersion},
-        {"entity_archetypes", content_.entityArchetypes.size()},
-        {"behavior_recipes", content_.behaviorRecipes.size()},
-        {"strategy_rules", content_.strategyRules.size()},
-        {"registered_meta_actions", Json::array()}, {"registered_conditions", Json::array()} };
-    for (const auto& [id, definition] : content_.metaActions) {
-        (void)definition;
-        contentSummary["registered_meta_actions"].push_back(id);
-    }
-    for (const auto& [id, definition] : content_.conditions) {
-        (void)definition;
-        contentSummary["registered_conditions"].push_back(id);
-    }
-    const Json context{{"trigger", trigger}, {"evolution_level", evolutionLevel},
-                       {"base_content_version", content_.contentVersion},
-                       {"base_world_revision", state_.revision}, {"world_time", state_.now.minute},
-                       {"resources", resources}, {"npcs", npcs}, {"content", contentSummary},
-                       {"allowed_operations", allowedOperations}, {"evidence_events", events},
-                       {"validation_feedback", validationFeedback}};
-    return provider_->proposeEvolution(context, evolutionLevel, validationFeedback);
+    return WorldEvolutionSystem(*const_cast<WorldService*>(this)).requestProposal(
+        evolutionLevel, trigger, validationFeedback);
 }
 
 TurnRequest WorldService::makeTurnRequest(const std::string& npcId, const std::string& input,

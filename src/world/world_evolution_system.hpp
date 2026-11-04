@@ -1,0 +1,33 @@
+#pragma once
+
+#include "provider/provider.hpp"
+
+#include <string>
+#include <vector>
+
+namespace tide_marks {
+
+class WorldService;
+struct CommandResult;
+struct EvolutionProposal;
+struct EvolutionSandboxResult;
+
+// Coordinates world-facing Level 1/Level 2 evolution. Provider requests and
+// overlay lifecycle are kept outside WorldService, while all fact changes
+// still use WorldService's transaction and event boundary.
+class WorldEvolutionSystem {
+public:
+    explicit WorldEvolutionSystem(WorldService& world) : world_(world) {}
+
+    [[nodiscard]] ProviderResponse requestProposal(const std::string& evolutionLevel,
+                                                    const std::string& trigger,
+                                                    const Json& validationFeedback) const;
+    CommandResult activateOverlay(const EvolutionProposal& proposal,
+                                  const EvolutionSandboxResult& sandbox);
+    CommandResult rollbackOverlay(const std::string& proposalId);
+
+private:
+    WorldService& world_;
+};
+
+}  // namespace tide_marks

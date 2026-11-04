@@ -100,6 +100,8 @@ add_library(tide_marks_core
     src/world/behavior_execution_system.cpp
     src/world/command_dispatcher.cpp
     src/world/world_intelligence_system.cpp
+    src/world/world_evolution_system.cpp
+    src/world/security_system.cpp
     src/world/world_service.cpp
     src/world/world_state_json.cpp
 )

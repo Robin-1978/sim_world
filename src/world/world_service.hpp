@@ -33,6 +33,8 @@ class NpcSimulationSystem;
 class BehaviorExecutionSystem;
 class CommandDispatcher;
 class WorldIntelligenceSystem;
+class WorldEvolutionSystem;
+class SecuritySystem;
 struct Command {
     std::string turnId;
     std::string kind;
@@ -201,6 +203,8 @@ private:
     friend class BehaviorExecutionSystem;
     friend class CommandDispatcher;
     friend class WorldIntelligenceSystem;
+    friend class WorldEvolutionSystem;
+    friend class SecuritySystem;
     class TransactionScope {
     public:
         explicit TransactionScope(WorldService& service);
@@ -289,7 +293,6 @@ private:
         int requesterPriority);
     void applyNeedRelief(const std::string& npcId, const std::string& actionId);
     [[nodiscard]] const NpcContent* authoredNpc(const std::string& npcId) const;
-    [[nodiscard]] std::vector<std::string> overlayIds() const;
     [[nodiscard]] int resourceValue(const std::string& resource) const;
     [[nodiscard]] int availableResourceValue(const std::string& resource) const;
     void setResource(const std::string& resource, int value);
