@@ -1013,8 +1013,9 @@ CommandResult WorldService::createPromise(const std::string& from, const std::st
     if (hasNpc(from)) state_.npcs.at(from).openPromises.push_back(id);
     if (hasNpc(to)) state_.npcs.at(to).openPromises.push_back(id);
     if (!turnId.empty()) state_.processedTurnIds.insert(turnId);
-    addEvent("promise.created", from, to, description, Json{{"promise_id", id}, {"due", promise.due.minute}});
-    return CommandResult{true, "ok", id, state_.events.back()};
+    const auto event = addEvent("promise.created", from, to, description,
+                                Json{{"promise_id", id}, {"due", promise.due.minute}});
+    return CommandResult{true, "ok", id, event};
 }
 
 CommandResult WorldService::decidePromise(const std::string& promiseId, PromiseStatus decision,
@@ -1049,9 +1050,10 @@ CommandResult WorldService::decidePromise(const std::string& promiseId, PromiseS
             applyRelationshipDelta(npc->second.relationships[counterparty], content_.promisePolicy.acceptedActor);
         }
     }
-    addEvent("promise." + toString(decision), actor, promiseId, detail.empty() ? "Promise status changed" : detail,
-             Json{{"promise_id", promiseId}, {"status", toString(decision)}, {"version", promise.version}});
-    return CommandResult{true, "ok", toString(decision), state_.events.back()};
+    const auto event = addEvent(
+        "promise." + toString(decision), actor, promiseId, detail.empty() ? "Promise status changed" : detail,
+        Json{{"promise_id", promiseId}, {"status", toString(decision)}, {"version", promise.version}});
+    return CommandResult{true, "ok", toString(decision), event};
 }
 
 CommandResult WorldService::createEntity(const std::string& id, const std::string& archetypeId,
@@ -1068,10 +1070,11 @@ CommandResult WorldService::createEntity(const std::string& id, const std::strin
     state_.entities.emplace(id, WorldEntityState{id, archetype->kind, EntityLifecycle::Active, std::move(merged)});
     state_.inventories.try_emplace(id);
     if (!turnId.empty()) state_.processedTurnIds.insert(turnId);
-    addEvent("entity.created", kWorldActor, id, "Runtime entity created",
-             Json{{"entity_id", id}, {"archetype", archetypeId}, {"kind", archetype->kind},
-                  {"metadata", state_.entities.at(id).metadata}});
-    return CommandResult{true, "ok", id, state_.events.back()};
+    const auto event = addEvent(
+        "entity.created", kWorldActor, id, "Runtime entity created",
+        Json{{"entity_id", id}, {"archetype", archetypeId}, {"kind", archetype->kind},
+             {"metadata", state_.entities.at(id).metadata}});
+    return CommandResult{true, "ok", id, event};
 }
 
 CommandResult WorldService::setEntityLifecycle(const std::string& id, EntityLifecycle lifecycle,
@@ -1083,9 +1086,9 @@ CommandResult WorldService::setEntityLifecycle(const std::string& id, EntityLife
     if (!turnId.empty() && state_.processedTurnIds.contains(turnId)) return reject("duplicate_turn", "The turn was already applied.");
     found->second.lifecycle = lifecycle;
     if (!turnId.empty()) state_.processedTurnIds.insert(turnId);
-    addEvent("entity.lifecycle", kWorldActor, id, "Runtime entity lifecycle changed",
-             Json{{"entity_id", id}, {"lifecycle", toString(lifecycle)}});
-    return CommandResult{true, "ok", toString(lifecycle), state_.events.back()};
+    const auto event = addEvent("entity.lifecycle", kWorldActor, id, "Runtime entity lifecycle changed",
+                                Json{{"entity_id", id}, {"lifecycle", toString(lifecycle)}});
+    return CommandResult{true, "ok", toString(lifecycle), event};
 }
 
 CommandResult WorldService::setLinkState(const std::string& linkId, bool traversable, bool locked,
@@ -1097,9 +1100,9 @@ CommandResult WorldService::setLinkState(const std::string& linkId, bool travers
     if (!turnId.empty() && state_.processedTurnIds.contains(turnId)) return reject("duplicate_turn", "The turn was already applied.");
     state_.links[linkId] = RuntimeLinkState{traversable, locked};
     if (!turnId.empty()) state_.processedTurnIds.insert(turnId);
-    addEvent("link.state", kWorldActor, linkEntityId(linkId), "Traversal link state changed",
-             Json{{"link_id", linkId}, {"traversable", traversable}, {"locked", locked}});
-    return CommandResult{true, "ok", linkId, state_.events.back()};
+    const auto event = addEvent("link.state", kWorldActor, linkEntityId(linkId), "Traversal link state changed",
+                                Json{{"link_id", linkId}, {"traversable", traversable}, {"locked", locked}});
+    return CommandResult{true, "ok", linkId, event};
 }
 
 CommandResult WorldService::transferResource(const std::string& source, const std::string& target,
@@ -1160,12 +1163,12 @@ CommandResult WorldService::transferResource(const std::string& source, const st
         state_.inventories[targetId][resource] += amount;
     }
     if (!turnId.empty()) state_.processedTurnIds.insert(turnId);
-    addEvent("resource.transferred", actor, targetId,
-             "A registered resource transfer changed ownership quantities",
-             Json{{"resource", resource}, {"amount", amount}, {"source", sourceId}, {"target", targetId},
-                  {"source_before", sourceBefore}, {"source_after", balance(sourceId)},
-                  {"target_before", targetBefore}, {"target_after", balance(targetId)}});
-    return CommandResult{true, "ok", resource, state_.events.back()};
+    const auto event = addEvent(
+        "resource.transferred", actor, targetId, "A registered resource transfer changed ownership quantities",
+        Json{{"resource", resource}, {"amount", amount}, {"source", sourceId}, {"target", targetId},
+             {"source_before", sourceBefore}, {"source_after", balance(sourceId)},
+             {"target_before", targetBefore}, {"target_after", balance(targetId)}});
+    return CommandResult{true, "ok", resource, event};
 }
 
 CommandResult WorldService::tradeResources(const std::string& seller, const std::string& buyer,
@@ -1192,11 +1195,12 @@ CommandResult WorldService::tradeResources(const std::string& seller, const std:
     if (!turnId.empty()) {
         state_.processedTurnIds.insert(turnId);
     }
-    addEvent("trade.settled", actor, seller, "Two parties exchanged configured resources atomically",
-             Json{{"seller", seller}, {"buyer", buyer}, {"seller_resource", sellerResource},
-                  {"seller_amount", sellerAmount}, {"buyer_resource", buyerResource},
-                  {"buyer_amount", buyerAmount}});
-    return CommandResult{true, "ok", "trade", state_.events.back()};
+    const auto event = addEvent("trade.settled", actor, seller,
+                                "Two parties exchanged configured resources atomically",
+                                Json{{"seller", seller}, {"buyer", buyer}, {"seller_resource", sellerResource},
+                                     {"seller_amount", sellerAmount}, {"buyer_resource", buyerResource},
+                                     {"buyer_amount", buyerAmount}});
+    return CommandResult{true, "ok", "trade", event};
 }
 
 CommandResult WorldService::adjustRelationship(const std::string& npcId, const std::string& target,
@@ -1219,10 +1223,11 @@ CommandResult WorldService::adjustRelationship(const std::string& npcId, const s
                            RelationshipDelta{delta.trust, delta.respect, delta.fear, delta.owed});
     ++npc->second.stateVersion;
     if (!turnId.empty()) state_.processedTurnIds.insert(turnId);
-    addEvent("relationship.adjusted", actor, target, reason.empty() ? "A relationship changed" : reason,
-             Json{{"npc_id", npcId}, {"target", target}, {"trust", delta.trust},
-                  {"respect", delta.respect}, {"fear", delta.fear}, {"owed", delta.owed}});
-    return CommandResult{true, "ok", target, state_.events.back()};
+    const auto event = addEvent("relationship.adjusted", actor, target,
+                                reason.empty() ? "A relationship changed" : reason,
+                                Json{{"npc_id", npcId}, {"target", target}, {"trust", delta.trust},
+                                     {"respect", delta.respect}, {"fear", delta.fear}, {"owed", delta.owed}});
+    return CommandResult{true, "ok", target, event};
 }
 
 CommandResult WorldService::adjustGroupMetric(const std::string& groupId, const std::string& metric,
@@ -1236,10 +1241,11 @@ CommandResult WorldService::adjustGroupMetric(const std::string& groupId, const 
     const double before = group->second.metrics[metric];
     group->second.metrics[metric] += delta;
     if (!turnId.empty()) state_.processedTurnIds.insert(turnId);
-    addEvent("social.group_metric", actor, groupId, reason.empty() ? "A social group metric changed" : reason,
-             Json{{"group_id", groupId}, {"metric", metric}, {"before", before},
-                  {"after", group->second.metrics[metric]}, {"delta", delta}});
-    return CommandResult{true, "ok", metric, state_.events.back()};
+    const auto event = addEvent(
+        "social.group_metric", actor, groupId, reason.empty() ? "A social group metric changed" : reason,
+        Json{{"group_id", groupId}, {"metric", metric}, {"before", before},
+             {"after", group->second.metrics[metric]}, {"delta", delta}});
+    return CommandResult{true, "ok", metric, event};
 }
 
 CommandResult WorldService::setGroupMembership(const std::string& groupId, const std::string& npcId,
@@ -1254,10 +1260,11 @@ CommandResult WorldService::setGroupMembership(const std::string& groupId, const
     if (active) group->second.members[npcId] = role;
     else group->second.members.erase(npcId);
     if (!turnId.empty()) state_.processedTurnIds.insert(turnId);
-    addEvent(active ? "social.member_joined" : "social.member_left", actor, groupId,
-             active ? "An NPC joined a social group" : "An NPC left a social group",
-             Json{{"group_id", groupId}, {"npc_id", npcId}, {"role", role}});
-    return CommandResult{true, "ok", groupId, state_.events.back()};
+    const auto event = addEvent(
+        active ? "social.member_joined" : "social.member_left", actor, groupId,
+        active ? "An NPC joined a social group" : "An NPC left a social group",
+        Json{{"group_id", groupId}, {"npc_id", npcId}, {"role", role}});
+    return CommandResult{true, "ok", groupId, event};
 }
 
 CommandResult WorldService::moveNpc(const std::string& npcId, const std::string& destination,
@@ -1284,11 +1291,12 @@ CommandResult WorldService::moveNpc(const std::string& npcId, const std::string&
     npcFound->second.location = destination;
     ++npcFound->second.stateVersion;
     if (!turnId.empty()) state_.processedTurnIds.insert(turnId);
-    addEvent("entity.moved", actor, npcEntityId(npcId), "An NPC arrived at an authored location",
-             Json{{"npc_id", npcId}, {"from", previous}, {"to", destination},
-                  {"route", planRoute(previous, destination).value_or(std::vector<std::string>{})}});
+    const auto event = addEvent(
+        "entity.moved", actor, npcEntityId(npcId), "An NPC arrived at an authored location",
+        Json{{"npc_id", npcId}, {"from", previous}, {"to", destination},
+             {"route", planRoute(previous, destination).value_or(std::vector<std::string>{})}});
     syncNpcEntityState();
-    return CommandResult{true, "ok", destination, state_.events.back()};
+    return CommandResult{true, "ok", destination, event};
 }
 
 CommandResult WorldService::activateOverlay(const EvolutionProposal& proposal,
@@ -1320,13 +1328,14 @@ CommandResult WorldService::activateOverlay(const EvolutionProposal& proposal,
     state_.contentVersion = content_.contentVersion;
     state_.activeOverlays.push_back(
         ActiveOverlayState{proposal.id, proposal.baseContentVersion, content_.contentVersion, proposal.operations});
-    addEvent("evolution.overlay_activated", "developer", proposal.id, "An approved content overlay became active",
-             Json{{"proposal_id", proposal.id}, {"overlay_version", content_.contentVersion},
-                  {"previous_content_version", previousVersion},
-                  {"base_content_version", proposal.baseContentVersion},
-                  {"active_overlay_ids", overlayIds()}});
+    const auto event = addEvent(
+        "evolution.overlay_activated", "developer", proposal.id, "An approved content overlay became active",
+        Json{{"proposal_id", proposal.id}, {"overlay_version", content_.contentVersion},
+             {"previous_content_version", previousVersion},
+             {"base_content_version", proposal.baseContentVersion},
+             {"active_overlay_ids", overlayIds()}});
     rebuildEntityRegistry();
-    return CommandResult{true, "ok", content_.contentVersion, state_.events.back()};
+    return CommandResult{true, "ok", content_.contentVersion, event};
 }
 
 std::vector<std::string> WorldService::overlayIds() const {
@@ -1359,11 +1368,12 @@ CommandResult WorldService::rollbackOverlay(const std::string& proposalId) {
     }
     state_.contentVersion = content_.contentVersion;
     state_.activeOverlays.erase(active);
-    addEvent("evolution.overlay_rolled_back", "developer", proposalId, "An active content overlay was rolled back",
-             Json{{"proposal_id", proposalId}, {"from_version", previousVersion},
-                  {"to_version", content_.contentVersion}, {"active_overlay_ids", overlayIds()}});
+    const auto event = addEvent(
+        "evolution.overlay_rolled_back", "developer", proposalId, "An active content overlay was rolled back",
+        Json{{"proposal_id", proposalId}, {"from_version", previousVersion},
+             {"to_version", content_.contentVersion}, {"active_overlay_ids", overlayIds()}});
     rebuildEntityRegistry();
-    return CommandResult{true, "ok", content_.contentVersion, state_.events.back()};
+    return CommandResult{true, "ok", content_.contentVersion, event};
 }
 
 CommandResult WorldService::assertKnownFact(const std::string& npcId, const std::string& subject,
@@ -1406,11 +1416,12 @@ CommandResult WorldService::assertKnownFact(const std::string& npcId, const std:
     else npc->second.knowledge.push_back(fact);
     ++npc->second.stateVersion;
     if (!turnId.empty()) state_.processedTurnIds.insert(turnId);
-    addEvent("knowledge.asserted", actor, npcId, "An NPC recorded a sourced belief",
-             Json{{"knowledge_id", id}, {"subject", subject}, {"predicate", predicate},
-                  {"value", value}, {"source_sequence", sourceSequence}, {"source_type", source->type},
-                  {"scope", scope}, {"confidence", confidence}});
-    return CommandResult{true, "ok", id, state_.events.back()};
+    const auto event = addEvent(
+        "knowledge.asserted", actor, npcId, "An NPC recorded a sourced belief",
+        Json{{"knowledge_id", id}, {"subject", subject}, {"predicate", predicate},
+             {"value", value}, {"source_sequence", sourceSequence}, {"source_type", source->type},
+             {"scope", scope}, {"confidence", confidence}});
+    return CommandResult{true, "ok", id, event};
 }
 
 CommandResult WorldService::recordExperience(const std::string& npcId, const std::string& domain,
@@ -1457,11 +1468,12 @@ CommandResult WorldService::recordExperience(const std::string& npcId, const std
     }
     ++npc->second.stateVersion;
     if (!turnId.empty()) state_.processedTurnIds.insert(turnId);
-    addEvent("experience.recorded", actor, npcId, "An outcome was abstracted into reusable experience",
-             Json{{"domain", domain}, {"trigger", trigger}, {"action", action},
-                  {"outcome", outcome}, {"source_sequence", sourceSequence},
-                  {"confidence", confidence}, {"personal", personal}});
-    return CommandResult{true, "ok", domain, state_.events.back()};
+    const auto event = addEvent(
+        "experience.recorded", actor, npcId, "An outcome was abstracted into reusable experience",
+        Json{{"domain", domain}, {"trigger", trigger}, {"action", action},
+             {"outcome", outcome}, {"source_sequence", sourceSequence},
+             {"confidence", confidence}, {"personal", personal}});
+    return CommandResult{true, "ok", domain, event};
 }
 
 CommandResult WorldService::applySecurityOperator(const std::string& operation, const std::string& actor,
@@ -1537,14 +1549,15 @@ CommandResult WorldService::applySecurityOperator(const std::string& operation, 
     if (!turnId.empty()) state_.processedTurnIds.insert(turnId);
     const auto eventActor = actorEntity.starts_with("npc:") ? actorEntity.substr(4) : actorEntity;
     const auto eventTarget = targetEntity.starts_with("npc:") ? targetEntity.substr(4) : targetEntity;
-    addEvent(operation, eventActor, eventTarget, "A registered security operator changed target security facts",
-             Json{{"operation", operation}, {"actor_entity", actorEntity}, {"target_entity", targetEntity},
-                  {"integrity_before", integrityBefore}, {"integrity_after", security.integrity},
-                  {"availability_before", availabilityBefore}, {"availability_after", security.availability},
-                  {"threat_before", threatBefore}, {"threat_after", security.threat},
-                  {"exposure_before", exposureBefore}, {"exposure_after", security.exposure},
-                  {"evacuated_before", evacuatedBefore}, {"evacuated_after", security.evacuated}});
-    return CommandResult{true, "ok", operation, state_.events.back()};
+    const auto event = addEvent(
+        operation, eventActor, eventTarget, "A registered security operator changed target security facts",
+        Json{{"operation", operation}, {"actor_entity", actorEntity}, {"target_entity", targetEntity},
+             {"integrity_before", integrityBefore}, {"integrity_after", security.integrity},
+             {"availability_before", availabilityBefore}, {"availability_after", security.availability},
+             {"threat_before", threatBefore}, {"threat_after", security.threat},
+             {"exposure_before", exposureBefore}, {"exposure_after", security.exposure},
+             {"evacuated_before", evacuatedBefore}, {"evacuated_after", security.evacuated}});
+    return CommandResult{true, "ok", operation, event};
 }
 
 std::optional<std::vector<std::string>> WorldService::planRoute(const std::string& from,
@@ -1703,17 +1716,18 @@ DialogueTurn WorldService::commitTurn(const TurnRequest& request, ProviderRespon
                                              response.proposal.confidence});
         const auto target = channel->second.eventTarget == "player" ? kPlayerId :
                             channel->second.eventTarget == "self" ? "self" : channel->second.eventTarget;
-        addEvent(channel->second.eventType, request.npcId, target, response.dialogue,
-                 Json{{"turn_id", request.turnId}, {"action_id", ""}, {"trigger", request.trigger},
-                      {"speech_act", context.speechAct}, {"world_action_requested", false},
-                      {"process_status", "conversation_only"}, {"provider", result.provider},
-                      {"context_world_revision", response.proposal.worldRevision},
-                      {"context_npc_state_version", response.proposal.npcStateVersion}});
+        const auto event = addEvent(
+            channel->second.eventType, request.npcId, target, response.dialogue,
+            Json{{"turn_id", request.turnId}, {"action_id", ""}, {"trigger", request.trigger},
+                 {"speech_act", context.speechAct}, {"world_action_requested", false},
+                 {"process_status", "conversation_only"}, {"provider", result.provider},
+                 {"context_world_revision", response.proposal.worldRevision},
+                 {"context_npc_state_version", response.proposal.npcStateVersion}});
         result.accepted = true;
         result.intent = response.proposal.intent;
         result.motivation = response.proposal.rationale;
         result.dialogue = response.dialogue;
-        result.event = state_.events.back();
+        result.event = event;
         syncNpcEntityState();
         return result;
     }
@@ -1800,23 +1814,25 @@ DialogueTurn WorldService::commitTurn(const TurnRequest& request, ProviderRespon
                                          state_.now, 1.0});
     const auto target = channel->second.eventTarget == "player" ? kPlayerId :
                         channel->second.eventTarget == "self" ? "self" : channel->second.eventTarget;
-    addEvent(channel->second.eventType, request.npcId, target, response.dialogue,
-             Json{{"turn_id", request.turnId}, {"process_id", processId}, {"action_id", response.proposal.actionId},
-                  {"trigger", request.trigger}, {"duration_minutes", candidate->durationMinutes},
-                  {"process_status", candidate->durationMinutes > 0 ? "running" : "completed"},
-                  {"intent", response.proposal.intent}, {"motivation", response.proposal.rationale},
-                  {"expected_outcome", response.proposal.expectedOutcome},
-                  {"cited_stimulus_ids", response.proposal.citedStimulusIds},
-                  {"tradeoffs", response.proposal.tradeoffs},
-                  {"expected_relief", response.proposal.expectedRelief},
-                  {"confidence", response.proposal.confidence}, {"provider", result.provider},
-                  {"context_world_revision", response.proposal.worldRevision},
-                  {"context_npc_state_version", response.proposal.npcStateVersion}});
+    const auto event = addEvent(
+        channel->second.eventType, request.npcId, target, response.dialogue,
+        Json{{"turn_id", request.turnId}, {"process_id", processId},
+             {"action_id", response.proposal.actionId}, {"trigger", request.trigger},
+             {"duration_minutes", candidate->durationMinutes},
+             {"process_status", candidate->durationMinutes > 0 ? "running" : "completed"},
+             {"intent", response.proposal.intent}, {"motivation", response.proposal.rationale},
+             {"expected_outcome", response.proposal.expectedOutcome},
+             {"cited_stimulus_ids", response.proposal.citedStimulusIds},
+             {"tradeoffs", response.proposal.tradeoffs},
+             {"expected_relief", response.proposal.expectedRelief},
+             {"confidence", response.proposal.confidence}, {"provider", result.provider},
+             {"context_world_revision", response.proposal.worldRevision},
+             {"context_npc_state_version", response.proposal.npcStateVersion}});
     result.actionId = response.proposal.actionId;
     result.intent = response.proposal.intent;
     result.motivation = response.proposal.rationale;
     result.dialogue = response.dialogue;
-    result.event = state_.events.back();
+    result.event = event;
     syncNpcEntityState();
     return result;
 }
@@ -2331,8 +2347,8 @@ void WorldService::expireStimuli() {
     }
 }
 
-void WorldService::addEvent(std::string type, std::string actor, std::string target,
-                            std::string detail, Json data) {
+WorldEvent WorldService::addEvent(std::string type, std::string actor, std::string target,
+                                  std::string detail, Json data) {
     ++state_.revision;
     state_.events.push_back(WorldEvent{1, state_.events.size() + 1, state_.now, std::move(type), std::move(actor),
                                        std::move(target), std::move(detail), state_.revision, std::move(data)});
@@ -2345,6 +2361,7 @@ void WorldService::addEvent(std::string type, std::string actor, std::string tar
         eventBus_.publish(committed);
         eventBus_.dispatch();
     }
+    return committed;
 }
 
 Json WorldService::snapshotJson() const { return worldStateToJson(state_); }

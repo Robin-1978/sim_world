@@ -179,8 +179,8 @@ private:
     void rollbackTransaction();
     void rebuildEntityRegistry();
     void syncNpcEntityState();
-    void addEvent(std::string type, std::string actor, std::string target,
-                  std::string detail, Json data = Json::object());
+    WorldEvent addEvent(std::string type, std::string actor, std::string target,
+                        std::string detail, Json data = Json::object());
     void projectStimuli(const WorldEvent& event);
     void expireStimuli();
     void processAutonomousTurns(const std::set<std::string>& dueNpcIds);

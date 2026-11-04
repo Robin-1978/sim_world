@@ -29,6 +29,23 @@ BehaviorNodeContent behaviorNodeFromJson(const Json& value) {
     return node;
 }
 
+EvolutionValidation validateBehaviorRecipeReferences(const BehaviorNodeContent& node,
+                                                      const WorldContentPack& content) {
+    if (node.type == "condition" && !content.conditions.contains(node.name)) {
+        return {false, "unknown_condition_reference",
+                "Behavior condition '" + node.name + "' is not registered by the active content."};
+    }
+    if (node.type == "meta_action" && !content.metaActions.contains(node.name)) {
+        return {false, "unknown_meta_action_reference",
+                "Behavior meta-action '" + node.name + "' is not registered by the active content."};
+    }
+    for (const auto& child : node.children) {
+        const auto result = validateBehaviorRecipeReferences(child, content);
+        if (!result.valid) return result;
+    }
+    return {true, "ok", "Behavior recipe references resolve against the active content."};
+}
+
 bool hasNpc(const WorldContentPack& content, const std::string& id) {
     return std::any_of(content.npcs.begin(), content.npcs.end(), [&id](const auto& npc) {
         return npc.definition.id == id;
@@ -68,6 +85,8 @@ EvolutionValidation applyOperations(WorldContentPack& content, const EvolutionPr
             recipe.interruptSalienceThreshold = operation.value("interrupt_salience_threshold", 1.0);
             recipe.root = behaviorNodeFromJson(operation.at("root"));
             BehaviorRecipeRuntime::validate(recipe);
+            const auto references = validateBehaviorRecipeReferences(recipe.root, content);
+            if (!references.valid) return references;
             content.behaviorRecipes.push_back(std::move(recipe));
         } else {
             return {false, "overlay_operation_unsupported", "This operation is not implemented by the declarative overlay engine."};
@@ -176,6 +195,22 @@ EvolutionValidation EvolutionManager::validate(const EvolutionProposal& proposal
         }
         if (type == "create_entity_archetype" && operation.value("kind", "").empty()) {
             return {false, "archetype_kind_missing", "An entity archetype needs a kind."};
+        }
+        if (type == "register_behavior_recipe") {
+            try {
+                if (!operation.contains("root") || !operation.at("root").is_object()) {
+                    return {false, "behavior_recipe_root_missing", "A behavior recipe needs an object root node."};
+                }
+                BehaviorRecipeContent recipe;
+                recipe.id = operation.at("id").get<std::string>();
+                recipe.planId = operation.value("plan_id", recipe.id);
+                recipe.root = behaviorNodeFromJson(operation.at("root"));
+                BehaviorRecipeRuntime::validate(recipe);
+                const auto references = validateBehaviorRecipeReferences(recipe.root, content);
+                if (!references.valid) return references;
+            } catch (const std::exception& error) {
+                return {false, "invalid_behavior_recipe", error.what()};
+            }
         }
     }
     return {true, "ok", "Proposal is structurally valid and ready for sandbox approval."};

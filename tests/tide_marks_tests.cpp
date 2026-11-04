@@ -737,6 +737,27 @@ void movement_operator_obeys_authored_topology() {
            "movement rejects an unknown destination");
     expect(!service.moveNpc("mira", "granary", "eve", "move-unauthorized").accepted,
            "movement rejects an unrelated actor");
+
+    const auto beforeLocation = service.state().npcs.at("mira").location;
+    const auto moveEventsBeforeBlock = std::count_if(
+        service.state().events.begin(), service.state().events.end(), [](const auto& event) {
+            return event.type == "entity.moved";
+        });
+    expect(service.setLinkState("granary_square", false, false, "close-granary-square").accepted &&
+               service.setLinkState("archive_square", false, false, "close-archive-square").accepted,
+           "topology links can be closed through the runtime boundary");
+    const auto blockedByTopology = service.moveNpc("mira", "village_square", "mira", "move-blocked");
+    expect(!blockedByTopology.accepted && blockedByTopology.code == "no_route" &&
+               service.state().npcs.at("mira").location == beforeLocation &&
+               std::count_if(service.state().events.begin(), service.state().events.end(),
+                             [](const auto& event) { return event.type == "entity.moved"; }) ==
+                   moveEventsBeforeBlock,
+           "movement cannot cross a fully closed authored topology and emits no move fact");
+    expect(service.setLinkState("granary_square", true, false, "open-granary-square").accepted &&
+               service.setLinkState("archive_square", true, false, "open-archive-square").accepted,
+           "closed topology links can be restored without replacing the world");
+    expect(service.moveNpc("mira", "village_square", "mira", "move-reopened").accepted,
+           "restoring the authored topology makes the same route available again");
 }
 
 void conflict_and_security_operators_change_facts_then_stimuli() {
@@ -755,9 +776,32 @@ void conflict_and_security_operators_change_facts_then_stimuli() {
     const auto repair = service.submit(Command{
         "repair-security-1", "security", "lorn", "", "", R"({"operation":"security.repair","target":"lorn","resource":"grain","amount":2,"integrity_restore":0.2})"});
     expect(repair.accepted, "repair consumes an authored resource and restores security facts");
+    const auto integrityAfterRepair = service.state().security.at("npc:lorn").integrity;
+    const auto sabotage = service.submit(Command{
+        "sabotage-1", "security", "mira", "", "", R"({"operation":"conflict.sabotage","target":"lorn","damage":0.1})"});
+    expect(sabotage.accepted && service.state().security.at("npc:lorn").integrity < integrityAfterRepair &&
+               sabotage.event && sabotage.event->type == "conflict.sabotage",
+           "sabotage is a distinct authored conflict operator with its own fact event");
+    const auto threatBefore = service.state().security.at("npc:lorn").threat;
+    const auto threat = service.submit(Command{
+        "threaten-1", "security", "mira", "", "", R"({"operation":"security.threaten","target":"lorn","threat_gain":0.2})"});
+    expect(threat.accepted && service.state().security.at("npc:lorn").threat > threatBefore &&
+               threat.event && threat.event->type == "security.threaten",
+           "threaten raises target threat without pretending to change integrity");
+    const auto evacuate = service.submit(Command{
+        "evacuate-1", "security", "lorn", "", "", R"({"operation":"security.evacuate","target":"lorn"})"});
+    expect(evacuate.accepted && service.state().security.at("npc:lorn").evacuated &&
+               evacuate.event && evacuate.event->type == "security.evacuate",
+           "evacuate changes the target's safety fact and emits an auditable event");
     const auto restored = WorldService::fromSnapshot(service.snapshotJson());
     expect(restored.state().security.at("npc:lorn").integrity == service.state().security.at("npc:lorn").integrity,
            "security facts survive snapshot restore");
+    expect(restored.state().security.at("npc:lorn").evacuated &&
+               std::any_of(restored.state().events.begin(), restored.state().events.end(), [](const auto& event) {
+                   return event.type == "conflict.sabotage" || event.type == "security.threaten" ||
+                          event.type == "security.evacuate";
+               }),
+           "security branch facts and their history survive snapshot restore");
 }
 
 void knowledge_and_experience_keep_provenance() {
@@ -844,6 +888,12 @@ void extended_meta_actions_execute_from_content_recipes() {
     addAction("test_production", "production.execute",
               Json{{"inputs", Json{{"grain", 5}}}, {"outputs", Json{{"boat_integrity", 3}}}},
               "test production");
+    addAction("test_production_insufficient", "production.execute",
+              Json{{"inputs", Json{{"grain", 1000}}}, {"outputs", Json{{"boat_integrity", 1}}}},
+              "demand exceeds supply");
+    addAction("test_production_capacity", "production.execute",
+              Json{{"inputs", Json{{"grain", 1}}}, {"outputs", Json{{"boat_integrity", 1000}}}},
+              "bin overflow");
 
     auto service = WorldService::fromContent(content);
     expect(service.converse("mira", "please test transfer", "meta-transfer").accepted &&
@@ -873,6 +923,27 @@ void extended_meta_actions_execute_from_content_recipes() {
                service.state().resources.at("grain").amount == grainBefore - 5 &&
                service.state().resources.at("boat_integrity").amount == integrityBefore + 3,
            "a content recipe can execute a production input/output transition atomically");
+    const auto failedInputGrain = service.state().resources.at("grain").amount;
+    const auto failedInputIntegrity = service.state().resources.at("boat_integrity").amount;
+    const auto productionEventsBeforeFailure = std::count_if(
+        service.state().events.begin(), service.state().events.end(), [](const auto& event) {
+            return event.type == "production.executed";
+        });
+    const auto insufficientProduction =
+        service.converse("mira", "please demand exceeds supply", "meta-production-insufficient");
+    expect(!insufficientProduction.accepted &&
+               service.state().resources.at("grain").amount == failedInputGrain &&
+               service.state().resources.at("boat_integrity").amount == failedInputIntegrity &&
+               std::count_if(service.state().events.begin(), service.state().events.end(), [](const auto& event) {
+                   return event.type == "production.executed";
+               }) == productionEventsBeforeFailure,
+           "production rejects insufficient inputs atomically without facts or events");
+    const auto capacityProduction =
+        service.converse("mira", "please bin overflow", "meta-production-capacity");
+    expect(!capacityProduction.accepted &&
+               service.state().resources.at("grain").amount == failedInputGrain &&
+               service.state().resources.at("boat_integrity").amount == failedInputIntegrity,
+           "production rejects output overflow atomically without consuming inputs");
     for (const auto& type : {"resource.transferred", "entity.moved", "conflict.attack", "promise.created",
                              "promise.accepted", "knowledge.asserted", "experience.recorded",
                              "production.executed"}) {
@@ -1166,7 +1237,8 @@ void evolution_proposals_are_governed() {
         "proposal.recipe.1", "declarative_capability", "llm", service.content().contentVersion,
         service.state().revision,
         Json::array({Json{{"operation", "register_behavior_recipe"}, {"id", "assist_neighbor"},
-                         {"meta_actions", Json::array({"relieve_need"})}}})};
+                         {"root", Json{{"type", "meta_action"}, {"id", "assist"},
+                                       {"name", "relieve_need"}}}}})};
     const auto valid = EvolutionManager::validate(proposal, service.content(), service.state().revision);
     expect(valid.valid, "declarative evolution proposal passes structural validation");
     proposal.status = EvolutionProposalStatus::Validated;
@@ -1185,6 +1257,44 @@ void evolution_proposals_are_governed() {
     expect(EvolutionManager::validate(stale, service.content(), service.state().revision).code ==
                "revision_conflict",
            "evolution proposals cannot silently bind to a different world revision");
+
+    EvolutionProposal unknownAction{
+        "proposal.recipe.unknown_action", "declarative_capability", "llm", service.content().contentVersion,
+        service.state().revision,
+        Json::array({Json{{"operation", "register_behavior_recipe"}, {"id", "invalid_action_recipe"},
+                         {"root", Json{{"type", "meta_action"}, {"id", "action"},
+                                       {"name", "not_a_registered_meta_action"}}}}})};
+    const auto unknownActionValidation =
+        EvolutionManager::validate(unknownAction, service.content(), service.state().revision);
+    expect(!unknownActionValidation.valid && unknownActionValidation.code == "unknown_meta_action_reference",
+           "overlay recipes cannot invoke meta-actions absent from the active content registry");
+    const auto unknownActionSandbox = EvolutionManager::sandbox(unknownAction, service);
+    expect(!unknownActionSandbox.passed && unknownActionSandbox.code == "unknown_meta_action_reference",
+           "the sandbox independently rejects unresolved overlay meta-actions");
+
+    EvolutionProposal unknownCondition{
+        "proposal.recipe.unknown_condition", "declarative_capability", "llm", service.content().contentVersion,
+        service.state().revision,
+        Json::array({Json{{"operation", "register_behavior_recipe"}, {"id", "invalid_condition_recipe"},
+                         {"root", Json{{"type", "condition"}, {"id", "condition"},
+                                       {"name", "not_a_registered_condition"}}}}})};
+    expect(EvolutionManager::validate(unknownCondition, service.content(), service.state().revision).code ==
+               "unknown_condition_reference",
+           "overlay recipes cannot invoke conditions absent from the active content registry");
+
+    const Json duplicateRoot = Json{
+        {"type", "sequence"}, {"id", "root"},
+        {"children", Json::array({
+            Json{{"type", "condition"}, {"id", "duplicate"}, {"name", "has_inputs"}},
+            Json{{"type", "condition"}, {"id", "duplicate"}, {"name", "has_output_capacity"}}})}};
+    EvolutionProposal duplicateNode{
+        "proposal.recipe.duplicate_node", "declarative_capability", "llm", service.content().contentVersion,
+        service.state().revision,
+        Json::array({Json{{"operation", "register_behavior_recipe"}, {"id", "duplicate_node_recipe"},
+                         {"root", duplicateRoot}}})};
+    expect(EvolutionManager::validate(duplicateNode, service.content(), service.state().revision).code ==
+               "invalid_behavior_recipe",
+           "overlay recipes reject duplicate behavior node identities");
 }
 
 void evolution_sandbox_isolated_and_versioned() {
