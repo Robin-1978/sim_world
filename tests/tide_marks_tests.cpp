@@ -218,6 +218,29 @@ void async_turn_queue_does_not_commit_expired_results() {
     }
 }
 
+void async_turn_queue_commits_results_with_current_context() {
+    auto content = ContentPackLoader::load(ContentPackLoader::defaultRoot());
+    content.npcDeliberation.minStimulusSalience = 0.0;
+    content.npcDeliberation.minDrivePressure = 0.0;
+    auto provider = std::make_unique<DelayedProvider>(std::chrono::milliseconds(40));
+    auto service = WorldService::fromContent(content, std::move(provider));
+
+    service.advanceMinutes(60);
+    expect(service.pendingAsyncTurns() > 0, "autonomous decisions are queued without blocking the world boundary");
+    std::this_thread::sleep_for(std::chrono::milliseconds(250));
+    const auto consumed = service.pumpAsyncTurns();
+    expect(consumed > 0, "completed autonomous decisions are consumed on the main thread");
+    expect(std::any_of(service.state().events.begin(), service.state().events.end(), [](const auto& event) {
+               return event.type == "npc.intent";
+           }),
+           "a current asynchronous proposal commits through the normal intent path");
+    expect(std::any_of(service.state().npcs.begin(), service.state().npcs.end(), [](const auto& entry) {
+               return entry.second.activity.status == ActivityStatus::Active ||
+                      entry.second.activity.status == ActivityStatus::Completed;
+           }),
+           "an accepted autonomous proposal creates a persistent NPC activity");
+}
+
 void high_salience_stimulus_interrupts_and_releases_reservations() {
     int providerCalls = 0;
     auto content = ContentPackLoader::load(ContentPackLoader::defaultRoot());
@@ -1294,6 +1317,8 @@ int main() {
     run("accepted_intent_runs_without_reasking_llm", accepted_intent_runs_without_reasking_llm);
     run("autonomous_deliberation_is_triggered_not_per_tick", autonomous_deliberation_is_triggered_not_per_tick);
     run("async_turn_queue_does_not_commit_expired_results", async_turn_queue_does_not_commit_expired_results);
+    run("async_turn_queue_commits_results_with_current_context",
+        async_turn_queue_commits_results_with_current_context);
     run("high_salience_stimulus_interrupts_and_releases_reservations", high_salience_stimulus_interrupts_and_releases_reservations);
     run("reservation_policy_is_authored_per_process", reservation_policy_is_authored_per_process);
     run("behavior_tree_supports_sequence_timeout_and_interrupt", behavior_tree_supports_sequence_timeout_and_interrupt);
