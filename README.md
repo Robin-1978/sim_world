@@ -10,11 +10,11 @@ Tide Marks is a rule-driven world that keeps living without the player at its ce
 cmake --preset default
 cmake --build --preset default
 ctest --test-dir build --output-on-failure
-./build/tide_marks_headless --days 2 --replay /tmp/tide_marks-village.jsonl
-./build/tide_marks_headless --days 2 --dump-events
+./build/tide_marks_headless --days 2 --provider mock --replay /tmp/tide_marks-village.jsonl
+./build/tide_marks_headless --days 2 --provider mock --dump-events
 ```
 
-This prints the starting state, a dialogue turn, two days of NPC life, and the replay summary. It does not require a display or a running model server. `./build/tide_marks_client` is a display-free scene inspector.
+The explicit `mock` provider makes this command deterministic and offline. It prints the starting state, a dialogue turn, two days of NPC life, and the replay summary. It does not require a display or a running model server. `./build/tide_marks_client` is a display-free scene inspector.
 
 The headless entry point reads the world identity, first dialogue participant, content version, and opening state from the selected pack. Load a different instance, including a genuinely different fiction, with:
 
@@ -96,6 +96,19 @@ cmake --build build -j2
 Player dialogue uses two model stages: semantic utterance understanding with a bounded thinking budget, then a fast answer/action decision. Autonomous reappraisal, which weighs drives and external stimuli without a user turn, uses a short reasoning budget.
 
 The LLM interprets player text and selects authored actions. Runtime validates every proposal and owns all facts. If the LLM is unavailable or returns invalid JSON, a player conversation fails closed without an event or world change; Runtime never guesses intent from keywords.
+
+To exercise governed Level 1 and Level 2 evolution with the real model, run:
+
+```bash
+./build/tide_marks_headless --profile data/intelligence-profile.json \
+  --provider profile --days 0 --evolve level1
+./build/tide_marks_headless --profile data/intelligence-profile.json \
+  --provider profile --days 0 --evolve level2
+```
+
+These commands print the LLM proposal only. Runtime validation, sandbox execution, independent approval, and versioned overlay activation are separate steps; requesting a proposal never mutates the source world. For deterministic schema and governance tests, use the repository's CTest suite, which injects `MockProvider` explicitly.
+
+An explicit durable checkpoint can be requested from the C++ API with `WorldService::saveDurableCommit(path)`. JSON remains the default inspectable artifact; when SQLite is discovered at configure time, `SqlitePersistence` stores the checkpoint transactionally. This checkpoint operation is explicit and does not write the database on every simulation minute.
 
 The design and continuation checkpoint are in [`docs/design.md`](docs/design.md) and [`docs/release-continuation-plan.md`](docs/release-continuation-plan.md).
 
