@@ -3,6 +3,7 @@
 #include "core/types.hpp"
 #include "npc/conversation.hpp"
 #include <memory>
+#include <mutex>
 
 namespace tide_marks {
 struct ActionCandidate {
@@ -219,6 +220,7 @@ public:
 
 private:
     LlamaCppConfig config_;
+    mutable std::mutex callMutex_;
 };
 
 

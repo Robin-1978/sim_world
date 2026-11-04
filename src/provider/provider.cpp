@@ -159,6 +159,7 @@ ProviderResponse LlamaCppProvider::decide(const DecisionContext& context, const 
 
 ProviderResponse LlamaCppProvider::decide(const DecisionContext& context, const std::string& playerInput,
                                           const Json& validationFeedback) {
+    std::lock_guard lock(callMutex_);
     Json candidates = Json::array();
     for (const auto& candidate : context.candidates) {
         candidates.push_back(Json{{"action_id", candidate.actionId}, {"plan_id", candidate.planId},
@@ -407,6 +408,7 @@ ProviderResponse LlamaCppProvider::proposeEvolution(const Json& context,
 ProviderResponse LlamaCppProvider::proposeEvolution(const Json& context,
                                                      const std::string& evolutionLevel,
                                                      const Json& validationFeedback) {
+    std::lock_guard lock(callMutex_);
     const auto configuredPolicy = config_.decisionPolicies.find("evolution_proposal");
     if (configuredPolicy == config_.decisionPolicies.end()) {
         return ProviderResponse{false, {}, {}, "missing_provider_policy:evolution_proposal", Json::object()};

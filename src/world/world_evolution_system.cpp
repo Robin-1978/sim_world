@@ -194,8 +194,12 @@ std::size_t WorldEvolutionSystem::pumpAsyncProposals() {
             data["provider"] = queued.provider;
             world_.addEvent(type, kWorldActor, queued.request.evolutionLevel, detail, std::move(data));
         };
+        // Evolution is a proposal, not an intent that immediately starts an
+        // activity. Unrelated committed facts may arrive while the model is
+        // thinking; the proposal is rebased through current validation and
+        // sandbox below. Content changes and the explicit game-time deadline
+        // still invalidate the captured context.
         const bool expired = world_.state_.now.minute > queued.request.deadline.minute ||
-                             world_.state_.revision != queued.request.baseWorldRevision ||
                              world_.content_.contentVersion != queued.request.baseContentVersion;
         if (expired) {
             audit("evolution.proposal_expired", "An automatic evolution proposal arrived after its captured context expired",
