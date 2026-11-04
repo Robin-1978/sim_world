@@ -1230,11 +1230,15 @@ void extended_meta_actions_execute_from_content_recipes() {
               Json{{"inputs", Json{{"grain", 1000}}}, {"outputs", Json{{"boat_integrity", 1}}}});
     addAction("test_production_capacity", "production.execute",
               Json{{"inputs", Json{{"grain", 1}}}, {"outputs", Json{{"boat_integrity", 1000}}}});
+    addAction("test_exchange_create", "exchange.create",
+              Json{{"proposer", "self"}, {"counterparty", "lorn"},
+                   {"offered", Json{{"grain", 1}}}, {"requested", Json{{"boat_integrity", 1}}},
+                   {"due_minutes", 30}});
 
     auto provider = std::make_unique<ScriptedActionProvider>(std::vector<std::string>{
         "test_transfer", "test_move", "test_attack", "test_promise", "test_promise_accept",
         "test_knowledge", "test_experience", "test_production", "test_production_insufficient",
-        "test_production_capacity"});
+        "test_production_capacity", "test_exchange_create"});
     auto service = WorldService::fromContent(content, std::move(provider));
     expect(service.converse("mira", "please test transfer", "meta-transfer").accepted &&
                service.state().inventories.at("npc:mira").at("grain") == 2,
@@ -1284,13 +1288,64 @@ void extended_meta_actions_execute_from_content_recipes() {
                service.state().resources.at("grain").amount == failedInputGrain &&
                service.state().resources.at("boat_integrity").amount == failedInputIntegrity,
            "production rejects output overflow atomically without consuming inputs");
+    expect(service.converse("mira", "please propose an exchange", "meta-exchange").accepted &&
+               service.state().exchangeContracts.contains("exchange-1") &&
+               service.state().exchangeContracts.at("exchange-1").status ==
+                   ExchangeContractStatus::Proposed,
+           "a content recipe can create a durable exchange proposal without moving terms");
     for (const auto& type : {"resource.transferred", "entity.moved", "conflict.attack", "promise.created",
                              "promise.accepted", "knowledge.asserted", "experience.recorded",
-                             "production.executed"}) {
+                             "production.executed", "exchange.proposed"}) {
         expect(std::any_of(service.state().events.begin(), service.state().events.end(), [&type](const auto& event) {
                    return event.type == type;
                }),
                std::string("the content recipe emits its auditable event: ") + type);
+    }
+}
+
+void exchange_meta_actions_execute_from_scheduled_activity() {
+    auto content = ContentPackLoader::load(TIDE_MARKS_TEST_DATA_DIR "/port-pack");
+    content.metaActions["scheduled_exchange_create"] =
+        MetaActionDefinition{"scheduled_exchange_create", "exchange", "scheduled_exchange_create",
+                             "exchange.create", {}};
+    content.metaActions["scheduled_exchange_accept"] =
+        MetaActionDefinition{"scheduled_exchange_accept", "exchange", "scheduled_exchange_accept",
+                             "exchange.transition", {}};
+    content.metaActions["scheduled_exchange_settle"] =
+        MetaActionDefinition{"scheduled_exchange_settle", "exchange", "scheduled_exchange_settle",
+                             "exchange.settle", {}};
+    const auto addActivity = [&content](std::string id, std::string actor, std::string metaAction,
+                                        Json args) {
+        EffectContent effect;
+        effect.operation = "meta_action";
+        effect.metaActionId = std::move(metaAction);
+        effect.args = std::move(args);
+        content.activities.push_back(ActivityContent{std::move(id), "hour", 10, std::move(actor),
+                                                     "scheduled_exchange", "", 0,
+                                                     "scheduled.exchange.activity",
+                                                     "A scheduled exchange activity transition",
+                                                     {std::move(effect)}});
+    };
+    addActivity("schedule_exchange_create", "sable", "scheduled_exchange_create",
+                Json{{"proposer", "self"}, {"counterparty", "rhea"},
+                     {"offered", Json{{"energy", 1}}}, {"requested", Json{{"coolant", 1}}},
+                     {"due_minutes", 30}});
+    addActivity("schedule_exchange_accept", "rhea", "scheduled_exchange_accept",
+                Json{{"contract_id", "exchange-1"}, {"status", "accepted"},
+                     {"reason", "scheduled acceptance"}});
+    addActivity("schedule_exchange_settle", "rhea", "scheduled_exchange_settle",
+                Json{{"contract_id", "exchange-1"}});
+
+    auto service = WorldService::fromContent(content, std::make_unique<MockProvider>());
+    service.advanceMinutes(60);
+    expect(service.state().exchangeContracts.contains("exchange-1") &&
+               service.state().exchangeContracts.at("exchange-1").status ==
+                   ExchangeContractStatus::Settled,
+           "scheduled activities can create, accept and settle a configured exchange");
+    for (const auto& type : {"exchange.proposed", "exchange.accepted", "exchange.settled"}) {
+        expect(std::any_of(service.state().events.begin(), service.state().events.end(),
+                           [&type](const auto& event) { return event.type == type; }),
+               std::string("scheduled exchange activity emits ") + type);
     }
 }
 
@@ -1868,6 +1923,8 @@ int main() {
     run("knowledge_and_experience_keep_provenance", knowledge_and_experience_keep_provenance);
     run("successful_actions_automatically_create_experience", successful_actions_automatically_create_experience);
     run("extended_meta_actions_execute_from_content_recipes", extended_meta_actions_execute_from_content_recipes);
+    run("exchange_meta_actions_execute_from_scheduled_activity",
+        exchange_meta_actions_execute_from_scheduled_activity);
     run("runtime_loads_a_world_without_village_identifiers", runtime_loads_a_world_without_village_identifiers);
     run("social_groups_trade_and_relationships_are_shared_facts", social_groups_trade_and_relationships_are_shared_facts);
     run("port_slice_is_a_replaceable_social_instance", port_slice_is_a_replaceable_social_instance);
