@@ -30,6 +30,7 @@ struct EvolutionProposal;
 struct EvolutionSandboxResult;
 class ContractSystem;
 class NpcSimulationSystem;
+class BehaviorExecutionSystem;
 struct Command {
     std::string turnId;
     std::string kind;
@@ -195,6 +196,7 @@ public:
 private:
     friend class ContractSystem;
     friend class NpcSimulationSystem;
+    friend class BehaviorExecutionSystem;
     class TransactionScope {
     public:
         explicit TransactionScope(WorldService& service);
@@ -263,12 +265,12 @@ private:
                                            const std::map<std::string, int>* reservedResources,
                                            const Json* parameters = nullptr);
     [[nodiscard]] bool evaluateBehaviorCondition(const std::string& npcId,
-                                                 const BehaviorNodeContent& node) const;
+                                                 const BehaviorNodeContent& node);
     [[nodiscard]] bool applyMetaAction(const std::string& npcId, const std::string& actionId,
                                        const BehaviorNodeContent& node,
                                        const std::map<std::string, int>* reservedResources,
                                        const Json* parameters = nullptr);
-    [[nodiscard]] const BehaviorRecipeContent* recipeForAction(const std::string& actionId) const;
+    [[nodiscard]] const BehaviorRecipeContent* recipeForAction(const std::string& actionId);
     void tickProcesses(const std::set<std::string>& dueNpcIds);
     void resumeSuspendedProcesses(const std::set<std::string>& dueNpcIds);
     void completeProcess(const std::string& npcId, ProcessExecution process);

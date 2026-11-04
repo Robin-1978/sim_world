@@ -97,6 +97,7 @@ add_library(tide_marks_core
     src/world/transaction_manager.cpp
     src/world/contract_system.cpp
     src/world/npc_simulation_system.cpp
+    src/world/behavior_execution_system.cpp
     src/world/world_service.cpp
     src/world/world_state_json.cpp
 )

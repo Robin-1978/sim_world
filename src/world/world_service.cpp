@@ -1,6 +1,7 @@
 #include "world/world_service.hpp"
 #include "world/contract_system.hpp"
 #include "world/npc_simulation_system.hpp"
+#include "world/behavior_execution_system.hpp"
 #include "world/resource_system.hpp"
 #include "world/social_system.hpp"
 #include "world/meta_action_executor.hpp"
@@ -1776,230 +1777,34 @@ const NpcContent* WorldService::authoredNpc(const std::string& npcId) const {
     return found == content_.npcs.end() ? nullptr : &*found;
 }
 
-const BehaviorRecipeContent* WorldService::recipeForAction(const std::string& actionId) const {
-    const auto found = std::find_if(content_.behaviorRecipes.begin(), content_.behaviorRecipes.end(),
-                                    [&actionId](const auto& recipe) { return recipe.id == actionId; });
-    return found == content_.behaviorRecipes.end() ? nullptr : &*found;
+const BehaviorRecipeContent* WorldService::recipeForAction(const std::string& actionId) {
+    return BehaviorExecutionSystem(*this).recipeForAction(actionId);
 }
 
 bool WorldService::evaluateBehaviorCondition(const std::string& npcId,
-                                             const BehaviorNodeContent& node) const {
-    const auto definition = content_.conditions.find(node.name);
-    if (definition == content_.conditions.end()) return false;
-    Json args = definition->second.args;
-    for (auto it = node.args.begin(); it != node.args.end(); ++it) args[it.key()] = it.value();
-    const auto& operation = definition->second.operation;
-    if (operation == "always") return true;
-    if (operation == "resource.available") {
-        return availableResourceValue(args.value("resource", "")) >= args.value("minimum", 1);
-    }
-    if (operation == "resource.below") {
-        return resourceValue(args.value("resource", "")) < args.value("below", 1);
-    }
-    if (operation == "link.traversable" || operation == "link.locked") {
-        const auto link = state_.links.find(args.value("link", ""));
-        const bool traversable = link == state_.links.end() ||
-                                 (link->second.traversable && !link->second.locked);
-        return operation == "link.traversable" ? traversable : !traversable;
-    }
-    if (operation == "need.critical") {
-        const auto npc = state_.npcs.find(npcId);
-        const auto* authored = authoredNpc(npcId);
-        if (npc == state_.npcs.end() || authored == nullptr) return false;
-        const auto needId = args.value("need", "");
-        const auto need = std::find_if(authored->needs.begin(), authored->needs.end(),
-                                       [&needId](const auto& item) { return item.id == needId; });
-        const auto stateNeed = npc->second.needs.find(needId);
-        return need != authored->needs.end() && stateNeed != npc->second.needs.end() &&
-               stateNeed->second.deficit >= need->criticalThreshold;
-    }
-    if (operation == "npc.at") {
-        const auto npc = state_.npcs.find(npcId);
-        return npc != state_.npcs.end() && npc->second.location == args.value("location", "");
-    }
-    if (operation == "time.between") {
-        const int minuteOfDay = state_.now.hour() * 60 + state_.now.minuteOfHour();
-        return minuteOfDay >= args.value("from_minute", 0) && minuteOfDay < args.value("to_minute", 0);
-    }
-    return false;
+                                             const BehaviorNodeContent& node) {
+    return BehaviorExecutionSystem(*this).evaluateBehaviorCondition(npcId, node);
 }
 
 bool WorldService::applyMetaAction(const std::string& npcId, const std::string& actionId,
                                    const BehaviorNodeContent& node,
                                    const std::map<std::string, int>* reservedResources,
                                    const Json* parameters) {
-    const auto definition = content_.metaActions.find(node.name);
-    if (definition == content_.metaActions.end()) return false;
-
-    MetaActionExecutor::Callbacks callbacks;
-    callbacks.emit = [this](const std::string& type, const std::string& actor,
-                            const std::string& target, const std::string& detail, Json data) {
-        addEvent(type, actor, target, detail, std::move(data));
-    };
-    callbacks.transfer = [this, &npcId, &actionId](const Json& args) {
-        return transferResource(args.value("source", npcId), args.value("target", kWorldActor),
-                                args.value("resource", ""), args.value("amount", 0), npcId,
-                                "recipe:" + npcId + ":" + actionId).accepted;
-    };
-    callbacks.move = [this, &npcId, &actionId](const Json& args) {
-        return moveNpc(npcId, args.value("destination", ""), npcId,
-                       "recipe:" + npcId + ":" + actionId + ":movement").accepted;
-    };
-    callbacks.security = [this, &npcId, &actionId](const Json& args) {
-        return applySecurityOperator(args.value("operation", ""), npcId,
-                                     args.value("target", "self"), args.value("args", Json::object()),
-                                     "recipe:" + npcId + ":" + actionId + ":security").accepted;
-    };
-    callbacks.knownFact = [this, &npcId, &actionId](const Json& args) {
-        return assertKnownFact(npcId, args.value("subject", ""), args.value("predicate", ""),
-                               args.value("value", ""), args.value("source_sequence", 0ULL),
-                               args.value("scope", "direct"), args.value("confidence", 0.0), npcId,
-                               "recipe:" + npcId + ":" + actionId + ":knowledge").accepted;
-    };
-    callbacks.experience = [this, &npcId, &actionId](const Json& args) {
-        return recordExperience(npcId, args.value("domain", ""), args.value("trigger", ""),
-                                args.value("action", actionId), args.value("outcome", ""),
-                                args.value("source_sequence", 0ULL), args.value("confidence", 0.0),
-                                args.value("personal", true), npcId,
-                                "recipe:" + npcId + ":" + actionId + ":experience").accepted;
-    };
-    callbacks.promiseCreate = [this, &npcId, &actionId](const Json& args) {
-        return createPromise(args.value("from", npcId), args.value("to", ""),
-                             args.value("description", ""), args.value("due_days", 1),
-                             "recipe:" + npcId + ":" + actionId + ":promise").accepted;
-    };
-    callbacks.promiseTransition = [this, &npcId, &actionId](const Json& args) {
-        return decidePromise(args.value("promise_id", ""),
-                             promiseStatusFromString(args.value("status", "proposed")), npcId,
-                             "recipe:" + npcId + ":" + actionId + ":promise",
-                             args.value("detail", "")).accepted;
-    };
-    callbacks.trade = [this, &npcId, &actionId](const Json& args) {
-        return tradeResources(args.value("seller", npcId), args.value("buyer", ""),
-                              args.value("seller_resource", ""), args.value("seller_amount", 0),
-                              args.value("buyer_resource", ""), args.value("buyer_amount", 0), npcId,
-                              "recipe:" + npcId + ":" + actionId).accepted;
-    };
-    callbacks.exchangeCreate = [this, &npcId, &actionId](const Json& args) {
-        return proposeExchange(args.value("proposer", npcId), args.value("counterparty", ""),
-                                args.value("offered", std::map<std::string, int>{}),
-                                args.value("requested", std::map<std::string, int>{}),
-                                args.value("due_minutes", 0), npcId,
-                                "recipe:" + npcId + ":" + actionId + ":exchange").accepted;
-    };
-    callbacks.exchangeTransition = [this, &npcId, &actionId](const Json& args) {
-        return decideExchange(args.value("contract_id", ""),
-                              exchangeContractStatusFromString(args.value("status", "")), npcId,
-                              "recipe:" + npcId + ":" + actionId + ":exchange",
-                              args.value("reason", "")).accepted;
-    };
-    callbacks.exchangeSettle = [this, &npcId, &actionId](const Json& args) {
-        return settleExchange(args.value("contract_id", ""), npcId,
-                              "recipe:" + npcId + ":" + actionId + ":exchange").accepted;
-    };
-    callbacks.groupMetric = [this, &npcId, &actionId](const Json& args) {
-        return adjustGroupMetric(args.value("group", ""), args.value("metric", ""),
-                                 args.value("delta", 0.0), npcId,
-                                 "recipe:" + npcId + ":" + actionId,
-                                 args.value("reason", "")).accepted;
-    };
-    callbacks.groupMembership = [this, &npcId, &actionId](const Json& args) {
-        return setGroupMembership(args.value("group", ""), args.value("npc", npcId),
-                                  args.value("role", "member"), args.value("active", true), npcId,
-                                  "recipe:" + npcId + ":" + actionId).accepted;
-    };
-    callbacks.needRelief = [this, &npcId](const std::string& sourceAction) {
-        applyNeedRelief(npcId, sourceAction);
-    };
-    return MetaActionExecutor::execute(content_, state_, npcId, actionId, definition->second, node,
-                                       reservedResources, parameters, callbacks);
+    return BehaviorExecutionSystem(*this).applyMetaAction(npcId, actionId, node, reservedResources, parameters);
 }
 
 bool WorldService::applyActionEffects(const std::string& npcId, const std::string& actionId) {
-    return applyActionEffects(npcId, actionId, nullptr, nullptr);
+    return BehaviorExecutionSystem(*this).applyActionEffects(npcId, actionId);
 }
 
 bool WorldService::applyActionEffects(const std::string& npcId, const std::string& actionId,
                                       const std::map<std::string, int>* reservedResources,
                                       const Json* parameters) {
-    const auto* recipe = recipeForAction(actionId);
-    if (recipe == nullptr) return false;
-    const std::size_t eventCountBefore = state_.events.size();
-    // A recipe is one atomic transition. Its conditions and all meta-action
-    // effects either commit together or disappear together.
-    TransactionScope recipeTransaction(*this);
-    const auto result = BehaviorRecipeRuntime::run(
-        *recipe,
-        [this, &npcId](const BehaviorNodeContent& node) {
-            return evaluateBehaviorCondition(npcId, node);
-        },
-        [this, &npcId, &actionId, reservedResources, parameters](const BehaviorNodeContent& node) {
-            return applyMetaAction(npcId, actionId, node, reservedResources, parameters);
-        });
-    if (result.status != NodeStatus::Success) {
-        recipeTransaction.rollback();
-        return false;
-    }
-    // A successfully committed action is an episode. Record a bounded prior
-    // candidate from its own event trail, never from model prose.
-    const auto effectEvent = std::find_if(state_.events.rbegin(), state_.events.rend(),
-                                          [eventCountBefore](const auto& event) { return event.sequence > eventCountBefore; });
-    if (effectEvent != state_.events.rend()) {
-        auto npc = state_.npcs.find(npcId);
-        if (npc != state_.npcs.end()) {
-            bool changed = false;
-            const auto existing = std::find_if(npc->second.experiences.begin(), npc->second.experiences.end(),
-                                               [&actionId](const auto& experience) {
-                                                   return experience.action == actionId && experience.domain == "action";
-                                               });
-            if (existing == npc->second.experiences.end()) {
-                npc->second.experiences.push_back(Experience{
-                    "experience:" + npcId + ":" + actionId, "action", "observed_context", actionId,
-                    effectEvent->type, {effectEvent->sequence}, state_.now, state_.now, 0.5, true});
-                changed = true;
-            } else if (std::find(existing->sourceSequences.begin(), existing->sourceSequences.end(),
-                                 effectEvent->sequence) == existing->sourceSequences.end()) {
-                const double samples = static_cast<double>(existing->sourceSequences.size() + 1);
-                existing->confidence = std::clamp(existing->confidence + (1.0 - existing->confidence) / samples,
-                                                   0.0, 1.0);
-                existing->lastUsed = state_.now;
-                existing->sourceSequences.push_back(effectEvent->sequence);
-                changed = true;
-            }
-            if (changed) {
-                addEvent("experience.observed", npcId, npcId,
-                         "A committed action outcome became reusable NPC experience",
-                         Json{{"action_id", actionId}, {"source_sequence", effectEvent->sequence},
-                              {"source_type", effectEvent->type}, {"domain", "action"}});
-            }
-        }
-    }
-    return result.status == NodeStatus::Success;
+    return BehaviorExecutionSystem(*this).applyActionEffects(npcId, actionId, reservedResources, parameters);
 }
 
 void WorldService::applyNeedRelief(const std::string& npcId, const std::string& actionId) {
-    const auto* authored = authoredNpc(npcId);
-    const auto npc = state_.npcs.find(npcId);
-    if (authored == nullptr || npc == state_.npcs.end()) return;
-    const auto changes = DriveSystem::relieve(npc->second, authored->needs, actionId, state_.now,
-                                              content_.driveAdaptation);
-    for (const auto& change : changes) {
-        npc->second.needs.at(change.needId).lastReliefRevision = state_.revision + 1;
-        addEvent("need.relieved", npcId, actionId, "A committed action relieved a need",
-                 Json{{"need_id", change.needId}, {"action_id", actionId},
-                      {"before", change.before}, {"after", change.after},
-                      {"expected_relief", change.expectedRelief}, {"actual_relief", change.actualRelief},
-                      {"rule", "drive.committed_action"}, {"source_revision", state_.revision + 1}});
-        if (change.adapted) {
-            addEvent("drive.adapted", npcId, change.needId, "Predicted need relief was calibrated from its outcome",
-                     Json{{"need_id", change.needId}, {"action_id", actionId},
-                          {"expectation_before", change.expectationBefore},
-                          {"expectation_after", change.expectationAfter},
-                          {"actual_relief", change.actualRelief},
-                          {"adaptation_version", npc->second.needs.at(change.needId).adaptationVersion},
-                          {"rule", "drive.bounded_expectation_adaptation"}});
-        }
-    }
+    BehaviorExecutionSystem(*this).applyNeedRelief(npcId, actionId);
 }
 
 void WorldService::projectStimuli(const WorldEvent& event) {
