@@ -193,7 +193,7 @@ bool execute(WorldService& service, const std::string& line) {
             for (auto it = offered.begin(); it != offered.end(); ++it) offeredTerms[it.key()] = it.value().get<int>();
             for (auto it = requested.begin(); it != requested.end(); ++it) requestedTerms[it.key()] = it.value().get<int>();
             const auto result = service.proposeExchange(
-                from, to, std::move(offeredTerms), std::move(requestedTerms), minutes, "player",
+                from, to, std::move(offeredTerms), std::move(requestedTerms), minutes, kWorldActor,
                 "text-exchange-propose-" + std::to_string(service.state().events.size() + 1));
             std::cout << (result.accepted ? "created " + result.message : result.code + ": " + result.message) << "\n";
         } catch (const std::exception& error) {

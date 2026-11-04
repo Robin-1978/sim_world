@@ -1,0 +1,5 @@
+exchange sable rhea 30 {"energy":1} {"coolant":1}
+exchange-accept exchange-1 rhea
+exchange-settle exchange-1 rhea
+events 6
+quit

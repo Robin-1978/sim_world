@@ -142,6 +142,7 @@ cmake --build build -j2
 ctest --test-dir build --output-on-failure
 ./build/tide_marks_headless --days 2 --provider mock --dump-events
 ./build/tide_marks_text --script docs/examples/village-session.txt --provider mock
+./build/tide_marks_text --content-root tests/fixtures/port-pack --script tests/fixtures/port-pack/exchange-session.txt --provider mock
 ./build/tide_marks_headless --days 0 --profile data/intelligence-profile.json --provider profile
 ./build/tide_marks_headless --anomalies --days 0
 ./build/tide_marks_headless --content-root tests/fixtures/port-pack --experiment docs/examples/port-morale-scenario.json
