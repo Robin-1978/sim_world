@@ -2571,6 +2571,11 @@ void llm_proposes_level_one_and_level_two_evolution() {
     expect(providerRaw->observedLevel == "level1" &&
                providerRaw->observedContext.value("base_world_revision", 0ULL) == service.state().revision,
            "the Level 1 provider receives the current world revision and evidence context");
+    const auto& miraContext = providerRaw->observedContext.at("npcs").at("mira");
+    expect(miraContext.contains("memories") && miraContext.contains("knowledge") &&
+               miraContext.contains("experiences") && miraContext.contains("relationships") &&
+               miraContext.contains("stimuli") && miraContext.contains("activity"),
+           "evolution context includes bounded cognitive, social, external-drive, and activity evidence");
 
     const auto level2 = EvolutionManager::propose(service, "level2", "test_world_foundation");
     expect(level2.accepted && level2.proposal.evolutionLevel == "level2" &&
