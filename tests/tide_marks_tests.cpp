@@ -1342,6 +1342,26 @@ void persistence_adapter_receives_committed_representations() {
            "WorldService can export a committed Snapshot and Replay as one durable checkpoint");
 }
 
+void json_file_persistence_creates_run_directories() {
+    const auto root = std::filesystem::temp_directory_path() / "tide_marks_missing_run_parent";
+    std::filesystem::remove_all(root);
+    const auto snapshotPath = root / "instance-a" / "run-1" / "snapshot.json";
+    const auto durablePath = root / "instance-a" / "run-1" / "checkpoint.json";
+    JsonFilePersistence persistence;
+    const Json snapshot{{"world_revision", 2}, {"event_sequence", 1}, {"events", Json::array()}};
+    persistence.saveSnapshot(snapshotPath.string(), snapshot);
+    expect(std::filesystem::exists(snapshotPath),
+           "JSON persistence creates an external run directory before writing a snapshot");
+    std::ifstream input(snapshotPath);
+    Json restored;
+    input >> restored;
+    expect(restored == snapshot, "JSON persistence preserves the snapshot payload in a created run directory");
+    persistence.saveDurableCommit(durablePath.string(), snapshot, {Json{{"kind", "replay_header"}}});
+    expect(std::filesystem::exists(durablePath),
+           "JSON persistence creates the run directory for a durable checkpoint as well");
+    std::filesystem::remove_all(root);
+}
+
 void durable_checkpoint_policy_is_boundary_driven_and_opt_in() {
     auto persistence = std::make_unique<RecordingPersistence>();
     auto* persistenceRaw = persistence.get();
@@ -2717,6 +2737,7 @@ int main() {
     run("snapshot_and_replay_are_deterministic", snapshot_and_replay_are_deterministic);
     run("persistence_adapter_receives_committed_representations",
         persistence_adapter_receives_committed_representations);
+    run("json_file_persistence_creates_run_directories", json_file_persistence_creates_run_directories);
     run("durable_checkpoint_policy_is_boundary_driven_and_opt_in",
         durable_checkpoint_policy_is_boundary_driven_and_opt_in);
 #ifdef TIDE_MARKS_HAS_SQLITE

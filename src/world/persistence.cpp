@@ -7,6 +7,15 @@
 namespace tide_marks {
 
 void JsonFilePersistence::replaceFile(const std::string& path, const std::string& bytes) {
+    const auto parent = std::filesystem::path(path).parent_path();
+    if (!parent.empty()) {
+        std::error_code directoryError;
+        std::filesystem::create_directories(parent, directoryError);
+        if (directoryError) {
+            throw std::runtime_error("cannot create persistence directory: " + parent.string() + ": " +
+                                     directoryError.message());
+        }
+    }
     const std::string temporaryPath = path + ".tmp";
     std::ofstream output(temporaryPath, std::ios::trunc | std::ios::binary);
     if (!output) throw std::runtime_error("cannot write persistence file: " + path);

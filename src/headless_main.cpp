@@ -17,7 +17,8 @@ void usage(const char* program) {
               << " [--content-root PATH] [--days N] [--profile PATH]"
                  " [--provider mock|profile|llama_cpp] [--replay PATH] [--dump-events]"
                  " [--anomalies] [--experiment PATH] [--evolve level1|level2]"
-                 " [--wait-llm-ms N]\n";
+                 " [--wait-llm-ms N] [--durable-checkpoint PATH]"
+                 " [--checkpoint-every-minutes N|--checkpoint-daily]\n";
 }
 
 }  // namespace
@@ -31,6 +32,9 @@ int main(int argc, char** argv) {
     std::string providerName = "profile";
     std::string profilePath = defaultIntelligenceProfilePath();
     std::int64_t waitLlmMilliseconds = 0;
+    std::string durableCheckpointPath;
+    std::int64_t checkpointIntervalMinutes = 0;
+    bool checkpointDaily = false;
     bool dumpEvents = false;
     bool dumpAnomalies = false;
     for (int i = 1; i < argc; ++i) {
@@ -57,6 +61,12 @@ int main(int argc, char** argv) {
             profilePath = argv[++i];
         } else if (argument == "--wait-llm-ms" && i + 1 < argc) {
             waitLlmMilliseconds = std::max<std::int64_t>(0, std::atoll(argv[++i]));
+        } else if (argument == "--durable-checkpoint" && i + 1 < argc) {
+            durableCheckpointPath = argv[++i];
+        } else if (argument == "--checkpoint-every-minutes" && i + 1 < argc) {
+            checkpointIntervalMinutes = std::max<std::int64_t>(0, std::atoll(argv[++i]));
+        } else if (argument == "--checkpoint-daily") {
+            checkpointDaily = true;
         } else if (argument == "--dump-events") {
             dumpEvents = true;
         }
@@ -70,6 +80,21 @@ int main(int argc, char** argv) {
         provider = makeProviderFromProfile(profile, providerName);
     }
     auto service = WorldService::load(contentRoot, std::move(provider));
+    if (checkpointIntervalMinutes > 0 && durableCheckpointPath.empty()) {
+        std::cerr << "--checkpoint-every-minutes requires --durable-checkpoint PATH\n";
+        return 2;
+    }
+    if (checkpointDaily && checkpointIntervalMinutes > 0) {
+        std::cerr << "--checkpoint-daily and --checkpoint-every-minutes are mutually exclusive\n";
+        return 2;
+    }
+    if (!durableCheckpointPath.empty()) {
+        service.configureDurableCheckpoint(DurableCheckpointPolicy{
+            checkpointIntervalMinutes > 0 ? DurableCheckpointMode::PeriodicMinutes
+                                           : DurableCheckpointMode::DayBoundary,
+            durableCheckpointPath,
+            checkpointIntervalMinutes});
+    }
     const auto worldName = service.content().instance
                                ? service.content().instance->displayName
                                : service.content().worldId;
