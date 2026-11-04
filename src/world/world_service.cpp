@@ -396,6 +396,11 @@ DecisionContext WorldService::decisionContext(const std::string& npcId) const {
     context.npcStateVersion = npc.stateVersion;
     std::ostringstream resources;
     for (const auto& [id, resourceDefinition] : content_.resources) {
+        const bool locationVisible = resourceDefinition.location.empty() || resourceDefinition.location == npc.location;
+        const bool ownerVisible = resourceDefinition.owner.empty() || resourceDefinition.owner == "world" ||
+                                  resourceDefinition.owner == "village" || resourceDefinition.owner == npcId ||
+                                  resourceDefinition.owner == npcEntityId(npcId);
+        if (!locationVisible || !ownerVisible) continue;
         resources << id << '=' << resourceValue(id) << ' ' << resourceDefinition.unit << ';';
     }
     context.perception = "At " + npc.location + ", it is " + state_.now.toString() +

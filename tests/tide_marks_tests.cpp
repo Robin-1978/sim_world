@@ -965,7 +965,9 @@ void decision_context_projects_location_relevant_resources() {
                !lorn.worldSnapshot["public_resources"].contains("grain"),
            "LLM world snapshots project resources at the NPC location instead of dumping every location");
     expect(mira.worldSnapshot["public_resources"].contains("cooperation") &&
-               mira.worldSnapshot["public_resources"].at("grain").at("location") == "granary",
+               mira.worldSnapshot["public_resources"].at("grain").at("location") == "granary" &&
+               mira.perception.find("boat_integrity") == std::string::npos &&
+               lorn.perception.find("grain") == std::string::npos,
            "locationless collective resources remain visible and resource provenance stays explicit");
 }
 
