@@ -283,6 +283,66 @@
       "id": "set_link_state",
       "category": "topology",
       "operator": "link.set_state"
+    },
+    {
+      "id": "attack_security",
+      "category": "security",
+      "operator": "conflict.attack",
+      "args": {
+        "integrity_loss": 0.15,
+        "availability_loss": 0.15,
+        "threat_gain": 0.7,
+        "exposure_gain": 0.4
+      }
+    },
+    {
+      "id": "sabotage_security",
+      "category": "security",
+      "operator": "conflict.sabotage",
+      "args": {
+        "integrity_loss": 0.1,
+        "availability_loss": 0.1,
+        "threat_gain": 0.7,
+        "exposure_gain": 0.4
+      }
+    },
+    {
+      "id": "threaten_security",
+      "category": "security",
+      "operator": "security.threaten",
+      "args": {
+        "threat_gain": 0.55,
+        "exposure_gain": 0.25
+      }
+    },
+    {
+      "id": "defend_security",
+      "category": "security",
+      "operator": "security.defend",
+      "args": {
+        "threat_reduction": 0.35,
+        "exposure_reduction": 0.25
+      }
+    },
+    {
+      "id": "evacuate_security",
+      "category": "security",
+      "operator": "security.evacuate",
+      "args": {
+        "exposure_reduction": 0.6
+      }
+    },
+    {
+      "id": "repair_security",
+      "category": "security",
+      "operator": "security.repair",
+      "args": {
+        "resource": "grain",
+        "amount": 2,
+        "integrity_restore": 0.2,
+        "availability_restore": 0.2,
+        "threat_reduction": 0.2
+      }
     }
   ],
   "conditions": [

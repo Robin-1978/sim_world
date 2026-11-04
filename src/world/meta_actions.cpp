@@ -1,5 +1,7 @@
 #include "world/meta_actions.hpp"
 
+#include <map>
+
 namespace tide_marks {
 
 const std::set<std::string>& MetaActionRegistry::executableOperators() {
@@ -46,6 +48,20 @@ bool MetaActionRegistry::isExecutableConditionOperator(const std::string& operat
         "link.locked", "need.critical", "npc.at", "time.between",
     };
     return operators.contains(operation);
+}
+
+MetaActionRegistry::SecurityOperatorKind MetaActionRegistry::securityOperatorKind(
+    const std::string& operation) {
+    static const std::map<std::string, SecurityOperatorKind> operators{
+        {"conflict.attack", SecurityOperatorKind::Conflict},
+        {"conflict.sabotage", SecurityOperatorKind::Conflict},
+        {"security.threaten", SecurityOperatorKind::Threaten},
+        {"security.defend", SecurityOperatorKind::Defend},
+        {"security.evacuate", SecurityOperatorKind::Evacuate},
+        {"security.repair", SecurityOperatorKind::Repair},
+    };
+    const auto found = operators.find(operation);
+    return found == operators.end() ? SecurityOperatorKind::Unknown : found->second;
 }
 
 }  // namespace tide_marks

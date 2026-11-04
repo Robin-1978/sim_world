@@ -8,7 +8,7 @@
 |---|---|---|
 | `content-pack.json` | Content Pack manifest; points to the world, NPC, behavior, dialogue and instance definitions | No |
 | `world/*.json` | World rules, topology, resources, policies, schedules and static defaults | No |
-| `npcs/*.json` | NPC archetypes, needs, authored identity and candidate actions | No |
+| `npcs/*.json` | NPC archetypes, needs, authored identity, baseline schedules and candidate actions | No |
 | `behaviors/*.json` | Behavior recipes, conditions and meta-action bindings | No |
 | `dialogue/*.json` | Dialogue beats, speech permissions and authored communication vocabulary | No |
 | `instances/*.json` | Game Instance opening configuration: identity, initial time, placement and seeded inventory | No |

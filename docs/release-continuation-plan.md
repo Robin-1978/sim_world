@@ -27,6 +27,7 @@
 | 通用资源与实例活动 | 通用资源数量、可选输入预留、声明式抢占、实体库存、资源转移、生产、原子交易、承诺和定时 Activity 已实现；Activity 可组合已注册 operator 并在嵌套事务中失败补偿 | `ResourceContent`, `ResourceState(amount,reserved)`, `WorldState.inventories`, `GameInstanceContent.inventoryInitial`, `reservation_mode`, `priority`, `preemption_policy`, `tradeResources`, `ActivityContent`；承诺关系增量与重谈时长已由 `promise_policy` 驱动 |
 | 社会关系与组织 | 已实现 NPC/玩家/组织四轴关系、声明式社会组成员与指标、交易和快照恢复；港区与 Glass Orchard 分别使用自己的组织、阵营和制度事实，没有 Runtime 特例 | `NpcState.relationships`, `WorldState.socialGroups`, `SocialGroupContent`, `relationship.adjust`, `trade.execute`, `tests/fixtures/port-pack`, `tests/fixtures/glass-orchard-pack` |
 | 元动作语义目录 | 已冻结；故事动作 ID 由内容包绑定到通用 operator，行为配方在运行时编译为 BT | `src/world/meta_actions.*`, `src/npc/behavior_recipe.*`, `data/behaviors/village.json` |
+| NPC 基线日程 | 已实现确定性小时边界投影；当前不由 LLM 直接修改，临时偏离通过行动表达 | `NpcContent.schedule`, `NpcState.location/scheduleLabel`, `WorldService::processHourBoundary`; `ScheduleProposal`/版本化日程 Overlay 属于后续治理工作 |
 | World Intelligence 演化提案 | 提案持久化、来源事件证据、验证、沙箱、版本化 overlay 激活/恢复/栈式回滚、内容声明异常检测和反事实场景实验已完成；配方节点引用和整批 overlay 原子性均由 Runtime 校验 | `src/evolution/evolution.*`, `src/evolution/anomaly.*`, `src/evolution/scenario.*`, `src/world/world_service.*`, `data/schemas/evolution-proposal.schema.json`, `data/schemas/scenario-proposal.schema.json`; 校验白名单、EventLog 来源、治理类别、禁止 Core mutation、独立审批、快照重放和结果 JSON 审计已覆盖 |
 | 3D 表现和 Blender 场景 | 已完成内容化投影 | `src/client_main.cpp` 从当前内容包读取空间实体、连接、NPC、资源、场景资产与相机模式，无村庄 `world_id` 或角色分支；Xvfb 烟雾测试覆盖村庄和 Glass Orchard |
 

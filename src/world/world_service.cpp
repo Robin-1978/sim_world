@@ -3,6 +3,7 @@
 #include "npc/drive_system.hpp"
 #include "npc/state_machine.hpp"
 #include "world/ids.hpp"
+#include "world/meta_actions.hpp"
 #include "evolution/evolution.hpp"
 #include <algorithm>
 #include <cstddef>
@@ -682,7 +683,14 @@ void WorldService::processHourBoundary(int day, int hour, const std::set<std::st
                 }
             }
         }
-        if (npc.location != scheduledLocation) ++npc.stateVersion;
+        const auto previousLocation = npc.location;
+        if (npc.location != scheduledLocation) {
+            ++npc.stateVersion;
+            addEvent("npc.schedule_applied", id, scheduledLocation,
+                     "The authored baseline schedule placed the NPC at its scheduled location",
+                     Json{{"from", previousLocation}, {"to", scheduledLocation},
+                          {"rule", "content.schedule"}, {"minute_of_day", minuteOfDay}});
+        }
         npc.location = scheduledLocation;
         npc.scheduleLabel = scheduledLocation;
         if (!npc.activity.process || npc.activity.process->status != ProcessStatus::Running) {
@@ -1937,9 +1945,14 @@ CommandResult WorldService::applySecurityOperator(const std::string& operation, 
     const auto actorEntity = resolve(actor);
     const auto requestedTarget = target.empty() ? actor : target;
     const auto targetEntity = resolve(requestedTarget == "self" ? actor : requestedTarget);
+    const auto operatorKind = MetaActionRegistry::securityOperatorKind(operation);
+    if (operatorKind == MetaActionRegistry::SecurityOperatorKind::Unknown) {
+        return reject("unknown_security_operator", "The security operator is not registered.");
+    }
     if (actorEntity.empty() || targetEntity.empty() ||
         (actorEntity == targetEntity &&
-         (operation == "conflict.attack" || operation == "conflict.sabotage" || operation == "security.threaten"))) {
+         (operatorKind == MetaActionRegistry::SecurityOperatorKind::Conflict ||
+          operatorKind == MetaActionRegistry::SecurityOperatorKind::Threaten))) {
         return reject("invalid_security_target", "Security actions need distinct active actor and target entities.");
     }
     const auto active = [this](const std::string& id) {
@@ -1948,7 +1961,8 @@ CommandResult WorldService::applySecurityOperator(const std::string& operation, 
         return found != state_.entities.end() && found->second.lifecycle == EntityLifecycle::Active;
     };
     if (!active(actorEntity) || !active(targetEntity)) return reject("inactive_security_target", "The security target is not active.");
-    if (operation == "conflict.attack" || operation == "conflict.sabotage" || operation == "security.threaten") {
+    if (operatorKind == MetaActionRegistry::SecurityOperatorKind::Conflict ||
+        operatorKind == MetaActionRegistry::SecurityOperatorKind::Threaten) {
         if (actorEntity == kWorldActor) return reject("invalid_security_actor", "A conflict action needs a concrete actor.");
     }
     auto& security = state_.security[targetEntity];
@@ -1958,37 +1972,90 @@ CommandResult WorldService::applySecurityOperator(const std::string& operation, 
     const double threatBefore = security.threat;
     const double exposureBefore = security.exposure;
     const bool evacuatedBefore = security.evacuated;
-    if (operation == "conflict.attack" || operation == "conflict.sabotage") {
-        const double defaultDamage = operation == "conflict.attack" ? 0.15 : 0.10;
-        const double damage = bounded(args.value("integrity_loss", args.value("damage", defaultDamage)));
-        const double availabilityLoss = bounded(args.value("availability_loss", damage));
-        const double threatGain = bounded(args.value("threat_gain", 0.7));
-        security.integrity = bounded(security.integrity - damage);
-        security.availability = bounded(security.availability - availabilityLoss);
-        security.threat = bounded(security.threat + threatGain);
-        security.exposure = bounded(security.exposure + args.value("exposure_gain", 0.4));
-    } else if (operation == "security.threaten") {
-        const double threatGain = bounded(args.value("threat_gain", 0.55));
-        security.threat = bounded(security.threat + threatGain);
-        security.exposure = bounded(security.exposure + args.value("exposure_gain", 0.25));
-    } else if (operation == "security.defend") {
-        security.threat = bounded(security.threat - args.value("threat_reduction", 0.35));
-        security.exposure = bounded(security.exposure - args.value("exposure_reduction", 0.25));
-    } else if (operation == "security.evacuate") {
+    const auto configured = std::find_if(
+        content_.metaActions.begin(), content_.metaActions.end(),
+        [&operation](const auto& entry) { return entry.second.operation == operation; });
+    if (configured == content_.metaActions.end()) {
+        return reject("security_operator_unconfigured",
+                      "The security operator has no content-defined parameter policy.");
+    }
+    Json effectiveArgs = configured->second.defaultArgs;
+    for (auto it = args.begin(); it != args.end(); ++it) effectiveArgs[it.key()] = it.value();
+    const auto number = [&effectiveArgs](const char* key) -> std::optional<double> {
+        if (!effectiveArgs.contains(key) || !effectiveArgs.at(key).is_number()) return std::nullopt;
+        const auto value = effectiveArgs.at(key).get<double>();
+        return std::isfinite(value) ? std::optional<double>{value} : std::nullopt;
+    };
+    const auto requiredNumber = [&number](const char* key) -> std::optional<double> {
+        const auto value = number(key);
+        if (!value.has_value()) return std::nullopt;
+        return value;
+    };
+    const auto missing = [&operation](const char* key) {
+        return CommandResult{false, "invalid_security_parameters",
+                              "The content-defined " + operation + " operator needs numeric '" + key + "'.", std::nullopt};
+    };
+    switch (operatorKind) {
+    case MetaActionRegistry::SecurityOperatorKind::Conflict: {
+        const auto damage = requiredNumber("integrity_loss");
+        const auto availabilityLoss = requiredNumber("availability_loss");
+        const auto threatGain = requiredNumber("threat_gain");
+        const auto exposureGain = requiredNumber("exposure_gain");
+        if (!damage.has_value()) return missing("integrity_loss");
+        if (!availabilityLoss.has_value()) return missing("availability_loss");
+        if (!threatGain.has_value()) return missing("threat_gain");
+        if (!exposureGain.has_value()) return missing("exposure_gain");
+        security.integrity = bounded(security.integrity - *damage);
+        security.availability = bounded(security.availability - *availabilityLoss);
+        security.threat = bounded(security.threat + *threatGain);
+        security.exposure = bounded(security.exposure + *exposureGain);
+        break;
+    }
+    case MetaActionRegistry::SecurityOperatorKind::Threaten: {
+        const auto threatGain = requiredNumber("threat_gain");
+        const auto exposureGain = requiredNumber("exposure_gain");
+        if (!threatGain.has_value()) return missing("threat_gain");
+        if (!exposureGain.has_value()) return missing("exposure_gain");
+        security.threat = bounded(security.threat + *threatGain);
+        security.exposure = bounded(security.exposure + *exposureGain);
+        break;
+    }
+    case MetaActionRegistry::SecurityOperatorKind::Defend: {
+        const auto threatReduction = requiredNumber("threat_reduction");
+        const auto exposureReduction = requiredNumber("exposure_reduction");
+        if (!threatReduction.has_value()) return missing("threat_reduction");
+        if (!exposureReduction.has_value()) return missing("exposure_reduction");
+        security.threat = bounded(security.threat - *threatReduction);
+        security.exposure = bounded(security.exposure - *exposureReduction);
+        break;
+    }
+    case MetaActionRegistry::SecurityOperatorKind::Evacuate: {
+        const auto exposureReduction = requiredNumber("exposure_reduction");
+        if (!exposureReduction.has_value()) return missing("exposure_reduction");
         security.evacuated = true;
-        security.exposure = bounded(security.exposure - args.value("exposure_reduction", 0.6));
-    } else if (operation == "security.repair") {
-        const auto resource = args.value("resource", "");
-        const int cost = args.value("amount", 0);
-        if (!resource.empty() && (cost <= 0 || availableResourceValue(resource) < cost)) {
+        security.exposure = bounded(security.exposure - *exposureReduction);
+        break;
+    }
+    case MetaActionRegistry::SecurityOperatorKind::Repair: {
+        const auto integrityRestore = requiredNumber("integrity_restore");
+        const auto availabilityRestore = requiredNumber("availability_restore");
+        const auto threatReduction = requiredNumber("threat_reduction");
+        if (!integrityRestore.has_value()) return missing("integrity_restore");
+        if (!availabilityRestore.has_value()) return missing("availability_restore");
+        if (!threatReduction.has_value()) return missing("threat_reduction");
+        const auto resource = effectiveArgs.value("resource", "");
+        const int cost = effectiveArgs.value("amount", 0);
+        if (resource.empty() || cost <= 0 || availableResourceValue(resource) < cost) {
             return reject("insufficient_resource", "Security repair lacks its authored repair resource.");
         }
-        if (!resource.empty()) state_.resources[resource].amount -= cost;
-        security.integrity = bounded(security.integrity + args.value("integrity_restore", 0.2));
-        security.availability = bounded(security.availability + args.value("availability_restore", 0.2));
-        security.threat = bounded(security.threat - args.value("threat_reduction", 0.2));
+        state_.resources[resource].amount -= cost;
+        security.integrity = bounded(security.integrity + *integrityRestore);
+        security.availability = bounded(security.availability + *availabilityRestore);
+        security.threat = bounded(security.threat - *threatReduction);
         security.evacuated = false;
-    } else {
+        break;
+    }
+    case MetaActionRegistry::SecurityOperatorKind::Unknown:
         return reject("unknown_security_operator", "The security operator is not registered.");
     }
     if (!turnId.empty()) state_.processedTurnIds.insert(turnId);
@@ -2545,9 +2612,8 @@ bool WorldService::applyMetaAction(const std::string& npcId, const std::string& 
                                    "recipe:" + npcId + ":" + actionId + ":movement");
         return moved.accepted;
     }
-    if (operation == "conflict.attack" || operation == "conflict.sabotage" ||
-        operation == "security.threaten" || operation == "security.defend" ||
-        operation == "security.evacuate" || operation == "security.repair") {
+    if (MetaActionRegistry::securityOperatorKind(operation) !=
+        MetaActionRegistry::SecurityOperatorKind::Unknown) {
         const auto target = args.value("target", "self");
         const auto security = applySecurityOperator(operation, npcId, target, args,
                                                     "recipe:" + npcId + ":" + actionId + ":security");
