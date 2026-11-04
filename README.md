@@ -149,3 +149,56 @@ Scenario proposals are isolated runs from the current snapshot. They never mutat
 ```
 
 The command prints the applied levers, baseline/scenario metrics, numeric deltas, generated events, and the resulting snapshot as JSON. A proposal can only change facts for which the loaded content pack already declares a bounded intervention; missing economics or policy mechanisms are rejected instead of being invented by the model.
+
+## Runtime boundary and data layout
+
+The runtime flow is deliberately split into four boundaries:
+
+```text
+visible facts + needs + stimuli + memory
+                    |
+                    v
+              LLM DecisionContext
+                    |
+                    v
+  speech act / IntentProposal / evolution proposal
+                    |
+                    v
+      schema + permission + revision validation
+                    |
+                    v
+  NpcActivity -> ProcessExecution -> BT -> operators
+                    |
+                    v
+       atomic WorldState commit + WorldEvent
+                    |
+                    v
+       perception, memory, relationships, drives
+```
+
+`Goal`, `ProcessExecution`, FSM and BT are four views of one `NpcActivity`; one accepted decision
+can run for many ticks and is re-evaluated at completion, interruption or a configured salient
+boundary. A conversation may produce only speech. A request or command may propose a world action,
+but it still goes through the same Runtime validation path. LLM proposals cannot call arbitrary
+code or write facts directly.
+
+`data/` is immutable Content Pack input: world rules, NPC archetypes, behavior recipes, dialogue,
+instances, schemas and the Intelligence Profile. It is never a save directory. Snapshots, Replay
+packages, evolution proposals and sandbox reports belong outside it, for example:
+`var/runs/<instance-id>/<run-id>/`. See [`data/README.md`](data/README.md) for the full split.
+
+An explicit durable checkpoint can be configured without an environment variable. The default is
+no automatic durable write:
+
+```bash
+./build/tide_marks_headless --provider mock --days 2 \
+  --durable-checkpoint var/runs/village/run-1/checkpoint.json
+./build/tide_marks_headless --provider mock --days 2 \
+  --durable-checkpoint var/runs/village/run-1/checkpoint.json \
+  --checkpoint-every-minutes 60
+```
+
+JSON is the inspectable default; SQLite is an optional adapter for the same committed
+Snapshot/Replay boundary. Replay is an explicit verification artifact, not per-tick persistence
+and not full Event Sourcing. The SQLite adapter is built and tested in a separate CI job with
+`TIDE_MARKS_REQUIRE_SQLITE=ON`.
