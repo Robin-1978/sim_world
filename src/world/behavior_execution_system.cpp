@@ -174,38 +174,23 @@ bool BehaviorExecutionSystem::applyActionEffects(const std::string& npcId, const
         recipeTransaction.rollback();
         return false;
     }
-    // A successfully committed action is an episode. Record a bounded prior
-    // candidate from its own event trail, never from model prose.
+    // A successfully committed action is an episode. Record it through the
+    // cognition boundary so the source event, confidence merge, and audit
+    // event use the same validation path as authored knowledge actions.
     const auto effectEvent = std::find_if(world_.state_.events.rbegin(), world_.state_.events.rend(),
                                           [eventCountBefore](const auto& event) { return event.sequence > eventCountBefore; });
     if (effectEvent != world_.state_.events.rend()) {
-        auto npc = world_.state_.npcs.find(npcId);
-        if (npc != world_.state_.npcs.end()) {
-            bool changed = false;
-            const auto existing = std::find_if(npc->second.experiences.begin(), npc->second.experiences.end(),
-                                               [&actionId](const auto& experience) {
-                                                   return experience.action == actionId && experience.domain == "action";
-                                               });
-            if (existing == npc->second.experiences.end()) {
-                npc->second.experiences.push_back(Experience{
-                    "experience:" + npcId + ":" + actionId, "action", "observed_context", actionId,
-                    effectEvent->type, {effectEvent->sequence}, world_.state_.now, world_.state_.now, 0.5, true});
-                changed = true;
-            } else if (std::find(existing->sourceSequences.begin(), existing->sourceSequences.end(),
-                                 effectEvent->sequence) == existing->sourceSequences.end()) {
-                const double samples = static_cast<double>(existing->sourceSequences.size() + 1);
-                existing->confidence = std::clamp(existing->confidence + (1.0 - existing->confidence) / samples,
-                                                   0.0, 1.0);
-                existing->lastUsed = world_.state_.now;
-                existing->sourceSequences.push_back(effectEvent->sequence);
-                changed = true;
-            }
-            if (changed) {
-                world_.addEvent("experience.observed", npcId, npcId,
-                         "A committed action outcome became reusable NPC experience",
-                         Json{{"action_id", actionId}, {"source_sequence", effectEvent->sequence},
-                              {"source_type", effectEvent->type}, {"domain", "action"}});
-            }
+        const auto sourceSequence = effectEvent->sequence;
+        const auto sourceType = effectEvent->type;
+        const auto recorded = world_.recordExperience(
+            npcId, "action", "observed_context", actionId, sourceType, sourceSequence, 0.5, true, npcId,
+            "recipe:" + npcId + ":" + actionId + ":experience:" + std::to_string(sourceSequence));
+        if (recorded.accepted) {
+            world_.addEvent("experience.observed", npcId, npcId,
+                            "A committed action outcome became reusable NPC experience",
+                            Json{{"action_id", actionId}, {"source_sequence", sourceSequence},
+                                 {"source_type", sourceType}, {"domain", "action"},
+                                 {"recorded_experience", recorded.message}});
         }
     }
     return result.status == NodeStatus::Success;
