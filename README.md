@@ -110,7 +110,7 @@ These commands print the LLM proposal only. Runtime validation, sandbox executio
 
 An explicit durable checkpoint can be requested from the C++ API with `WorldService::saveDurableCommit(path)`. JSON remains the default inspectable artifact; when SQLite is discovered at configure time, `SqlitePersistence` stores the checkpoint transactionally. This checkpoint operation is explicit and does not write the database on every simulation minute.
 
-The design and continuation checkpoint are in [`docs/design.md`](docs/design.md) and [`docs/release-continuation-plan.md`](docs/release-continuation-plan.md).
+The project goal is summarized in [`docs/goal.md`](docs/goal.md); architecture and continuation checkpoints are in [`docs/design.md`](docs/design.md) and [`docs/release-continuation-plan.md`](docs/release-continuation-plan.md).
 
 ## World Intelligence checks and counterfactuals
 

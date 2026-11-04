@@ -1,7 +1,8 @@
 # 《潮痕》持续推进计划
 
 > 本文件只记录实施状态、工作包、验证和下一步；架构与模型以 [design.md](design.md) 为唯一来源。
-> 最后更新：2026-11-04
+> 最后更新：2026-11-05
+> 目标摘要见 [`goal.md`](goal.md)。恢复工作时先读目标摘要，再按本文件的检查点和工作包继续。
 
 ## 当前目标
 
@@ -22,7 +23,7 @@
 | 存档 schema 与事件因果链 | 已完成 | `world_state_json.*`, `save_schema_version=18`, `simulation_version=adaptive-runtime-p1.19`, 事件 schema 4、稳定 `event_id`、事务 `correlation_id`、直接 `causation_sequence`、逐事件内容/模拟版本、Snapshot 因果与版本完整性校验、`event_sequence`, `instance_id`, `inventories`, `relationships`, `social_groups`, `exchange_contracts`, `NpcActivity` 聚合、`lastSimulationTick/lastDriveTick`、`definition_id` 引用、实例/内容版本校验与可重放 overlay 栈；运行态不复制角色定义 |
 | 内驱/需求模型 | 需求域是内容定义的标签，村庄默认四域、Glass Orchard 使用 stewardship/ecological；`DriveEvaluation` 统一 urgency、effective weight、预期满足、证据置信度和效用贡献，同一行动满足多个需求时逐项求和；显式满足配方和有界预期适应已实现，安全事实已支持冲突/威胁/防守/撤离/修复并通过 Stimulus 投射 | `src/npc/drive_system.*`, `src/npc/goal_selector.*`, `NeedContent`, `NeedState`, `need.*` events, `tests/fixtures/glass-orchard-pack` |
 | 外驱/结构上下文 | 已实现结构化 Stimulus/Constraint、到期、习惯化和快照；结构演化治理、沙箱和版本化激活均已接入 | `DecisionContext.stimuli`, `constraints`, `WorldService::projectStimuli`, `src/evolution/evolution.*` |
-| LLM 解释与权衡 | 同步对话/自驱提案、channel 策略、Qwen 结构化输出、两阶段话语理解、失败关闭和异步 TurnQueue 已完成；有效上下文按主体可见性拆成 `worldSnapshot/selfState/planCatalog`，候选计划暴露 BT 摘要与参数 Schema；意图参数校验失败最多反馈修正一次，演化使用强制 function call 且校验错误最多反馈修正两次 | `IntentProposal.parameters`, `DecisionContext`, `IProvider`, `TurnQueue`, `decision_channels`, `WorldService::converse/deliberate/pumpAsyncTurns` |
+| LLM 解释与权衡 | 同步对话/自驱提案、channel 策略、Qwen 结构化输出、两阶段话语理解、失败关闭和异步 TurnQueue 已完成；`DecisionContextProjector` 按主体可见性拆成 `worldSnapshot/selfState/planCatalog`，候选计划暴露 BT 摘要与参数 Schema；意图参数校验失败最多反馈修正一次，演化使用强制 function call 且校验错误最多反馈修正两次 | `src/provider/decision_context_projector.*`, `IntentProposal.parameters`, `DecisionContext`, `IProvider`, `TurnQueue`, `decision_channels`, `WorldService::converse/deliberate/pumpAsyncTurns` |
 | 长过程执行 | 数据驱动时长、单一活动槽、配方声明的输入预留、完成/挂起/恢复事件和 Snapshot 恢复均已实现；挂起释放预留，刺激清除且资源可用时按原计划恢复并顺延完成时间；配置允许的高优先级过程可抢占低优先级预留，整组仲裁原子提交；Goal、Process、FSM、BT 是同一活动的四个投影 | `ProcessExecution.priority/preemptionPolicy`, `NpcActivity`, `reservation_mode`, `WorldService::planResourcePreemption`, `src/npc/state_machine.*` |
 | 通用资源与实例活动 | 通用资源数量、可选输入预留、声明式抢占、实体库存、资源转移、生产、原子交易、承诺和定时 Activity 已实现；Activity 可组合已注册 operator 并在嵌套事务中失败补偿 | `ResourceContent`, `ResourceState(amount,reserved)`, `WorldState.inventories`, `GameInstanceContent.inventoryInitial`, `reservation_mode`, `priority`, `preemption_policy`, `tradeResources`, `ActivityContent`；承诺关系增量与重谈时长已由 `promise_policy` 驱动 |
 | 社会关系与组织 | 已实现 NPC/玩家/组织四轴关系、声明式社会组成员与指标、交易和快照恢复；港区与 Glass Orchard 分别使用自己的组织、阵营和制度事实，没有 Runtime 特例 | `NpcState.relationships`, `WorldState.socialGroups`, `SocialGroupContent`, `relationship.adjust`, `trade.execute`, `tests/fixtures/port-pack`, `tests/fixtures/glass-orchard-pack` |
@@ -41,7 +42,7 @@
 | Activity 生命周期不变量 | 已完成本次修正 | `proposed` 只能是空槽；非空 Goal/Process 身份和阶段投影必须一致；Snapshot 遇到非法组合直接拒绝 |
 | 提交效果 Replay | 已完成最小闭环 | 显式生成 Replay Package 时保存基线、聚合 JSON Patch、事件范围、Revision 和状态摘要；`replay()` 实际应用 Patch、追加事件并验证最终 Snapshot；仍明确不是 Event Sourcing，逐领域事件 reducer 属于后续 |
 | Persistence Adapter | 显式 durable checkpoint 已完成，自动提交未完成 | `IWorldPersistence` 同时支持默认 `JsonFilePersistence` 与构建可选的 `SqlitePersistence`；`WorldService::saveDurableCommit` 以单个检查点保存 Snapshot、Replay、Revision、事件、幂等和 Overlay 投影并有读回回归，但每个内存事务自动 durable commit 仍按 ADR 作为后续阶段 |
-| WorldService 职责拆分 | 进行中：基础协调器已抽出 | `TransactionManager`、`EventJournal`、`SimulationScheduler`、`IntelligenceCoordinator` 已独立且不拥有领域事实；下一步抽资源/社会系统协调，不做微服务 |
+| WorldService 职责拆分 | 进行中：事务、事件、调度、异步协调器和只读决策投影已抽出 | `TransactionManager`、`EventJournal`、`SimulationScheduler`、`IntelligenceCoordinator`、`DecisionContextProjector` 已独立且不拥有领域事实；下一步抽资源/社会系统协调，不做微服务 |
 | 事件驱动调度 | 已完成原型闭环 | `advanceMinutes` 选择下一个小时/日程、NPC 唤醒、过程完成、刺激到期或合同截止边界；安静分钟合并推进但保留逐分钟 Revision 语义，远场回归验证边界数显著低于模拟分钟数 |
 | ECS 定位 | 已冻结为投影模型 | `WorldState` 是事实权威，`EntityRegistry` 是当前已知类型的查询投影；自定义 Component 进入权威持久化前，不宣称支持通用动态 ECS |
 | 行动效用分项 | 已完成最小闭环 | `utility_profile` 可声明资源成本、风险、关系影响、未来价值和结构惩罚；范围校验、确定性合成和审计分项已接入；复杂社会效用模型仍由内容扩展 |
