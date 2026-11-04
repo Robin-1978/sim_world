@@ -202,6 +202,7 @@ WorldService WorldService::fromContent(const WorldContentPack& content,
             }
         }
         DriveSystem::initialize(npc, authored.needs, service.state_.now);
+        npc.lastDriveTick = service.state_.now;
         npc.memories.push_back(Memory{"authored", "Initial content pack memory.", service.state_.now, 1.0});
         service.state_.npcs.emplace(authored.definition.id, std::move(npc));
         service.state_.entities[npcEntityId(authored.definition.id)] =
@@ -451,6 +452,7 @@ void WorldService::advanceMinutes(std::int64_t minutes) {
         // produced the fact.
         TransactionScope transaction(*this);
         ++state_.now.minute;
+        ++simulationMetrics_.simulatedMinutes;
         expireStimuli();
         std::set<std::string> dueNpcIds;
         for (auto& [id, npc] : state_.npcs) {
@@ -458,16 +460,21 @@ void WorldService::advanceMinutes(std::int64_t minutes) {
             const auto tier = authored != nullptr ? authored->simulationTier : std::string("near");
             const int interval = tier == "far" ? content_.simulationPolicy.farTickMinutes
                                                 : content_.simulationPolicy.nearTickMinutes;
-            if (state_.now.minute % interval != 0) continue;
-            npc.lastSimulationTick = state_.now;
+            if (state_.now.minute % interval != 0) {
+                ++simulationMetrics_.skippedNpcTicks;
+                continue;
+            }
             dueNpcIds.insert(id);
             if (tier == "far") ++simulationMetrics_.farNpcTicks;
             else ++simulationMetrics_.nearNpcTicks;
+            npc.lastSimulationTick = state_.now;
         }
         resumeSuspendedProcesses(dueNpcIds);
         tickProcesses(dueNpcIds);
-        if (state_.now.minute % kMinutesPerHour == 0) processHourBoundary(state_.now.day(), state_.now.hour());
-        if (state_.now.minute % kMinutesPerDay == 0) processDayBoundary(state_.now.day());
+        if (state_.now.minute % kMinutesPerHour == 0) {
+            processHourBoundary(state_.now.day(), state_.now.hour(), dueNpcIds);
+        }
+        if (state_.now.minute % kMinutesPerDay == 0) processDayBoundary(state_.now.day(), dueNpcIds);
         applyPromiseDeadline();
     }
     pumpAsyncTurns();
@@ -479,13 +486,16 @@ void WorldService::advanceTo(GameTime target) {
     advanceMinutes(target.minute - state_.now.minute);
 }
 
-void WorldService::processHourBoundary(int day, int hour) {
+void WorldService::processHourBoundary(int day, int hour, const std::set<std::string>& dueNpcIds) {
     (void)day;
     const int minuteOfDay = hour * static_cast<int>(kMinutesPerHour);
     for (auto& [id, npc] : state_.npcs) {
+        if (!dueNpcIds.contains(id)) continue;
         const auto* authored = authoredNpc(id);
         if (authored != nullptr) {
-            const GameTime previous{state_.now.minute - kMinutesPerHour};
+            const GameTime previous = npc.lastDriveTick.minute >= 0
+                                           ? npc.lastDriveTick
+                                           : GameTime{state_.now.minute - kMinutesPerHour};
             const auto changes = DriveSystem::advance(npc, authored->needs, previous, state_.now);
             Json changed = Json::array();
             for (const auto& change : changes) {
@@ -499,9 +509,10 @@ void WorldService::processHourBoundary(int day, int hour) {
             }
             if (!changed.empty()) {
                 addEvent("need.deprived", id, "self", "Need deficits advanced with world time",
-                         Json{{"changes", changed}, {"hours", 1}, {"rule", "drive.time_decay"},
+                         Json{{"changes", changed}, {"rule", "drive.time_decay"},
                               {"from_minute", previous.minute}, {"to_minute", state_.now.minute}});
             }
+            npc.lastDriveTick = state_.now;
         }
         const auto entity = state_.entities.find(npcEntityId(id));
         if (entity != state_.entities.end() && entity->second.lifecycle != EntityLifecycle::Active) continue;
@@ -530,7 +541,7 @@ void WorldService::processHourBoundary(int day, int hour) {
         if (!activity.conditionResource.empty() && resourceValue(activity.conditionResource) >= activity.conditionBelow) continue;
         processActivity(activity);
     }
-    processAutonomousTurns();
+    processAutonomousTurns(dueNpcIds);
 }
 
 void WorldService::processActivity(const ActivityContent& activity) {
@@ -723,10 +734,11 @@ void WorldService::completeProcess(const std::string& npcId, ProcessExecution pr
     ++found->second.stateVersion;
 }
 
-void WorldService::processAutonomousTurns() {
+void WorldService::processAutonomousTurns(const std::set<std::string>& dueNpcIds) {
     if (!content_.npcDeliberation.enabled) return;
     pumpAsyncTurns();
     for (auto& [npcId, npc] : state_.npcs) {
+        if (!dueNpcIds.contains(npcId)) continue;
         if (!hasNpc(npcId) || npc.activity.status == ActivityStatus::Active) continue;
         if (npc.lastAutonomousTurn.minute >= 0 &&
             state_.now.minute - npc.lastAutonomousTurn.minute < content_.npcDeliberation.cooldownMinutes) {
@@ -751,13 +763,14 @@ void WorldService::processAutonomousTurns() {
     }
 }
 
-void WorldService::processDayBoundary(int day) {
+void WorldService::processDayBoundary(int day, const std::set<std::string>& dueNpcIds) {
     for (const auto& activity : content_.activities) {
         if (activity.trigger != "day") continue;
         if (!activity.conditionResource.empty() && resourceValue(activity.conditionResource) >= activity.conditionBelow) continue;
         processActivity(activity);
     }
     for (auto& [id, npc] : state_.npcs) {
+        if (!dueNpcIds.contains(id)) continue;
         const auto entity = state_.entities.find(npcEntityId(id));
         if (entity != state_.entities.end() && entity->second.lifecycle != EntityLifecycle::Active) continue;
         ++npc.stateVersion;

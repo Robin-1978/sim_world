@@ -817,6 +817,13 @@ void runtime_loads_a_world_without_village_identifiers() {
     expect(service.simulationMetrics().farNpcTicks == 2 &&
                service.state().npcs.at("sable").lastSimulationTick.minute == service.state().now.minute,
            "far simulation advances on the authored coarse cadence");
+    expect(service.simulationMetrics().skippedNpcTicks == 8 &&
+               service.simulationMetrics().simulatedMinutes == 10,
+           "the scheduler records skipped far-tier ticks and simulated time");
+    const auto settledMinute = service.state().now.minute;
+    service.advanceTo(GameTime{settledMinute - 1});
+    expect(service.state().now.minute == settledMinute,
+           "advance_to is idempotent when the target is already in the past");
     const auto workshop = service.entities().record("spatial:workshop");
     const auto serviceLift = service.entities().record("link:service_lift");
     expect(workshop.has_value() && workshop->kind == "zone", "authored spatial kinds remain generic");

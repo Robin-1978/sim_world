@@ -212,6 +212,10 @@ struct NpcState {
     // Far-tier NPCs can therefore wake on a coarse cadence without losing
     // their schedule across a snapshot.
     GameTime lastSimulationTick{-1};
+    // Drive adaptation follows the same supported simulation cadence as the
+    // process. Keeping it separate prevents a minute-level process tick from
+    // discarding the last hourly drive anchor.
+    GameTime lastDriveTick{-1};
     NpcActivity activity;
 };
 

@@ -54,6 +54,8 @@ struct DialogueTurn {
 struct SimulationMetrics {
     std::uint64_t nearNpcTicks{0};
     std::uint64_t farNpcTicks{0};
+    std::uint64_t skippedNpcTicks{0};
+    std::int64_t simulatedMinutes{0};
 };
 
 class WorldService {
@@ -181,7 +183,7 @@ private:
                   std::string detail, Json data = Json::object());
     void projectStimuli(const WorldEvent& event);
     void expireStimuli();
-    void processAutonomousTurns();
+    void processAutonomousTurns(const std::set<std::string>& dueNpcIds);
     void enqueueAutonomousTurn(const std::string& npcId, const std::string& trigger);
     [[nodiscard]] TurnRequest makeTurnRequest(const std::string& npcId, const std::string& input,
                                               const std::string& turnId, const std::string& channelId,
@@ -193,7 +195,7 @@ private:
     DialogueTurn executeTurn(const std::string& npcId, const std::string& input,
                              const std::string& turnId, const std::string& channelId,
                              const std::string& trigger);
-    void processHourBoundary(int day, int hour);
+    void processHourBoundary(int day, int hour, const std::set<std::string>& dueNpcIds);
     void processActivity(const ActivityContent& activity);
     [[nodiscard]] bool applyActionEffects(const std::string& npcId, const std::string& actionId);
     [[nodiscard]] bool applyActionEffects(const std::string& npcId, const std::string& actionId,
@@ -216,7 +218,7 @@ private:
     [[nodiscard]] int resourceValue(const std::string& resource) const;
     [[nodiscard]] int availableResourceValue(const std::string& resource) const;
     void setResource(const std::string& resource, int value);
-    void processDayBoundary(int day);
+    void processDayBoundary(int day, const std::set<std::string>& dueNpcIds);
     void reviseNpcStrategies(int day);
     void applyPromiseDeadline();
     CommandResult reject(std::string code, std::string message) const;

@@ -254,6 +254,7 @@ Json worldStateToJson(const WorldState& state) {
                         {"stimulus_sensitivity", stimulusSensitivity},
                         {"stimuli", stimuli}, {"last_autonomous_turn", npc.lastAutonomousTurn.minute},
                         {"last_simulation_tick", npc.lastSimulationTick.minute},
+                        {"last_drive_tick", npc.lastDriveTick.minute},
                         {"activity", activity}};
     }
     Json promises = Json::object();
@@ -404,6 +405,8 @@ WorldState deserializeWorldState(const Json& json) {
         }
         npc.lastAutonomousTurn = GameTime{jsonValue<std::int64_t>(value, "last_autonomous_turn", -1)};
         npc.lastSimulationTick = GameTime{jsonValue<std::int64_t>(value, "last_simulation_tick", -1)};
+        npc.lastDriveTick = GameTime{jsonValue<std::int64_t>(value, "last_drive_tick",
+                                                            value.value("last_simulation_tick", -1))};
         const auto activity = value.value("activity", Json::object());
         if (activity.is_object() && activity.contains("goal") && activity.at("goal").is_object()) {
             const auto& goal = activity.at("goal");
