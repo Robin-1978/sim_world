@@ -236,5 +236,23 @@
     },
     "runtime_metadata_boundary": "world/instance/content/prompt/revision identity is carried in runtime_metadata and excluded from worldSnapshot",
     "result": "passed"
+  },
+  "latest_evolution_smoke": {
+    "level1": {
+      "command": "./build/tide_marks_headless --profile data/intelligence-profile.json --provider profile --days 0 --evolve level1",
+      "provider": "llama.cpp",
+      "proposal_kind": "strategy",
+      "operation": "register_behavior_recipe",
+      "status": "proposed",
+      "runtime_result": "validated; sandbox and independent approval still required"
+    },
+    "level2": {
+      "command": "./build/tide_marks_headless --profile data/intelligence-profile.json --provider profile --days 0 --evolve level2",
+      "provider": "llama.cpp",
+      "proposal_kind": "content",
+      "operation": "register_behavior_recipe",
+      "status": "proposed",
+      "runtime_result": "first tool payload repaired once with structured validation feedback, then validated; no source world mutation"
+    }
   }
 }
