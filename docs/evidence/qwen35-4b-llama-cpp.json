@@ -293,6 +293,23 @@
     },
     "result": "passed"
   },
+  "current_self_drive_probe": {
+    "command": "./build/tide_marks_text --provider profile --script docs/examples/llm-self-drive-session.txt",
+    "provider": "llama.cpp",
+    "elapsed_seconds": 24.34,
+    "world_boundary": "day 1 7:00",
+    "consumed_turns": 3,
+    "pending_turns": 0,
+    "intent_events": 3,
+    "npc_modes_after_drain": {
+      "eve": "executing",
+      "lorn": "executing",
+      "mira": "executing"
+    },
+    "provider_failures": 0,
+    "runtime_result": "all three current-model proposals entered authored ProcessExecution state at the safe boundary after the ScheduleSystem extraction",
+    "result": "passed"
+  },
   "latest_evolution_smoke": {
     "level1": {
       "command": "./build/tide_marks_headless --profile data/intelligence-profile.json --provider profile --days 0 --evolve level1",
