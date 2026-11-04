@@ -18,6 +18,10 @@ public:
     virtual ~IWorldPersistence() = default;
     virtual void saveSnapshot(const std::string& path, const Json& snapshot) const = 0;
     virtual void saveReplay(const std::string& path, const std::vector<Json>& lines) const = 0;
+    // An explicit durable checkpoint. Implementations must make the supplied
+    // committed Snapshot and its Replay artifact visible as one checkpoint.
+    virtual void saveDurableCommit(const std::string& path, const Json& snapshot,
+                                   const std::vector<Json>& replayLines) const = 0;
 };
 
 // Prototype file adapter. SQLite implements the same boundary optionally
@@ -26,6 +30,8 @@ class JsonFilePersistence final : public IWorldPersistence {
 public:
     void saveSnapshot(const std::string& path, const Json& snapshot) const override;
     void saveReplay(const std::string& path, const std::vector<Json>& lines) const override;
+    void saveDurableCommit(const std::string& path, const Json& snapshot,
+                           const std::vector<Json>& replayLines) const override;
 
 private:
     static void replaceFile(const std::string& path, const std::string& bytes);
@@ -42,9 +48,12 @@ public:
 
     void saveSnapshot(const std::string& path, const Json& snapshot) const override;
     void saveReplay(const std::string& path, const std::vector<Json>& lines) const override;
+    void saveDurableCommit(const std::string& path, const Json& snapshot,
+                           const std::vector<Json>& replayLines) const override;
 
     [[nodiscard]] Json loadSnapshot(const std::string& path) const;
     [[nodiscard]] std::vector<Json> loadReplay(const std::string& path) const;
+    [[nodiscard]] Json loadDurableCommit(const std::string& path) const;
 
 private:
     std::string databasePath_;

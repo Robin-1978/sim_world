@@ -60,11 +60,20 @@ public:
         replayPath = path;
         replayLines = lines;
     }
+    void saveDurableCommit(const std::string& path, const Json& snapshot,
+                           const std::vector<Json>& lines) const override {
+        durableCommitPath = path;
+        durableCommitSnapshot = snapshot;
+        durableCommitReplay = lines;
+    }
 
     mutable std::string snapshotPath;
     mutable Json snapshotValue;
     mutable std::string replayPath;
     mutable std::vector<Json> replayLines;
+    mutable std::string durableCommitPath;
+    mutable Json durableCommitSnapshot;
+    mutable std::vector<Json> durableCommitReplay;
 };
 
 class DelayedProvider final : public IProvider {
@@ -1233,12 +1242,17 @@ void persistence_adapter_receives_committed_representations() {
     auto service = WorldService(std::make_unique<MockProvider>(), std::move(persistence));
     service.saveSnapshot("memory://snapshot");
     service.writeReplay("memory://replay");
+    service.saveDurableCommit("memory://commit");
     expect(persistenceRaw->snapshotPath == "memory://snapshot" &&
                persistenceRaw->snapshotValue.at("world_revision") == service.state().revision,
            "WorldService sends a committed Snapshot through the persistence boundary");
     expect(persistenceRaw->replayPath == "memory://replay" && persistenceRaw->replayLines.size() == 1 &&
                persistenceRaw->replayLines.front().at("kind") == "replay_header",
            "WorldService sends Replay lines through the same injectable persistence boundary");
+    expect(persistenceRaw->durableCommitPath == "memory://commit" &&
+               persistenceRaw->durableCommitSnapshot.at("world_revision") == service.state().revision &&
+               persistenceRaw->durableCommitReplay.size() == 1,
+           "WorldService can export a committed Snapshot and Replay as one durable checkpoint");
 }
 
 #ifdef TIDE_MARKS_HAS_SQLITE
@@ -1260,6 +1274,18 @@ void sqlite_persistence_roundtrips_versioned_artifacts() {
     persistence.saveReplay("run/test/replay", replacement);
     expect(persistence.loadReplay("run/test/replay") == replacement,
            "SQLite replay replacement is atomic for one run path");
+    const Json durableSnapshot{{"world_id", "test-world"}, {"instance_id", "test-instance"},
+                               {"content_version", "test-v1"}, {"world_revision", 4},
+                               {"event_sequence", 1}, {"processed_turn_ids", Json::array({"turn-1"})},
+                               {"active_overlays", Json::array()},
+                               {"events", Json::array({Json{{"sequence", 1}, {"type", "test.event"}}})},
+                               {"resources", Json::object()}};
+    persistence.saveDurableCommit("run/test/commit", durableSnapshot, replacement);
+    const auto durable = persistence.loadDurableCommit("run/test/commit");
+    expect(durable.at("world_revision") == 4 && durable.at("events").size() == 1 &&
+               durable.at("processed_turn_ids").at(0) == "turn-1" &&
+               durable.at("durable_replay") == replacement,
+           "SQLite durable commit round-trips state, event history, idempotency and replay together");
     std::filesystem::remove(path);
 }
 #endif

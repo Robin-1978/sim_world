@@ -168,6 +168,7 @@ public:
     [[nodiscard]] Json snapshotJson() const;
     void saveSnapshot(const std::string& path) const;
     void writeReplay(const std::string& path) const;
+    void saveDurableCommit(const std::string& path) const;
     static WorldService replay(const std::string& path,
                                std::string contentRoot = ContentPackLoader::defaultRoot(),
                                std::unique_ptr<IProvider> provider = nullptr);

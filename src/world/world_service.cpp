@@ -3224,6 +3224,29 @@ void WorldService::writeReplay(const std::string& path) const {
     persistence_->saveReplay(path, lines);
 }
 
+void WorldService::saveDurableCommit(const std::string& path) const {
+    std::vector<Json> lines;
+    Json baseline = replayBaseline_.is_object() && !replayBaseline_.empty() ? replayBaseline_ : snapshotJson();
+    const auto baselineRevision = baseline.at("world_revision").get<std::uint64_t>();
+    Json baselineFact = baseline;
+    baselineFact.erase("events");
+    const Json currentFact = replayFactJson(state_, state_.events.size());
+    const auto patch = Json::diff(baselineFact, currentFact);
+    const bool hasChanges = !patch.empty() || state_.events.size() > replayBaselineEvents_.size();
+    lines.push_back(Json{{"kind", "replay_header"}, {"schema_version", 2}, {"state", baseline},
+                         {"transaction_count", hasChanges ? 1U : 0U}});
+    if (hasChanges) {
+        Json events = Json::array();
+        for (std::size_t index = replayBaselineEvents_.size(); index < state_.events.size(); ++index) {
+            events.push_back(worldEventToJson(state_.events[index]));
+        }
+        lines.push_back(Json{{"kind", "transaction"}, {"base_world_revision", baselineRevision},
+                             {"world_revision", state_.revision}, {"patch", patch}, {"events", events},
+                             {"state_digest", stateDigest(currentFact)}});
+    }
+    persistence_->saveDurableCommit(path, snapshotJson(), lines);
+}
+
 WorldService WorldService::fromContentSnapshot(const WorldContentPack& content, const Json& json,
                                                      std::unique_ptr<IProvider> provider) {
     WorldService service(std::move(provider));
