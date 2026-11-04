@@ -16,6 +16,7 @@
 #include <string_view>
 #include <tuple>
 #include <exception>
+#include <limits>
 #include <set>
 
 namespace tide_marks {
@@ -726,30 +727,44 @@ void WorldService::advanceMinutes(std::int64_t minutes) {
     pumpAsyncTurns();
     const auto target = state_.now.minute + minutes;
     while (state_.now.minute < target) {
+        const auto boundary = nextSimulationBoundary(target);
+        const auto elapsedMinutes = boundary - state_.now.minute;
+        if (elapsedMinutes <= 0) throw std::logic_error("simulation scheduler did not advance time");
         // A time step is one state transition. A long offline jump is a
-        // sequence of committed steps, not one unbounded transaction; this
-        // keeps event publication and observation aligned with the step that
-        // produced the fact.
+        // sequence of committed logical steps. When no rule can observe an
+        // intermediate minute, the scheduler coalesces those quiet steps into
+        // one transaction while preserving their revision count and final
+        // state. Observable boundaries still publish in timestamp order.
         std::set<std::string> dueNpcIds;
         bool autonomousBoundary = false;
         {
             TransactionScope transaction(*this);
-            ++state_.now.minute;
-            ++simulationMetrics_.simulatedMinutes;
+            state_.now.minute = boundary;
+            // TransactionScope commits one revision. Account for the quiet
+            // logical minutes that were coalesced before that final commit.
+            state_.revision += static_cast<std::uint64_t>(elapsedMinutes - 1);
+            simulationMetrics_.scheduledBoundaries++;
+            simulationMetrics_.simulatedMinutes += elapsedMinutes;
             expireStimuli();
             for (auto& [id, npc] : state_.npcs) {
                 const auto* authored = authoredNpc(id);
                 const auto tier = authored != nullptr ? authored->simulationTier : std::string("near");
                 const int interval = tier == "far" ? content_.simulationPolicy.farTickMinutes
                                                     : content_.simulationPolicy.nearTickMinutes;
-                if (state_.now.minute % interval != 0) {
-                    ++simulationMetrics_.skippedNpcTicks;
-                    continue;
+                const bool processDue = npc.activity.process &&
+                                        npc.activity.process->status == ProcessStatus::Running &&
+                                        npc.activity.process->completesAt.minute <= state_.now.minute;
+                const bool due = (interval > 0 && state_.now.minute % interval == 0) || processDue;
+                if (due) {
+                    dueNpcIds.insert(id);
+                    if (tier == "far") ++simulationMetrics_.farNpcTicks;
+                    else ++simulationMetrics_.nearNpcTicks;
+                    npc.lastSimulationTick = state_.now;
                 }
-                dueNpcIds.insert(id);
-                if (tier == "far") ++simulationMetrics_.farNpcTicks;
-                else ++simulationMetrics_.nearNpcTicks;
-                npc.lastSimulationTick = state_.now;
+                // There was no NPC wakeup at any coalesced minute: the next
+                // boundary is selected as the earliest one in the world.
+                simulationMetrics_.skippedNpcTicks +=
+                    static_cast<std::uint64_t>(elapsedMinutes - (due ? 1 : 0));
             }
             resumeSuspendedProcesses(dueNpcIds);
             tickProcesses(dueNpcIds);
@@ -776,6 +791,51 @@ void WorldService::advanceMinutes(std::int64_t minutes) {
     }
     pumpAsyncTurns();
     syncNpcEntityState();
+}
+
+std::int64_t WorldService::nextSimulationBoundary(std::int64_t target) const {
+    const auto current = state_.now.minute;
+    auto boundary = target;
+    const auto consider = [&boundary, current, target](std::int64_t candidate) {
+        if (candidate > current && candidate <= target) boundary = std::min(boundary, candidate);
+    };
+    const auto nextMultiple = [current](std::int64_t interval) {
+        if (interval <= 0) return current + 1;
+        return ((current / interval) + 1) * interval;
+    };
+
+    // Hour and day boundaries drive authored schedules, need decay, daily
+    // memories, activities and autonomous reassessment.
+    consider(nextMultiple(kMinutesPerHour));
+    consider(nextMultiple(kMinutesPerDay));
+
+    for (const auto& [npcId, npc] : state_.npcs) {
+        const auto* authored = authoredNpc(npcId);
+        const auto interval = authored != nullptr && authored->simulationTier == "far"
+                                  ? content_.simulationPolicy.farTickMinutes
+                                  : content_.simulationPolicy.nearTickMinutes;
+        consider(nextMultiple(std::max(1, interval)));
+        if (npc.activity.process && npc.activity.process->status == ProcessStatus::Running) {
+            consider(std::max(current + 1, npc.activity.process->completesAt.minute));
+        }
+        for (const auto& stimulus : npc.stimuli) {
+            if (stimulus.active) consider(std::max(current + 1, stimulus.expiresAt.minute));
+        }
+    }
+    for (const auto& [id, promise] : state_.promises) {
+        (void)id;
+        if (promise.status == PromiseStatus::Accepted || promise.status == PromiseStatus::Renegotiated) {
+            consider(std::max(current + 1, promise.due.minute));
+        }
+    }
+    for (const auto& [id, contract] : state_.exchangeContracts) {
+        (void)id;
+        if (contract.status == ExchangeContractStatus::Proposed ||
+            contract.status == ExchangeContractStatus::Accepted) {
+            consider(std::max(current + 1, contract.due.minute));
+        }
+    }
+    return boundary;
 }
 
 void WorldService::advanceTo(GameTime target) {

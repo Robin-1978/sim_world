@@ -2027,6 +2027,17 @@ void offline_scheduler_baseline_is_measurable() {
     expect(village.simulationMetrics().nearNpcTicks > village.simulationMetrics().farNpcTicks &&
                harbor.simulationMetrics().farNpcTicks > 0 && villageSnapshotBytes > 0 && harborSnapshotBytes > 0,
            "the baseline exposes near/far work and snapshot size for offline profiling");
+
+    auto minimalContent = ContentPackLoader::load(
+        (std::filesystem::path(TIDE_MARKS_TEST_DATA_DIR) / "minimal-pack").string());
+    minimalContent.npcDeliberation.enabled = false;
+    auto farOnly = WorldService::fromContent(minimalContent, std::make_unique<MockProvider>());
+    farOnly.advanceMinutes(kMinutesPerDay);
+    expect(farOnly.simulationMetrics().scheduledBoundaries <
+               static_cast<std::uint64_t>(farOnly.simulationMetrics().simulatedMinutes),
+           "far-only worlds coalesce quiet minutes at scheduled wakeup boundaries");
+    expect(farOnly.simulationMetrics().simulatedMinutes == kMinutesPerDay,
+           "coalesced scheduling preserves the requested elapsed world time");
 }
 
 void world_intelligence_detects_anomalies_and_runs_counterfactuals() {

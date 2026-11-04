@@ -42,7 +42,7 @@
 | 提交效果 Replay | 已完成最小闭环 | 显式生成 Replay Package 时保存基线、聚合 JSON Patch、事件范围、Revision 和状态摘要；`replay()` 实际应用 Patch、追加事件并验证最终 Snapshot；仍明确不是 Event Sourcing，逐领域事件 reducer 属于后续 |
 | Persistence Adapter | 原型适配器已完成，生产 durable commit 未完成 | `IWorldPersistence` 同时支持默认 `JsonFilePersistence` 与构建可选的 `SqlitePersistence`；SQLite 已对 Snapshot/Replay 工件做单事务替换与读回回归，但 WorldState、事件、Revision、幂等记录和 Overlay 的统一 durable commit 仍按 ADR 作为后续阶段 |
 | WorldService 职责拆分 | 未完成 | 先抽 `TransactionManager`、`EventJournal`、`SimulationScheduler`、`IntelligenceCoordinator`，事实写入仍只经统一事务边界；不做微服务 |
-| 事件驱动调度 | 未完成 | 直接跳到下一日程/完成/截止边界；大规模推进不按分钟全量遍历和备份全部 WorldState，同时通过分区等价性回归 |
+| 事件驱动调度 | 已完成原型闭环 | `advanceMinutes` 选择下一个小时/日程、NPC 唤醒、过程完成、刺激到期或合同截止边界；安静分钟合并推进但保留逐分钟 Revision 语义，远场回归验证边界数显著低于模拟分钟数 |
 | ECS 定位 | 已冻结为投影模型 | `WorldState` 是事实权威，`EntityRegistry` 是当前已知类型的查询投影；自定义 Component 进入权威持久化前，不宣称支持通用动态 ECS |
 | 行动效用分项 | 已完成最小闭环 | `utility_profile` 可声明资源成本、风险、关系影响、未来价值和结构惩罚；范围校验、确定性合成和审计分项已接入；复杂社会效用模型仍由内容扩展 |
 
@@ -175,7 +175,7 @@ Evolution Proposal Schema、提案库、EventLog 来源事实、回放沙箱、�
 | P1-1 | 异步 Provider TurnQueue | 已完成：模型请求不阻塞 World Tick；过期结果可审计且不改事实 |
 | P1-2 | 资源转移、预留/抢占、移动、冲突/安全、承诺/合同、知识和生产 operator | 已完成基础 operator 与事务/事件/回放契约；合同提案/接受/结算/过期、双侧失败原子性、参与方生命周期复检、失败审计和文本查询已覆盖，抵押、价格和复杂仲裁仍是扩展项 |
 | P1-3 | 潮门港社会切片 | 已完成最小切片：交易、组织/阵营关系和近远场模拟形成可回放因果链；家庭、任务和 UI 属于后续内容扩展 |
-| P1-4 | 调度与性能基线 | 已完成：`advance_to` 边界、多个实例离线推进、近/远场唤醒、跳过检查和快照大小有回归基准 |
+| P1-4 | 调度与性能基线 | 已完成：`advance_to` 边界、多个实例离线推进、近/远场唤醒、安静分钟合并、跳过检查和快照大小有回归基准 |
 | P2-1 | Evolution Sandbox | 已完成：从快照运行候选变化，输出指标、事件差异和来源，不污染原始 Pack |
 | P2-2 | Overlay 激活与回滚 | 已完成：内容/策略/日程版本可审计、可观察，沙箱与提案必须锁定当前 Revision，快照恢复后仍可按栈回退 |
 | P2-3 | 场景实验 | 已完成当前通用边界：资源、组织指标、NPC 需求的声明式反事实实验；小店、利率、政策等具体机制待其事实模型落地后再接入 |

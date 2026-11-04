@@ -58,6 +58,7 @@ struct SimulationMetrics {
     std::uint64_t nearNpcTicks{0};
     std::uint64_t farNpcTicks{0};
     std::uint64_t skippedNpcTicks{0};
+    std::uint64_t scheduledBoundaries{0};
     std::int64_t simulatedMinutes{0};
 };
 
@@ -259,6 +260,7 @@ private:
     void reviseNpcStrategies(int day);
     void applyPromiseDeadline();
     void applyExchangeDeadlines();
+    [[nodiscard]] std::int64_t nextSimulationBoundary(std::int64_t target) const;
     CommandResult reject(std::string code, std::string message) const;
 };
 
