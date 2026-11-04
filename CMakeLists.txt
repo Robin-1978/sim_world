@@ -104,6 +104,7 @@ add_library(tide_marks_core
     src/world/security_system.cpp
     src/world/cognition_system.cpp
     src/world/stimulus_system.cpp
+    src/world/entity_projection_system.cpp
     src/world/world_service.cpp
     src/world/world_state_json.cpp
 )

@@ -8,6 +8,7 @@
 #include "world/security_system.hpp"
 #include "world/cognition_system.hpp"
 #include "world/stimulus_system.hpp"
+#include "world/entity_projection_system.hpp"
 #include "world/resource_system.hpp"
 #include "world/social_system.hpp"
 #include "world/meta_action_executor.hpp"
@@ -233,72 +234,11 @@ WorldService WorldService::fromContent(const WorldContentPack& content,
 }
 
 void WorldService::rebuildEntityRegistry() {
-    entities_ = EntityRegistry{};
-    const auto playerState = state_.entities.find(kPlayerId);
-    if (playerState == state_.entities.end() || playerState->second.lifecycle != EntityLifecycle::Destroyed) {
-        entities_.create(EntityRecord{kPlayerId, kPlayerId, playerState == state_.entities.end() ||
-                                                   playerState->second.lifecycle == EntityLifecycle::Active});
-    }
-    if (entities_.contains(kPlayerId)) entities_.set<TransformComponent>(kPlayerId, TransformComponent{0.0, 0.0, 0.0, 0.0});
-    const auto defaultLocation = content_.spatialEntities.empty() ? std::string{} : content_.spatialEntities.front().id;
-    const auto regionId = state_.worldId.empty() ? content_.worldId : state_.worldId;
-    if (entities_.contains(kPlayerId)) {
-        entities_.set<LocationComponent>(kPlayerId, LocationComponent{defaultLocation, regionId});
-        InventoryComponent inventory;
-        if (const auto found = state_.inventories.find(kPlayerId); found != state_.inventories.end()) {
-            inventory.quantities = found->second;
-        }
-        entities_.set<InventoryComponent>(kPlayerId, std::move(inventory));
-    }
-    for (const auto& authored : content_.spatialEntities) {
-        const auto entity = spatialEntityId(authored.id);
-        const auto stateEntity = state_.entities.find(entity);
-        if (stateEntity != state_.entities.end() && stateEntity->second.lifecycle == EntityLifecycle::Destroyed) continue;
-        const bool active = stateEntity == state_.entities.end() || stateEntity->second.lifecycle == EntityLifecycle::Active;
-        if (!entities_.create(EntityRecord{entity, authored.kind, active})) continue;
-        entities_.set<SpatialComponent>(entity, authored.spatial);
-        entities_.set<LocationComponent>(entity, LocationComponent{authored.id, regionId});
-    }
-    for (const auto& authored : content_.links) {
-        const auto entity = linkEntityId(authored.id);
-        const auto stateEntity = state_.entities.find(entity);
-        if (stateEntity != state_.entities.end() && stateEntity->second.lifecycle == EntityLifecycle::Destroyed) continue;
-        const bool active = stateEntity == state_.entities.end() || stateEntity->second.lifecycle == EntityLifecycle::Active;
-        if (!entities_.create(EntityRecord{entity, authored.kind, active})) continue;
-        auto link = authored.link;
-        if (const auto runtime = state_.links.find(authored.id); runtime != state_.links.end()) {
-            link.traversable = runtime->second.traversable;
-            link.locked = runtime->second.locked;
-        }
-        entities_.set<LinkComponent>(entity, std::move(link));
-    }
-    for (const auto& [id, npc] : state_.npcs) {
-        const auto entity = npcEntityId(id);
-        const auto stateEntity = state_.entities.find(entity);
-        if (stateEntity != state_.entities.end() && stateEntity->second.lifecycle == EntityLifecycle::Destroyed) continue;
-        const bool active = stateEntity == state_.entities.end() || stateEntity->second.lifecycle == EntityLifecycle::Active;
-        entities_.create(EntityRecord{entity, "npc", active});
-        entities_.set<NpcComponent>(entity, NpcComponent{id, npc.mode});
-        entities_.set<LocationComponent>(entity, LocationComponent{npc.location, content_.worldId});
-        entities_.set<RenderableComponent>(entity, RenderableComponent{"npc." + id, true});
-        InventoryComponent inventory;
-        if (const auto found = state_.inventories.find(entity); found != state_.inventories.end()) {
-            inventory.quantities = found->second;
-        }
-        entities_.set<InventoryComponent>(entity, std::move(inventory));
-    }
-    for (const auto& [id, runtimeEntity] : state_.entities) {
-        if (runtimeEntity.lifecycle == EntityLifecycle::Destroyed || entities_.contains(id)) continue;
-        if (!entities_.create(EntityRecord{id, runtimeEntity.kind, runtimeEntity.lifecycle == EntityLifecycle::Active})) continue;
-    }
+    EntityProjectionSystem(*this).rebuild();
 }
 
 void WorldService::syncNpcEntityState() {
-    for (const auto& [id, npc] : state_.npcs) {
-        const auto entity = npcEntityId(id);
-        entities_.set<NpcComponent>(entity, NpcComponent{id, npc.mode});
-        entities_.set<LocationComponent>(entity, LocationComponent{npc.location, state_.worldId});
-    }
+    EntityProjectionSystem(*this).syncNpc();
 }
 
 bool WorldService::hasNpc(const std::string& npcId) const {
