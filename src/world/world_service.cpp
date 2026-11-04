@@ -1,5 +1,6 @@
 #include "world/world_service.hpp"
 #include "world/resource_system.hpp"
+#include "world/social_system.hpp"
 #include "world/world_state_json.hpp"
 #include "npc/drive_system.hpp"
 #include "npc/state_machine.hpp"
@@ -1425,21 +1426,15 @@ CommandResult WorldService::adjustRelationship(const std::string& npcId, const s
                                                RelationshipAxes delta, const std::string& actor,
                                                const std::string& turnId, const std::string& reason) {
     TransactionScope transaction(*this);
-    auto npc = state_.npcs.find(npcId);
-    if (npc == state_.npcs.end()) return reject("unknown_npc", "The relationship actor does not exist.");
-    if (target.empty() || target == npcId ||
-        (!state_.npcs.contains(target) && target != kPlayerId && !state_.socialGroups.contains(target))) {
-        return reject("unknown_relationship_target", "The relationship target does not exist.");
-    }
     if (actor != kWorldActor && actor != kPlayerId && actor != npcId) {
         return reject("unauthorized", "Only the actor or world authority may change this relationship.");
     }
     if (!turnId.empty() && state_.processedTurnIds.contains(turnId)) {
         return reject("duplicate_turn", "The relationship change was already applied.");
     }
-    applyRelationshipDelta(npc->second.relationships[target],
-                           RelationshipDelta{delta.trust, delta.respect, delta.fear, delta.owed});
-    ++npc->second.stateVersion;
+    const auto result = SocialSystem::adjustRelationship(state_, npcId, target, delta);
+    if (!result.accepted) return reject(result.code, result.message);
+    ++state_.npcs.at(npcId).stateVersion;
     if (!turnId.empty()) state_.processedTurnIds.insert(turnId);
     const auto event = addEvent("relationship.adjusted", actor, target,
                                 reason.empty() ? "A relationship changed" : reason,
@@ -1452,17 +1447,14 @@ CommandResult WorldService::adjustGroupMetric(const std::string& groupId, const 
                                               double delta, const std::string& actor,
                                               const std::string& turnId, const std::string& reason) {
     TransactionScope transaction(*this);
-    if (metric.empty() || !std::isfinite(delta)) return reject("invalid_group_metric", "A group metric needs a finite delta.");
-    auto group = state_.socialGroups.find(groupId);
-    if (group == state_.socialGroups.end()) return reject("unknown_social_group", "The social group does not exist.");
     if (!turnId.empty() && state_.processedTurnIds.contains(turnId)) return reject("duplicate_turn", "The group metric change was already applied.");
-    const double before = group->second.metrics[metric];
-    group->second.metrics[metric] += delta;
+    const auto result = SocialSystem::adjustGroupMetric(state_, groupId, metric, delta);
+    if (!result.accepted) return reject(result.code, result.message);
     if (!turnId.empty()) state_.processedTurnIds.insert(turnId);
     const auto event = addEvent(
         "social.group_metric", actor, groupId, reason.empty() ? "A social group metric changed" : reason,
-        Json{{"group_id", groupId}, {"metric", metric}, {"before", before},
-             {"after", group->second.metrics[metric]}, {"delta", delta}});
+        Json{{"group_id", groupId}, {"metric", metric}, {"before", result.before},
+             {"after", result.after}, {"delta", delta}});
     return CommandResult{true, "ok", metric, event};
 }
 
@@ -1470,13 +1462,9 @@ CommandResult WorldService::setGroupMembership(const std::string& groupId, const
                                                const std::string& role, bool active,
                                                const std::string& actor, const std::string& turnId) {
     TransactionScope transaction(*this);
-    auto group = state_.socialGroups.find(groupId);
-    if (group == state_.socialGroups.end()) return reject("unknown_social_group", "The social group does not exist.");
-    if (!state_.npcs.contains(npcId)) return reject("unknown_npc", "The group member does not exist.");
-    if (active && role.empty()) return reject("invalid_group_role", "An active membership needs a role.");
     if (!turnId.empty() && state_.processedTurnIds.contains(turnId)) return reject("duplicate_turn", "The membership change was already applied.");
-    if (active) group->second.members[npcId] = role;
-    else group->second.members.erase(npcId);
+    const auto result = SocialSystem::setMembership(state_, groupId, npcId, role, active);
+    if (!result.accepted) return reject(result.code, result.message);
     if (!turnId.empty()) state_.processedTurnIds.insert(turnId);
     const auto event = addEvent(
         active ? "social.member_joined" : "social.member_left", actor, groupId,
@@ -2643,19 +2631,14 @@ bool WorldService::applyMetaAction(const std::string& npcId, const std::string& 
         return true;
     }
     if (operation == "relationship.adjust") {
-        auto npc = state_.npcs.find(npcId);
-        if (npc == state_.npcs.end()) return false;
         const auto target = args.value("target", "player");
-        if (target.empty() || target == npcId ||
-            (!state_.npcs.contains(target) && target != kPlayerId && !state_.socialGroups.contains(target))) {
-            return false;
-        }
-        RelationshipDelta delta;
+        RelationshipAxes delta;
         delta.trust = args.value("trust", 0.0);
         delta.respect = args.value("respect", 0.0);
         delta.fear = args.value("fear", 0.0);
         delta.owed = args.value("owed", 0.0);
-        applyRelationshipDelta(npc->second.relationships[target], delta);
+        const auto result = SocialSystem::adjustRelationship(state_, npcId, target, delta);
+        if (!result.accepted) return false;
         addEvent("action.relationship", npcId, target, "A behavior recipe changed a relationship",
                  Json{{"action_id", actionId}, {"target", target}, {"trust", delta.trust}, {"respect", delta.respect},
                       {"fear", delta.fear}, {"owed", delta.owed}});
