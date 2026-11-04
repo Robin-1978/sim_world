@@ -398,12 +398,15 @@ DecisionContext WorldService::decisionContext(const std::string& npcId) const {
         if (state_.npcs.contains(owner)) return true;
         return owner.starts_with("npc:") && state_.npcs.contains(owner.substr(4));
     };
+    const auto resourceVisible = [&npc, &npcId, &ownerIsNpc](const ResourceContent& definition) {
+        const bool locationVisible = definition.location.empty() || definition.location == npc.location;
+        const bool ownerVisible = !ownerIsNpc(definition.owner) || definition.owner == npcId ||
+                                  definition.owner == npcEntityId(npcId);
+        return locationVisible && ownerVisible;
+    };
     std::ostringstream resources;
     for (const auto& [id, resourceDefinition] : content_.resources) {
-        const bool locationVisible = resourceDefinition.location.empty() || resourceDefinition.location == npc.location;
-        const bool ownerVisible = !ownerIsNpc(resourceDefinition.owner) ||
-                                  resourceDefinition.owner == npcId || resourceDefinition.owner == npcEntityId(npcId);
-        if (!locationVisible || !ownerVisible) continue;
+        if (!resourceVisible(resourceDefinition)) continue;
         resources << id << '=' << resourceValue(id) << ' ' << resourceDefinition.unit << ';';
     }
     context.perception = "At " + npc.location + ", it is " + state_.now.toString() +
@@ -425,6 +428,8 @@ DecisionContext WorldService::decisionContext(const std::string& npcId) const {
     if (stimuli.str().empty()) stimuli << "none beyond the current public state;";
     context.externalStimuli = stimuli.str();
     for (const auto& [resourceId, resource] : state_.resources) {
+        const auto definition = content_.resources.find(resourceId);
+        if (definition == content_.resources.end() || !resourceVisible(definition->second)) continue;
         if (resource.amount - resource.reserved > 0) continue;
         context.constraints.push_back(StructuralConstraintView{
             "resource:" + resourceId + ":unavailable", "resource", resourceId,
@@ -591,12 +596,8 @@ DecisionContext WorldService::decisionContext(const std::string& npcId) const {
         {"active_stimuli", Json::array()}};
     for (const auto& [resourceId, resource] : state_.resources) {
         const auto definition = content_.resources.find(resourceId);
-        if (definition == content_.resources.end()) continue;
+        if (definition == content_.resources.end() || !resourceVisible(definition->second)) continue;
         const auto& authoredResource = definition->second;
-        const bool locationVisible = authoredResource.location.empty() || authoredResource.location == npc.location;
-        const bool ownerVisible = !ownerIsNpc(authoredResource.owner) ||
-                                  authoredResource.owner == npcId || authoredResource.owner == npcEntityId(npcId);
-        if (!locationVisible || !ownerVisible) continue;
         context.worldSnapshot["public_resources"][resourceId] =
             Json{{"amount", resource.amount}, {"reserved", resource.reserved},
                  {"location", authoredResource.location}, {"unit", authoredResource.unit},

@@ -967,7 +967,9 @@ void decision_context_projects_location_relevant_resources() {
     expect(mira.worldSnapshot["public_resources"].contains("cooperation") &&
                mira.worldSnapshot["public_resources"].at("grain").at("location") == "granary" &&
                mira.perception.find("boat_integrity") == std::string::npos &&
-               lorn.perception.find("grain") == std::string::npos,
+               lorn.perception.find("grain") == std::string::npos &&
+               mira.structuralConstraints.find("boat_integrity") == std::string::npos &&
+               lorn.structuralConstraints.find("grain") == std::string::npos,
            "locationless collective resources remain visible and resource provenance stays explicit");
 }
 
