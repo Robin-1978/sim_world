@@ -28,6 +28,7 @@ public:
                                               const std::string& trigger,
                                               const Json& validationFeedback);
     std::size_t pumpAsyncProposals();
+    void scheduleAutomatic();
     CommandResult activateOverlay(const EvolutionProposal& proposal,
                                   const EvolutionSandboxResult& sandbox);
     CommandResult rollbackOverlay(const std::string& proposalId);

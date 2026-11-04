@@ -173,6 +173,42 @@ ProviderResponse WorldEvolutionSystem::requestProposal(const WorldService& world
     return world.provider_->proposeEvolution(context, evolutionLevel, validationFeedback);
 }
 
+void WorldEvolutionSystem::scheduleAutomatic() {
+    // Automatic evolution is a content-configured wakeup. It only captures a
+    // read-only context and queues a real provider request; validation,
+    // sandboxing and independent approval remain in pumpAsyncProposals().
+    if (!world_.evolution_ || world_.provider_->name() == "mock" ||
+        !world_.content_.evolutionPolicy.enabled || world_.state_.now.minute <= 0 ||
+        world_.state_.now.minute % kMinutesPerDay != 0) {
+        return;
+    }
+    const int day = world_.state_.now.day();
+    const auto schedule = [this, day](const std::string& level, int intervalDays) {
+        if (intervalDays <= 0 || day % intervalDays != 0) return;
+        const std::string key = "day:" + std::to_string(day) + ":" + level;
+        if (world_.content_.evolutionPolicy.coalescePending && world_.pendingEvolutionKeys_.contains(key)) return;
+        const std::string trigger = "day_boundary:" + std::to_string(day);
+        const auto context = proposalContext(world_, level, trigger, Json::object());
+        if (context.empty()) return;
+        EvolutionRequest request;
+        request.requestId = "evolution:auto:" + level + ":" + std::to_string(day) + ":" +
+                            std::to_string(world_.state_.revision) + ":attempt:0";
+        request.key = key;
+        request.evolutionLevel = level;
+        request.trigger = trigger;
+        request.baseContentVersion = world_.content_.contentVersion;
+        request.baseWorldRevision = world_.state_.revision;
+        request.createdAt = world_.state_.now;
+        request.deadline = GameTime{world_.state_.now.minute + world_.content_.evolutionPolicy.maxProposalAgeMinutes};
+        request.coalescePending = world_.content_.evolutionPolicy.coalescePending;
+        request.context = context;
+        if (!world_.evolution_->submit(std::move(request)).accepted) return;
+        world_.pendingEvolutionKeys_.insert(key);
+    };
+    schedule("level1", world_.content_.evolutionPolicy.level1IntervalDays);
+    schedule("level2", world_.content_.evolutionPolicy.level2IntervalDays);
+}
+
 std::size_t WorldEvolutionSystem::pumpAsyncProposals() {
     if (!world_.evolution_) return 0;
     const auto results = world_.evolution_->drain();

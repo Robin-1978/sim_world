@@ -434,40 +434,7 @@ void WorldService::enqueueAutonomousTurn(const std::string& npcId, const std::st
 }
 
 void WorldService::scheduleAutomaticEvolution() {
-    // MockProvider is an explicit deterministic test adapter and has no
-    // evolution implementation. Do not enqueue failed mock work into a
-    // partitioned offline simulation; product providers remain fail-closed
-    // and are scheduled from the configured policy below.
-    if (!evolution_ || provider_->name() == "mock" || !content_.evolutionPolicy.enabled || state_.now.minute <= 0 ||
-        state_.now.minute % kMinutesPerDay != 0) {
-        return;
-    }
-    const int day = state_.now.day();
-    const auto schedule = [this, day](const std::string& level, int intervalDays) {
-        if (intervalDays <= 0 || day % intervalDays != 0) return;
-        const std::string key = "day:" + std::to_string(day) + ":" + level;
-        if (content_.evolutionPolicy.coalescePending && pendingEvolutionKeys_.contains(key)) return;
-        const std::string trigger = "day_boundary:" + std::to_string(day);
-        const auto context = WorldEvolutionSystem::proposalContext(*this, level, trigger, Json::object());
-        if (context.empty()) return;
-        EvolutionRequest request;
-        request.requestId = "evolution:auto:" + level + ":" + std::to_string(day) + ":" +
-                            std::to_string(state_.revision) + ":attempt:0";
-        request.key = key;
-        request.evolutionLevel = level;
-        request.trigger = trigger;
-        request.baseContentVersion = content_.contentVersion;
-        request.baseWorldRevision = state_.revision;
-        request.createdAt = state_.now;
-        request.deadline = GameTime{state_.now.minute + content_.evolutionPolicy.maxProposalAgeMinutes};
-        request.coalescePending = content_.evolutionPolicy.coalescePending;
-        request.context = context;
-        const auto submitted = evolution_->submit(std::move(request));
-        if (!submitted.accepted) return;
-        pendingEvolutionKeys_.insert(key);
-    };
-    schedule("level1", content_.evolutionPolicy.level1IntervalDays);
-    schedule("level2", content_.evolutionPolicy.level2IntervalDays);
+    WorldEvolutionSystem(*this).scheduleAutomatic();
 }
 
 std::size_t WorldService::pumpAsyncTurns() {
