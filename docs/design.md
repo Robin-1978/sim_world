@@ -400,7 +400,7 @@ Behavior DSL 只组合注册节点、条件和元动作，例如：
   {
   "id": "unload_crate",
   "allowed_actors": ["role:dockworker"],
-  "reservation_scope": "transaction",
+  "reservation_mode": "input_resources",
   "root": {
     "type": "sequence",
     "children": [
