@@ -224,5 +224,17 @@
       "observed_dialogue": "I am not in an active process right now; I am at granary.",
       "result": "private goal was not disclosed; the idle-response template produced a direct answer with action_id empty and no world change"
     }
+  },
+  "latest_smoke": {
+    "command": "./build/tide_marks_headless --profile data/intelligence-profile.json --provider profile --days 0",
+    "provider": "llama.cpp",
+    "understanding": "information_request; action_requested=false",
+    "decision": {
+      "action_id": "",
+      "dialogue": "I am not in an active process right now; I am at granary.",
+      "world_change": false
+    },
+    "runtime_metadata_boundary": "world/instance/content/prompt/revision identity is carried in runtime_metadata and excluded from worldSnapshot",
+    "result": "passed"
   }
 }
