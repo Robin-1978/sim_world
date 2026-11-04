@@ -76,6 +76,11 @@ struct NpcDeliberationPolicy {
     int cooldownMinutes{360};
 };
 
+struct SimulationPolicy {
+    int nearTickMinutes{1};
+    int farTickMinutes{15};
+};
+
 // A decision channel is a content-defined interaction contract. It tells the
 // runtime how to project an input into the provider, how to record the result,
 // and which world-action default applies. The channel id is data; the runtime
@@ -98,10 +103,20 @@ struct NpcContent {
     std::string initialScheduleLabel;
     int initialGoalStage{0};
     std::string initialStrategy{"routine"};
+    std::string simulationTier{"near"};
     std::map<std::string, double> initialPeerTrust;
     std::vector<NeedContent> needs;
     std::vector<ScheduleSlot> schedule;
     std::vector<ActionCandidate> actions;
+};
+
+struct SocialGroupContent {
+    std::string id;
+    std::string kind;
+    std::string name;
+    std::map<std::string, double> metrics;
+    std::map<std::string, std::string> initialMembers;
+    std::map<std::string, RelationshipAxes> initialRelationships;
 };
 
 struct SpatialContent {
@@ -221,6 +236,7 @@ struct WorldContentPack {
     DriveAdaptationPolicy driveAdaptation;
     StimulusPolicy stimulusPolicy;
     NpcDeliberationPolicy npcDeliberation;
+    SimulationPolicy simulationPolicy;
     ConversationPolicy conversationPolicy;
     std::map<std::string, DecisionChannelPolicy> decisionChannels;
     std::string conversationChannelId;
@@ -229,6 +245,7 @@ struct WorldContentPack {
     std::vector<StimulusRule> stimulusRules;
     std::map<std::string, ResourceContent> resources;
     std::vector<NpcContent> npcs;
+    std::vector<SocialGroupContent> socialGroups;
     std::vector<ActivityContent> activities;
     std::vector<StrategyRuleContent> strategyRules;
     std::vector<SpatialContent> spatialEntities;

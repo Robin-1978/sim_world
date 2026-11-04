@@ -28,6 +28,10 @@
     "min_interrupt_salience": 0.85,
     "cooldown_minutes": 240
   },
+  "simulation_policy": {
+    "near_tick_minutes": 1,
+    "far_tick_minutes": 5
+  },
   "promise_policy": {
     "renegotiation_extension_minutes": 1440,
     "broken": {
@@ -149,6 +153,20 @@
       "tags": [
         "mechanism"
       ]
+    }
+  ],
+  "social_groups": [
+    {
+      "id": "workshop_crew",
+      "kind": "organization",
+      "name": "Workshop Crew",
+      "metrics": {
+        "morale": 0.6,
+        "legitimacy": 0.5
+      },
+      "initial_members": {
+        "sable": "operator"
+      }
     }
   ],
   "conversation_policy": {

@@ -216,8 +216,11 @@ Json worldStateToJson(const WorldState& state) {
         for (const auto& fact : npc.knowledge) knowledge.push_back(knowledgeJson(fact));
         Json experiences = Json::array();
         for (const auto& experience : npc.experiences) experiences.push_back(experienceJson(experience));
-        Json peerTrust = Json::object();
-        for (const auto& [peer, trust] : npc.peerTrust) peerTrust[peer] = trust;
+        Json relationships = Json::object();
+        for (const auto& [target, relation] : npc.relationships) {
+            relationships[target] = Json{{"trust", relation.trust}, {"respect", relation.respect},
+                                          {"fear", relation.fear}, {"owed", relation.owed}};
+        }
         Json needs = Json::object();
         for (const auto& [needId, need] : npc.needs) needs[needId] = needStateJson(need);
         Json stimulusSensitivity = Json::object();
@@ -244,13 +247,13 @@ Json worldStateToJson(const WorldState& state) {
         npcs[id] = Json{{"definition_id", npc.definitionId}, {"location", npc.location},
                         {"schedule_label", npc.scheduleLabel}, {"goal_stage", npc.goalStage},
                         {"needs", needs},
-                        {"relation", {{"trust", npc.playerRelation.trust}, {"respect", npc.playerRelation.respect},
-                                       {"fear", npc.playerRelation.fear}, {"owed", npc.playerRelation.owed}}},
+                        {"relationships", relationships},
                         {"memories", memories}, {"knowledge", knowledge}, {"experiences", experiences},
                         {"open_promises", npc.openPromises},
                         {"state_version", npc.stateVersion}, {"mode", npc.mode}, {"strategy", npc.strategy},
-                        {"peer_trust", peerTrust}, {"stimulus_sensitivity", stimulusSensitivity},
+                        {"stimulus_sensitivity", stimulusSensitivity},
                         {"stimuli", stimuli}, {"last_autonomous_turn", npc.lastAutonomousTurn.minute},
+                        {"last_simulation_tick", npc.lastSimulationTick.minute},
                         {"activity", activity}};
     }
     Json promises = Json::object();
@@ -258,6 +261,16 @@ Json worldStateToJson(const WorldState& state) {
         promises[id] = Json{{"id", promise.id}, {"from", promise.from}, {"to", promise.to},
                             {"description", promise.description}, {"due", promise.due.minute},
                             {"status", toString(promise.status)}, {"version", promise.version}};
+    }
+    Json socialGroups = Json::object();
+    for (const auto& [id, group] : state.socialGroups) {
+        Json relations = Json::object();
+        for (const auto& [target, relation] : group.relationships) {
+            relations[target] = Json{{"trust", relation.trust}, {"respect", relation.respect},
+                                      {"fear", relation.fear}, {"owed", relation.owed}};
+        }
+        socialGroups[id] = Json{{"definition_id", group.definitionId}, {"metrics", group.metrics},
+                                {"members", group.members}, {"relationships", relations}};
     }
     Json events = Json::array();
     for (const auto& event : state.events) events.push_back(worldEventToJson(event));
@@ -282,14 +295,15 @@ Json worldStateToJson(const WorldState& state) {
                                 {"overlay_version", overlay.overlayVersion},
                                 {"operations", overlay.operations}});
     }
-    return Json{{"save_schema_version", 12}, {"simulation_version", "adaptive-runtime-p1.12"},
+    return Json{{"save_schema_version", 13}, {"simulation_version", "adaptive-runtime-p1.13"},
                 {"event_sequence", state.events.size()}, {"world_id", state.worldId},
                 {"instance_id", state.instanceId},
                 {"content_version", state.contentVersion}, {"now", state.now.minute},
                 {"revision", state.revision},
                 {"resources", resources}, {"inventories", inventories}, {"security", security},
                 {"active_overlays", overlays},
-                {"entities", entities}, {"links", links}, {"npcs", npcs}, {"promises", promises}, {"events", events},
+                {"entities", entities}, {"links", links}, {"npcs", npcs}, {"social_groups", socialGroups},
+                {"promises", promises}, {"events", events},
                 {"processed_turn_ids", state.processedTurnIds}};
 }
 
@@ -364,11 +378,14 @@ WorldState deserializeWorldState(const Json& json) {
         for (auto need = needs.begin(); need != needs.end(); ++need) {
             npc.needs[need.key()] = needStateFromJson(need.value());
         }
-        const auto relation = value.value("relation", Json::object());
-        npc.playerRelation = RelationshipAxes{jsonValue<double>(relation, "trust", 0.35),
-                                              jsonValue<double>(relation, "respect", 0.35),
-                                              jsonValue<double>(relation, "fear", 0.0),
-                                              jsonValue<double>(relation, "owed", 0.0)};
+        const auto relationships = value.value("relationships", Json::object());
+        for (auto relation = relationships.begin(); relation != relationships.end(); ++relation) {
+            npc.relationships[relation.key()] = RelationshipAxes{
+                jsonValue<double>(relation.value(), "trust", 0.35),
+                jsonValue<double>(relation.value(), "respect", 0.35),
+                jsonValue<double>(relation.value(), "fear", 0.0),
+                jsonValue<double>(relation.value(), "owed", 0.0)};
+        }
         for (const auto& memory : value.value("memories", Json::array())) npc.memories.push_back(memoryFromJson(memory));
         for (const auto& fact : value.value("knowledge", Json::array())) npc.knowledge.push_back(knowledgeFromJson(fact));
         for (const auto& experience : value.value("experiences", Json::array())) {
@@ -378,10 +395,6 @@ WorldState deserializeWorldState(const Json& json) {
         npc.stateVersion = jsonValue<std::uint64_t>(value, "state_version", 0);
         npc.mode = jsonValue<std::string>(value, "mode", "working");
         npc.strategy = jsonValue<std::string>(value, "strategy", "routine");
-        const auto peerTrust = value.value("peer_trust", Json::object());
-        for (auto peer = peerTrust.begin(); peer != peerTrust.end(); ++peer) {
-            npc.peerTrust[peer.key()] = peer.value().get<double>();
-        }
         const auto stimulusSensitivity = value.value("stimulus_sensitivity", Json::object());
         for (auto sensitivity = stimulusSensitivity.begin(); sensitivity != stimulusSensitivity.end(); ++sensitivity) {
             npc.stimulusSensitivity[sensitivity.key()] = sensitivity.value().get<double>();
@@ -390,6 +403,7 @@ WorldState deserializeWorldState(const Json& json) {
             npc.stimuli.push_back(stimulusFromJson(stimulus));
         }
         npc.lastAutonomousTurn = GameTime{jsonValue<std::int64_t>(value, "last_autonomous_turn", -1)};
+        npc.lastSimulationTick = GameTime{jsonValue<std::int64_t>(value, "last_simulation_tick", -1)};
         const auto activity = value.value("activity", Json::object());
         if (activity.is_object() && activity.contains("goal") && activity.at("goal").is_object()) {
             const auto& goal = activity.at("goal");
@@ -410,6 +424,30 @@ WorldState deserializeWorldState(const Json& json) {
             if (npc.activity.goal || npc.activity.process) setActivityStatus(npc.activity, npc.activity.status);
         }
         state.npcs[it.key()] = std::move(npc);
+    }
+    const auto socialGroups = json.value("social_groups", Json::object());
+    if (!socialGroups.is_object()) throw std::runtime_error("snapshot social_groups must be an object");
+    for (auto group = socialGroups.begin(); group != socialGroups.end(); ++group) {
+        if (!group.value().is_object()) throw std::runtime_error("snapshot social group must be an object");
+        SocialGroupState parsed;
+        parsed.definitionId = jsonValue<std::string>(group.value(), "definition_id", "");
+        const auto metrics = group.value().value("metrics", Json::object());
+        for (auto metric = metrics.begin(); metric != metrics.end(); ++metric) {
+            parsed.metrics[metric.key()] = metric.value().get<double>();
+        }
+        const auto members = group.value().value("members", Json::object());
+        for (auto member = members.begin(); member != members.end(); ++member) {
+            parsed.members[member.key()] = member.value().get<std::string>();
+        }
+        const auto relations = group.value().value("relationships", Json::object());
+        for (auto relation = relations.begin(); relation != relations.end(); ++relation) {
+            parsed.relationships[relation.key()] = RelationshipAxes{
+                jsonValue<double>(relation.value(), "trust", 0.35),
+                jsonValue<double>(relation.value(), "respect", 0.35),
+                jsonValue<double>(relation.value(), "fear", 0.0),
+                jsonValue<double>(relation.value(), "owed", 0.0)};
+        }
+        state.socialGroups[group.key()] = std::move(parsed);
     }
     const auto promises = json.value("promises", Json::object());
     for (auto it = promises.begin(); it != promises.end(); ++it) {

@@ -370,6 +370,49 @@ SpatialContent parseSpatial(const Json& value, const std::string& path) {
     return result;
 }
 
+RelationshipAxes parseRelationshipAxes(const Json& value, const std::string& path) {
+    if (!value.is_object()) throw std::runtime_error("relationship axes must be an object in " + path);
+    const auto axis = [&value, &path](const char* key, double fallback) {
+        if (!value.contains(key)) return fallback;
+        if (!value.at(key).is_number() || value.at(key).get<double>() < 0.0 || value.at(key).get<double>() > 1.0) {
+            throw std::runtime_error(std::string("relationship axis must be between 0 and 1: ") + key + " in " + path);
+        }
+        return value.at(key).get<double>();
+    };
+    return RelationshipAxes{axis("trust", 0.35), axis("respect", 0.35), axis("fear", 0.0), axis("owed", 0.0)};
+}
+
+SocialGroupContent parseSocialGroup(const Json& value, const std::string& path) {
+    SocialGroupContent result;
+    result.id = requiredString(value, "id", path);
+    result.kind = requiredString(value, "kind", path);
+    result.name = requiredString(value, "name", path);
+    const auto metrics = value.value("metrics", Json::object());
+    if (!metrics.is_object()) throw std::runtime_error("social group metrics must be an object in " + path);
+    for (auto metric = metrics.begin(); metric != metrics.end(); ++metric) {
+        if (!metric.value().is_number()) {
+            throw std::runtime_error("social group metric must be numeric in " + path + ": " + metric.key());
+        }
+        result.metrics[metric.key()] = metric.value().get<double>();
+    }
+    const auto members = value.value("initial_members", Json::object());
+    if (!members.is_object()) throw std::runtime_error("social group initial_members must be an object in " + path);
+    for (auto member = members.begin(); member != members.end(); ++member) {
+        if (!member.value().is_string()) {
+            throw std::runtime_error("social group member role must be a string in " + path);
+        }
+        result.initialMembers[member.key()] = member.value().get<std::string>();
+    }
+    const auto relationships = value.value("initial_relationships", Json::object());
+    if (!relationships.is_object()) {
+        throw std::runtime_error("social group initial_relationships must be an object in " + path);
+    }
+    for (auto relationship = relationships.begin(); relationship != relationships.end(); ++relationship) {
+        result.initialRelationships[relationship.key()] = parseRelationshipAxes(relationship.value(), path);
+    }
+    return result;
+}
+
 LinkContent parseLink(const Json& value, const std::string& path) {
     LinkContent result;
     result.id = requiredString(value, "id", path);
@@ -394,6 +437,10 @@ NpcContent parseNpc(const Json& value, const Json& beats, const WorldContentPack
     result.initialScheduleLabel = initial.value("schedule_label", result.initialLocation);
     result.initialGoalStage = initial.value("goal_stage", 0);
     result.initialStrategy = initial.value("strategy", "routine");
+    result.simulationTier = value.value("simulation_tier", "near");
+    if (result.simulationTier != "near" && result.simulationTier != "far") {
+        throw std::runtime_error("NPC simulation_tier must be near or far in " + path);
+    }
     const auto peerTrust = initial.value("peer_trust", Json::object());
     for (auto it = peerTrust.begin(); it != peerTrust.end(); ++it) {
         result.initialPeerTrust[it.key()] = it.value().get<double>();
@@ -561,6 +608,25 @@ WorldContentPack ContentPackLoader::load(const std::string& rootPath) {
         pack.npcDeliberation.minDrivePressure < 0.0 || pack.npcDeliberation.minDrivePressure > 1.0 ||
         pack.npcDeliberation.minInterruptSalience < 0.0 || pack.npcDeliberation.minInterruptSalience > 1.0) {
         throw std::runtime_error("npc_deliberation values are out of range in " + worldPath);
+    }
+    const auto simulationPolicy = world.value("simulation_policy", Json::object());
+    if (!simulationPolicy.is_object()) throw std::runtime_error("simulation_policy must be an object in " + worldPath);
+    if (simulationPolicy.contains("near_tick_minutes")) {
+        const auto& value = simulationPolicy.at("near_tick_minutes");
+        if (!value.is_number_integer() || value.get<int>() <= 0 || value.get<int>() > 1440) {
+            throw std::runtime_error("simulation_policy.near_tick_minutes must be between 1 and 1440");
+        }
+        pack.simulationPolicy.nearTickMinutes = value.get<int>();
+    }
+    if (simulationPolicy.contains("far_tick_minutes")) {
+        const auto& value = simulationPolicy.at("far_tick_minutes");
+        if (!value.is_number_integer() || value.get<int>() <= 0 || value.get<int>() > 1440) {
+            throw std::runtime_error("simulation_policy.far_tick_minutes must be between 1 and 1440");
+        }
+        pack.simulationPolicy.farTickMinutes = value.get<int>();
+    }
+    if (pack.simulationPolicy.farTickMinutes < pack.simulationPolicy.nearTickMinutes) {
+        throw std::runtime_error("simulation_policy.far_tick_minutes must not be smaller than near_tick_minutes");
     }
     if (!world.contains("conversation_policy") || !world.at("conversation_policy").is_object()) {
         throw std::runtime_error("world must define a conversation_policy: " + worldPath);
@@ -755,6 +821,16 @@ WorldContentPack ContentPackLoader::load(const std::string& rootPath) {
             }
         }
     }
+    const auto socialGroups = world.value("social_groups", Json::array());
+    if (!socialGroups.is_array()) throw std::runtime_error("social_groups must be an array: " + worldPath);
+    std::set<std::string> socialGroupIds;
+    for (const auto& group : socialGroups) {
+        auto parsed = parseSocialGroup(group, worldPath);
+        if (!socialGroupIds.insert(parsed.id).second) {
+            throw std::runtime_error("duplicate social group id: " + parsed.id);
+        }
+        pack.socialGroups.push_back(std::move(parsed));
+    }
     const auto activities = world.value("activities", Json::array());
     if (!activities.is_array()) throw std::runtime_error("activities must be an array: " + worldPath);
     std::set<std::string> activityIds;
@@ -854,6 +930,21 @@ WorldContentPack ContentPackLoader::load(const std::string& rootPath) {
     for (const auto& rule : pack.strategyRules) {
         if (!npcIds.contains(rule.npcId) || !npcIds.contains(rule.peerId)) {
             throw std::runtime_error("strategy rule references an unknown NPC: " + rule.id);
+        }
+    }
+    for (const auto& group : pack.socialGroups) {
+        for (const auto& [npcId, role] : group.initialMembers) {
+            (void)role;
+            if (!npcIds.contains(npcId)) {
+                throw std::runtime_error("social group references an unknown NPC: " + group.id + "/" + npcId);
+            }
+        }
+        for (const auto& [target, relation] : group.initialRelationships) {
+            (void)relation;
+            if (!socialGroupIds.contains(target) && !npcIds.contains(target)) {
+                throw std::runtime_error("social group relationship references an unknown target: " +
+                                         group.id + "/" + target);
+            }
         }
     }
     if (manifest.contains("instance")) {

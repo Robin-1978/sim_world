@@ -310,6 +310,47 @@
         "additionalProperties": false
       }
     },
+    "social_groups": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "name"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "metrics": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "number"
+            }
+          },
+          "initial_members": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "initial_relationships": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/$defs/relationship_axes"
+            }
+          }
+        },
+        "additionalProperties": false
+      }
+    },
     "activities": {
       "type": "array",
       "items": {
@@ -379,6 +420,9 @@
                     "memory.append",
                     "knowledge.assert",
                     "experience.record",
+                    "trade.execute",
+                    "group.metric_adjust",
+                    "group.membership_adjust",
                     "promise.create",
                     "promise.transition",
                     "production.execute",
@@ -649,6 +693,32 @@
   },
   "additionalProperties": true,
   "$defs": {
+    "relationship_axes": {
+      "type": "object",
+      "properties": {
+        "trust": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "respect": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "fear": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "owed": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      },
+      "additionalProperties": false
+    },
     "relationship_delta": {
       "type": "object",
       "properties": {

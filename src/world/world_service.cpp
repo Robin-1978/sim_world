@@ -54,6 +54,7 @@ WorldState transactionalBackup(const WorldState& state, std::size_t& eventCount)
     backup.entities = state.entities;
     backup.links = state.links;
     backup.npcs = state.npcs;
+    backup.socialGroups = state.socialGroups;
     backup.promises = state.promises;
     backup.processedTurnIds = state.processedTurnIds;
     return backup;
@@ -183,14 +184,21 @@ WorldService WorldService::fromContent(const WorldContentPack& content,
         npc.scheduleLabel = authored.initialScheduleLabel;
         npc.goalStage = authored.initialGoalStage;
         npc.strategy = authored.initialStrategy;
-        npc.peerTrust = authored.initialPeerTrust;
+        npc.relationships[kPlayerId] = RelationshipAxes{};
+        for (const auto& [peer, trust] : authored.initialPeerTrust) {
+            npc.relationships[peer].trust = trust;
+        }
         if (instance != nullptr) {
             if (const auto override = instance->npcs.find(authored.definition.id); override != instance->npcs.end()) {
                 if (!override->second.location.empty()) npc.location = override->second.location;
                 if (!override->second.scheduleLabel.empty()) npc.scheduleLabel = override->second.scheduleLabel;
                 npc.goalStage = override->second.goalStage;
                 if (!override->second.strategy.empty()) npc.strategy = override->second.strategy;
-                if (!override->second.peerTrust.empty()) npc.peerTrust = override->second.peerTrust;
+                if (!override->second.peerTrust.empty()) {
+                    for (const auto& [peer, trust] : override->second.peerTrust) {
+                        npc.relationships[peer].trust = trust;
+                    }
+                }
             }
         }
         DriveSystem::initialize(npc, authored.needs, service.state_.now);
@@ -199,6 +207,14 @@ WorldService WorldService::fromContent(const WorldContentPack& content,
         service.state_.entities[npcEntityId(authored.definition.id)] =
             WorldEntityState{npcEntityId(authored.definition.id), "npc", EntityLifecycle::Active, Json::object()};
         service.state_.inventories.try_emplace(npcEntityId(authored.definition.id));
+    }
+    for (const auto& authored : content.socialGroups) {
+        SocialGroupState group;
+        group.definitionId = authored.id;
+        group.metrics = authored.metrics;
+        group.members = authored.initialMembers;
+        group.relationships = authored.initialRelationships;
+        service.state_.socialGroups.emplace(authored.id, std::move(group));
     }
     service.rebuildEntityRegistry();
     Json ids = Json::array();
@@ -366,8 +382,19 @@ DecisionContext WorldService::decisionContext(const std::string& npcId) const {
     for (const auto& [needId, need] : npc.needs) {
         context.character += "; need(" + needId + ")=" + std::to_string(need.deficit);
     }
-    for (const auto& [peer, trust] : npc.peerTrust) {
-        context.character += "; trust(" + peer + ")=" + std::to_string(trust);
+    for (const auto& [peer, relation] : npc.relationships) {
+        context.character += "; relationship(" + peer + ")=trust:" + std::to_string(relation.trust) +
+                             ",respect:" + std::to_string(relation.respect) +
+                             ",fear:" + std::to_string(relation.fear) +
+                             ",owed:" + std::to_string(relation.owed);
+    }
+    for (const auto& [groupId, group] : state_.socialGroups) {
+        const auto membership = group.members.find(npcId);
+        if (membership == group.members.end()) continue;
+        context.character += "; membership(" + groupId + ")=" + membership->second;
+        for (const auto& [metric, value] : group.metrics) {
+            context.character += "; group_metric(" + groupId + ":" + metric + ")=" + std::to_string(value);
+        }
     }
     std::vector<NeedContent> needs;
     {
@@ -425,8 +452,20 @@ void WorldService::advanceMinutes(std::int64_t minutes) {
         TransactionScope transaction(*this);
         ++state_.now.minute;
         expireStimuli();
-        resumeSuspendedProcesses();
-        tickProcesses();
+        std::set<std::string> dueNpcIds;
+        for (auto& [id, npc] : state_.npcs) {
+            const auto* authored = authoredNpc(id);
+            const auto tier = authored != nullptr ? authored->simulationTier : std::string("near");
+            const int interval = tier == "far" ? content_.simulationPolicy.farTickMinutes
+                                                : content_.simulationPolicy.nearTickMinutes;
+            if (state_.now.minute % interval != 0) continue;
+            npc.lastSimulationTick = state_.now;
+            dueNpcIds.insert(id);
+            if (tier == "far") ++simulationMetrics_.farNpcTicks;
+            else ++simulationMetrics_.nearNpcTicks;
+        }
+        resumeSuspendedProcesses(dueNpcIds);
+        tickProcesses(dueNpcIds);
         if (state_.now.minute % kMinutesPerHour == 0) processHourBoundary(state_.now.day(), state_.now.hour());
         if (state_.now.minute % kMinutesPerDay == 0) processDayBoundary(state_.now.day());
         applyPromiseDeadline();
@@ -532,12 +571,13 @@ void WorldService::processActivity(const ActivityContent& activity) {
              Json{{"activity_id", activity.id}, {"changes", changes}});
 }
 
-void WorldService::tickProcesses() {
+void WorldService::tickProcesses(const std::set<std::string>& dueNpcIds) {
     // Completion may run a nested recipe savepoint. A failed recipe restores
     // WorldState and invalidates references/iterators into the NPC map, so
     // collect durable work items before invoking code that may roll back.
     std::vector<std::pair<std::string, ProcessExecution>> due;
     for (const auto& [npcId, npc] : state_.npcs) {
+        if (!dueNpcIds.contains(npcId)) continue;
         if (npc.activity.status != ActivityStatus::Active ||
             !npc.activity.process || npc.activity.process->status != ProcessStatus::Running) {
             continue;
@@ -568,8 +608,9 @@ void WorldService::tickProcesses() {
     }
 }
 
-void WorldService::resumeSuspendedProcesses() {
+void WorldService::resumeSuspendedProcesses(const std::set<std::string>& dueNpcIds) {
     for (auto& [npcId, npc] : state_.npcs) {
+        if (!dueNpcIds.contains(npcId)) continue;
         if (npc.activity.status != ActivityStatus::Suspended || !npc.activity.process) continue;
         auto& process = *npc.activity.process;
         double highestSalience = 0.0;
@@ -735,15 +776,15 @@ void WorldService::reviseNpcStrategies(int day) {
     for (const auto& rule : content_.strategyRules) {
         auto found = state_.npcs.find(rule.npcId);
         if (found == state_.npcs.end() || found->second.strategy == rule.strategy) continue;
-        const auto trust = found->second.peerTrust.find(rule.peerId);
-        if (trust == found->second.peerTrust.end() || trust->second < rule.minPeerTrust) continue;
+        const auto trust = found->second.relationships.find(rule.peerId);
+        if (trust == found->second.relationships.end() || trust->second.trust < rule.minPeerTrust) continue;
         auto& npc = found->second;
         npc.strategy = rule.strategy;
         npc.goalStage = std::max(npc.goalStage, rule.goalStage);
-        npc.memories.push_back(Memory{"plan", rule.memory, state_.now, trust->second});
+        npc.memories.push_back(Memory{"plan", rule.memory, state_.now, trust->second.trust});
         ++npc.stateVersion;
         addEvent(rule.eventType, rule.npcId, rule.peerId, rule.memory,
-                 Json{{"strategy", npc.strategy}, {"rule", rule.id}, {"peer_trust", trust->second}, {"day", day}});
+                 Json{{"strategy", npc.strategy}, {"rule", rule.id}, {"peer_trust", trust->second.trust}, {"day", day}});
     }
 }
 
@@ -756,11 +797,11 @@ void WorldService::applyPromiseDeadline() {
             auto from = state_.npcs.find(promise.from);
             auto to = state_.npcs.find(promise.to);
             if (from != state_.npcs.end()) {
-                applyRelationshipDelta(from->second.playerRelation, content_.promisePolicy.brokenPromiser);
+                applyRelationshipDelta(from->second.relationships[promise.to], content_.promisePolicy.brokenPromiser);
                 ++from->second.stateVersion;
             }
             if (to != state_.npcs.end()) {
-                applyRelationshipDelta(to->second.playerRelation, content_.promisePolicy.brokenPromisee);
+                applyRelationshipDelta(to->second.relationships[promise.from], content_.promisePolicy.brokenPromisee);
                 ++to->second.stateVersion;
             }
             addEvent("promise.broken", promise.from, promise.to, "A promise reached its deadline", Json{{"promise_id", id}});
@@ -875,6 +916,48 @@ CommandResult WorldService::submit(const Command& command) {
             return reject("invalid_knowledge_action", "Knowledge detail must be valid JSON.");
         }
     }
+    if (command.kind == "relationship_adjust") {
+        try {
+            const Json args = command.detail.empty() ? Json::object() : Json::parse(command.detail);
+            const auto delta = RelationshipAxes{args.value("trust", 0.0), args.value("respect", 0.0),
+                                                args.value("fear", 0.0), args.value("owed", 0.0)};
+            return adjustRelationship(args.value("npc", command.actor), args.value("target", command.target),
+                                      delta, command.actor, command.turnId, args.value("reason", ""));
+        } catch (...) {
+            return reject("invalid_relationship", "Relationship detail must be valid JSON.");
+        }
+    }
+    if (command.kind == "group_metric") {
+        try {
+            const Json args = command.detail.empty() ? Json::object() : Json::parse(command.detail);
+            return adjustGroupMetric(args.value("group", command.target), args.value("metric", ""),
+                                     args.value("delta", 0.0), command.actor, command.turnId,
+                                     args.value("reason", ""));
+        } catch (...) {
+            return reject("invalid_group_metric", "Group metric detail must be valid JSON.");
+        }
+    }
+    if (command.kind == "group_membership") {
+        try {
+            const Json args = command.detail.empty() ? Json::object() : Json::parse(command.detail);
+            return setGroupMembership(args.value("group", command.target), args.value("npc", command.actor),
+                                      args.value("role", "member"), args.value("active", true),
+                                      command.actor, command.turnId);
+        } catch (...) {
+            return reject("invalid_group_membership", "Group membership detail must be valid JSON.");
+        }
+    }
+    if (command.kind == "trade") {
+        try {
+            const Json args = command.detail.empty() ? Json::object() : Json::parse(command.detail);
+            return tradeResources(args.value("seller", command.actor), args.value("buyer", command.target),
+                                  args.value("seller_resource", ""), args.value("seller_amount", 0),
+                                  args.value("buyer_resource", ""), args.value("buyer_amount", 0),
+                                  command.actor, command.turnId);
+        } catch (...) {
+            return reject("invalid_trade", "Trade detail must be valid JSON.");
+        }
+    }
     return reject("unknown_command", "The command is not part of the registered action vocabulary.");
 }
 
@@ -923,10 +1006,11 @@ CommandResult WorldService::decidePromise(const std::string& promiseId, PromiseS
     if (auto npc = state_.npcs.find(actor); npc != state_.npcs.end()) {
         ++npc->second.stateVersion;
         npc->second.memories.push_back(Memory{"promise", detail.empty() ? "A promise changed status." : detail, state_.now, 1.0});
+        const auto counterparty = actor == promise.from ? promise.to : promise.from;
         if (decision == PromiseStatus::Refused || decision == PromiseStatus::Broken) {
-            applyRelationshipDelta(npc->second.playerRelation, content_.promisePolicy.refusedActor);
+            applyRelationshipDelta(npc->second.relationships[counterparty], content_.promisePolicy.refusedActor);
         } else {
-            applyRelationshipDelta(npc->second.playerRelation, content_.promisePolicy.acceptedActor);
+            applyRelationshipDelta(npc->second.relationships[counterparty], content_.promisePolicy.acceptedActor);
         }
     }
     addEvent("promise." + toString(decision), actor, promiseId, detail.empty() ? "Promise status changed" : detail,
@@ -1046,6 +1130,98 @@ CommandResult WorldService::transferResource(const std::string& source, const st
                   {"source_before", sourceBefore}, {"source_after", balance(sourceId)},
                   {"target_before", targetBefore}, {"target_after", balance(targetId)}});
     return CommandResult{true, "ok", resource, state_.events.back()};
+}
+
+CommandResult WorldService::tradeResources(const std::string& seller, const std::string& buyer,
+                                           const std::string& sellerResource, int sellerAmount,
+                                           const std::string& buyerResource, int buyerAmount,
+                                           const std::string& actor, const std::string& turnId) {
+    TransactionScope transaction(*this);
+    if (sellerAmount <= 0 || buyerAmount <= 0 || sellerResource.empty() || buyerResource.empty()) {
+        return reject("invalid_trade", "A trade needs two positive resource quantities.");
+    }
+    if (!turnId.empty() && state_.processedTurnIds.contains(turnId)) {
+        return reject("duplicate_turn", "The trade was already applied.");
+    }
+    if (actor != kWorldActor && actor != kPlayerId && actor != seller && actor != buyer) {
+        return reject("unauthorized", "The actor is not a party to this trade.");
+    }
+    const auto first = transferResource(seller, buyer, sellerResource, sellerAmount, actor);
+    if (!first.accepted) return reject(first.code, first.message);
+    const auto second = transferResource(buyer, seller, buyerResource, buyerAmount, actor);
+    if (!second.accepted) {
+        transaction.rollback();
+        return reject(second.code, second.message);
+    }
+    if (!turnId.empty()) {
+        state_.processedTurnIds.insert(turnId);
+    }
+    addEvent("trade.settled", actor, seller, "Two parties exchanged configured resources atomically",
+             Json{{"seller", seller}, {"buyer", buyer}, {"seller_resource", sellerResource},
+                  {"seller_amount", sellerAmount}, {"buyer_resource", buyerResource},
+                  {"buyer_amount", buyerAmount}});
+    return CommandResult{true, "ok", "trade", state_.events.back()};
+}
+
+CommandResult WorldService::adjustRelationship(const std::string& npcId, const std::string& target,
+                                               RelationshipAxes delta, const std::string& actor,
+                                               const std::string& turnId, const std::string& reason) {
+    TransactionScope transaction(*this);
+    auto npc = state_.npcs.find(npcId);
+    if (npc == state_.npcs.end()) return reject("unknown_npc", "The relationship actor does not exist.");
+    if (target.empty() || target == npcId ||
+        (!state_.npcs.contains(target) && target != kPlayerId && !state_.socialGroups.contains(target))) {
+        return reject("unknown_relationship_target", "The relationship target does not exist.");
+    }
+    if (actor != kWorldActor && actor != kPlayerId && actor != npcId) {
+        return reject("unauthorized", "Only the actor or world authority may change this relationship.");
+    }
+    if (!turnId.empty() && state_.processedTurnIds.contains(turnId)) {
+        return reject("duplicate_turn", "The relationship change was already applied.");
+    }
+    applyRelationshipDelta(npc->second.relationships[target],
+                           RelationshipDelta{delta.trust, delta.respect, delta.fear, delta.owed});
+    ++npc->second.stateVersion;
+    if (!turnId.empty()) state_.processedTurnIds.insert(turnId);
+    addEvent("relationship.adjusted", actor, target, reason.empty() ? "A relationship changed" : reason,
+             Json{{"npc_id", npcId}, {"target", target}, {"trust", delta.trust},
+                  {"respect", delta.respect}, {"fear", delta.fear}, {"owed", delta.owed}});
+    return CommandResult{true, "ok", target, state_.events.back()};
+}
+
+CommandResult WorldService::adjustGroupMetric(const std::string& groupId, const std::string& metric,
+                                              double delta, const std::string& actor,
+                                              const std::string& turnId, const std::string& reason) {
+    TransactionScope transaction(*this);
+    if (metric.empty() || !std::isfinite(delta)) return reject("invalid_group_metric", "A group metric needs a finite delta.");
+    auto group = state_.socialGroups.find(groupId);
+    if (group == state_.socialGroups.end()) return reject("unknown_social_group", "The social group does not exist.");
+    if (!turnId.empty() && state_.processedTurnIds.contains(turnId)) return reject("duplicate_turn", "The group metric change was already applied.");
+    const double before = group->second.metrics[metric];
+    group->second.metrics[metric] += delta;
+    if (!turnId.empty()) state_.processedTurnIds.insert(turnId);
+    addEvent("social.group_metric", actor, groupId, reason.empty() ? "A social group metric changed" : reason,
+             Json{{"group_id", groupId}, {"metric", metric}, {"before", before},
+                  {"after", group->second.metrics[metric]}, {"delta", delta}});
+    return CommandResult{true, "ok", metric, state_.events.back()};
+}
+
+CommandResult WorldService::setGroupMembership(const std::string& groupId, const std::string& npcId,
+                                               const std::string& role, bool active,
+                                               const std::string& actor, const std::string& turnId) {
+    TransactionScope transaction(*this);
+    auto group = state_.socialGroups.find(groupId);
+    if (group == state_.socialGroups.end()) return reject("unknown_social_group", "The social group does not exist.");
+    if (!state_.npcs.contains(npcId)) return reject("unknown_npc", "The group member does not exist.");
+    if (active && role.empty()) return reject("invalid_group_role", "An active membership needs a role.");
+    if (!turnId.empty() && state_.processedTurnIds.contains(turnId)) return reject("duplicate_turn", "The membership change was already applied.");
+    if (active) group->second.members[npcId] = role;
+    else group->second.members.erase(npcId);
+    if (!turnId.empty()) state_.processedTurnIds.insert(turnId);
+    addEvent(active ? "social.member_joined" : "social.member_left", actor, groupId,
+             active ? "An NPC joined a social group" : "An NPC left a social group",
+             Json{{"group_id", groupId}, {"npc_id", npcId}, {"role", role}});
+    return CommandResult{true, "ok", groupId, state_.events.back()};
 }
 
 CommandResult WorldService::moveNpc(const std::string& npcId, const std::string& destination,
@@ -1877,6 +2053,28 @@ bool WorldService::applyMetaAction(const std::string& npcId, const std::string& 
                  Json{{"action_id", actionId}, {"inputs", consumed}, {"outputs", produced}});
         return true;
     }
+    if (operation == "trade.execute") {
+        const auto seller = args.value("seller", "self") == "self" ? npcId : args.value("seller", npcId);
+        const auto buyer = args.value("buyer", "");
+        const auto result = tradeResources(
+            seller, buyer, args.value("seller_resource", ""), args.value("seller_amount", 0),
+            args.value("buyer_resource", ""), args.value("buyer_amount", 0), npcId,
+            "recipe:" + npcId + ":" + actionId);
+        return result.accepted;
+    }
+    if (operation == "group.metric_adjust") {
+        const auto result = adjustGroupMetric(
+            args.value("group", ""), args.value("metric", ""), args.value("delta", 0.0), npcId,
+            "recipe:" + npcId + ":" + actionId, args.value("reason", ""));
+        return result.accepted;
+    }
+    if (operation == "group.membership_adjust") {
+        const auto member = args.value("npc", "self") == "self" ? npcId : args.value("npc", npcId);
+        const auto result = setGroupMembership(
+            args.value("group", ""), member, args.value("role", "member"), args.value("active", true),
+            npcId, "recipe:" + npcId + ":" + actionId);
+        return result.accepted;
+    }
     if (operation == "need.relieve") {
         const auto sourceAction = args.value("action", actionId);
         applyNeedRelief(npcId, sourceAction);
@@ -1893,15 +2091,20 @@ bool WorldService::applyMetaAction(const std::string& npcId, const std::string& 
     }
     if (operation == "relationship.adjust") {
         auto npc = state_.npcs.find(npcId);
-        if (npc == state_.npcs.end() || args.value("target", "player") != "player") return false;
+        if (npc == state_.npcs.end()) return false;
+        const auto target = args.value("target", "player");
+        if (target.empty() || target == npcId ||
+            (!state_.npcs.contains(target) && target != kPlayerId && !state_.socialGroups.contains(target))) {
+            return false;
+        }
         RelationshipDelta delta;
         delta.trust = args.value("trust", 0.0);
         delta.respect = args.value("respect", 0.0);
         delta.fear = args.value("fear", 0.0);
         delta.owed = args.value("owed", 0.0);
-        applyRelationshipDelta(npc->second.playerRelation, delta);
-        addEvent("action.relationship", npcId, kPlayerId, "A behavior recipe changed a relationship",
-                 Json{{"action_id", actionId}, {"trust", delta.trust}, {"respect", delta.respect},
+        applyRelationshipDelta(npc->second.relationships[target], delta);
+        addEvent("action.relationship", npcId, target, "A behavior recipe changed a relationship",
+                 Json{{"action_id", actionId}, {"target", target}, {"trust", delta.trust}, {"respect", delta.respect},
                       {"fear", delta.fear}, {"owed", delta.owed}});
         return true;
     }
@@ -2121,12 +2324,12 @@ WorldService WorldService::fromContentSnapshot(const WorldContentPack& content, 
     const auto& snapshot = json.contains("state") ? json.at("state") : json;
     if (!snapshot.is_object() || !snapshot.contains("save_schema_version") ||
         !snapshot.at("save_schema_version").is_number_integer() ||
-        snapshot.at("save_schema_version").get<int>() != 12) {
-        throw std::runtime_error("unsupported snapshot schema; expected save_schema_version=12");
+        snapshot.at("save_schema_version").get<int>() != 13) {
+        throw std::runtime_error("unsupported snapshot schema; expected save_schema_version=13");
     }
     if (!snapshot.contains("simulation_version") || !snapshot.at("simulation_version").is_string() ||
-        snapshot.at("simulation_version") != "adaptive-runtime-p1.12") {
-        throw std::runtime_error("unsupported snapshot simulation version; expected adaptive-runtime-p1.12");
+        snapshot.at("simulation_version") != "adaptive-runtime-p1.13") {
+        throw std::runtime_error("unsupported snapshot simulation version; expected adaptive-runtime-p1.13");
     }
     service.state_ = deserializeWorldState(snapshot);
     if (!service.state_.activeOverlays.empty()) {
@@ -2149,6 +2352,18 @@ WorldService WorldService::fromContentSnapshot(const WorldContentPack& content, 
     for (const auto& [id, npc] : service.state_.npcs) {
         if (npc.definitionId.empty() || service.authoredNpc(npc.definitionId) == nullptr) {
             throw std::runtime_error("snapshot references unknown npc definition: " + npc.definitionId);
+        }
+    }
+    for (const auto& [id, group] : service.state_.socialGroups) {
+        if (std::none_of(content.socialGroups.begin(), content.socialGroups.end(),
+                         [&id](const auto& defined) { return defined.id == id; })) {
+            throw std::runtime_error("snapshot references unknown social group: " + id);
+        }
+        for (const auto& [npcId, role] : group.members) {
+            (void)role;
+            if (!service.state_.npcs.contains(npcId)) {
+                throw std::runtime_error("social group snapshot references unknown NPC: " + id + "/" + npcId);
+            }
         }
     }
     const std::string expectedInstanceId = service.content_.instance ? service.content_.instance->id : "default";

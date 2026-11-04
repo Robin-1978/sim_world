@@ -194,7 +194,6 @@ struct NpcState {
     std::string scheduleLabel;
     int goalStage{0};
     std::map<std::string, NeedState> needs;
-    RelationshipAxes playerRelation;
     std::vector<Memory> memories;
     std::vector<KnowledgeFact> knowledge;
     std::vector<Experience> experiences;
@@ -202,10 +201,17 @@ struct NpcState {
     std::uint64_t stateVersion{0};
     std::string mode{"working"};
     std::string strategy{"routine"};
-    std::map<std::string, double> peerTrust;
+    // Relationships may point at another NPC, a social group/faction, or the
+    // player. Static NPC definitions only seed this map; runtime changes are
+    // committed world facts.
+    std::map<std::string, RelationshipAxes> relationships;
     std::map<std::string, double> stimulusSensitivity;
     std::vector<ExternalStimulus> stimuli;
     GameTime lastAutonomousTurn{-1};
+    // Last minute at which this NPC entered process/suspension simulation.
+    // Far-tier NPCs can therefore wake on a coarse cadence without losing
+    // their schedule across a snapshot.
+    GameTime lastSimulationTick{-1};
     NpcActivity activity;
 };
 
@@ -248,6 +254,15 @@ struct SecurityState {
 struct ResourceState {
     int amount{0};
     int reserved{0};
+};
+
+struct SocialGroupState {
+    std::string definitionId;
+    std::map<std::string, double> metrics;
+    // NPC id -> role within the group.
+    std::map<std::string, std::string> members;
+    // Group-to-group or group-to-actor relations.
+    std::map<std::string, RelationshipAxes> relationships;
 };
 
 std::string toString(EntityLifecycle lifecycle);
@@ -297,6 +312,7 @@ struct WorldState {
     // belongs to this world instance and is therefore authoritative here.
     std::map<std::string, RuntimeLinkState> links;
     std::map<std::string, NpcState> npcs;
+    std::map<std::string, SocialGroupState> socialGroups;
     std::map<std::string, Promise> promises;
     std::vector<WorldEvent> events;
     std::set<std::string> processedTurnIds;

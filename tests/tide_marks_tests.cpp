@@ -308,6 +308,10 @@ void meta_actions_are_loaded_from_content() {
            "structural transitions are configured by action id");
     expect(!content.metaActions.contains("transfer_resource"),
            "an undeclared action is absent rather than supplied by C++");
+    expect(MetaActionRegistry::executableOperators().contains("trade.execute") &&
+               MetaActionRegistry::executableOperators().contains("group.metric_adjust") &&
+               MetaActionRegistry::executableOperators().contains("group.membership_adjust"),
+           "social and exchange operators are registered execution capabilities");
     const auto repair = std::find_if(content.behaviorRecipes.begin(), content.behaviorRecipes.end(),
                                      [](const auto& recipe) { return recipe.id == "repair_ferry"; });
     const auto rest = std::find_if(content.behaviorRecipes.begin(), content.behaviorRecipes.end(),
@@ -402,12 +406,12 @@ void promise_policy_comes_from_content() {
     content.promisePolicy.acceptedActor.trust = 0.5;
     content.promisePolicy.renegotiationExtensionMinutes = 60;
     auto service = WorldService::fromContent(content);
-    const double before = service.state().npcs.at("mira").playerRelation.trust;
+    const double before = service.state().npcs.at("mira").relationships.at("player").trust;
     const auto made = service.createPromise("player", "mira", "bring a ledger", 1, "policy-create");
     expect(made.accepted, "policy test creates a promise");
     expect(service.decidePromise(made.message, PromiseStatus::Accepted, "mira", "policy-accept").accepted,
            "policy test accepts the promise");
-    const double after = service.state().npcs.at("mira").playerRelation.trust;
+    const double after = service.state().npcs.at("mira").relationships.at("player").trust;
     expect(after > before + 0.49 && after < before + 0.51,
            "relationship change follows the authored promise policy");
     const auto dueBefore = service.state().promises.at(made.message).due.minute;
@@ -450,7 +454,7 @@ void snapshot_and_replay_are_deterministic() {
     const auto path = std::filesystem::temp_directory_path() / "tide_marks_test_replay.jsonl";
     service.writeReplay(path.string());
     const auto snapshot = service.snapshotJson();
-    expect(snapshot.at("save_schema_version").get<int>() == 12, "snapshot declares its schema version");
+    expect(snapshot.at("save_schema_version").get<int>() == 13, "snapshot declares its schema version");
     expect(snapshot.at("instance_id") == "tide_marks.village.instance",
            "snapshot records the concrete game instance identity");
     expect(snapshot.at("event_sequence").get<std::size_t>() == service.state().events.size(),
@@ -810,6 +814,9 @@ void runtime_loads_a_world_without_village_identifiers() {
     service.advanceMinutes(10);
     expect(service.state().resources.at("energy").amount == 5,
            "the generic runtime settles arbitrary resource inputs at process completion");
+    expect(service.simulationMetrics().farNpcTicks == 2 &&
+               service.state().npcs.at("sable").lastSimulationTick.minute == service.state().now.minute,
+           "far simulation advances on the authored coarse cadence");
     const auto workshop = service.entities().record("spatial:workshop");
     const auto serviceLift = service.entities().record("link:service_lift");
     expect(workshop.has_value() && workshop->kind == "zone", "authored spatial kinds remain generic");
@@ -824,6 +831,48 @@ void runtime_loads_a_world_without_village_identifiers() {
     expect(service.setLinkState("service_lift", false, false).accepted, "link state is a transactional world fact");
     expect(!service.planRoute("workshop", "yard").has_value(), "closed links block route planning");
     expect(service.setLinkState("service_lift", true, false).accepted, "link can be reopened by a command");
+}
+
+void social_groups_trade_and_relationships_are_shared_facts() {
+    const std::filesystem::path fixtureRoot = std::filesystem::path(TIDE_MARKS_TEST_DATA_DIR) / "minimal-pack";
+    auto service = WorldService::load(fixtureRoot.string());
+    expect(service.state().socialGroups.contains("workshop_crew") &&
+               service.state().socialGroups.at("workshop_crew").members.at("sable") == "operator",
+           "social group membership loads from content without village identifiers");
+    const auto relation = service.adjustRelationship(
+        "sable", "workshop_crew", RelationshipAxes{-0.1, 0.15, 0.0, 0.05}, "sable", "social-relation",
+        "Sable disagreed with the crew decision");
+    expect(relation.accepted && service.state().npcs.at("sable").relationships.at("workshop_crew").respect > 0.49,
+           "an NPC can hold a four-axis relationship with an organization");
+    expect(service.adjustGroupMetric("workshop_crew", "morale", -0.2, "world", "social-morale",
+                                     "The crew absorbed a setback").accepted &&
+               service.state().socialGroups.at("workshop_crew").metrics.at("morale") < 0.41,
+           "group metrics change through an audited runtime fact");
+    expect(service.setGroupMembership("workshop_crew", "sable", "foreman", true, "world", "social-role").accepted &&
+               service.state().socialGroups.at("workshop_crew").members.at("sable") == "foreman",
+           "group membership roles are mutable facts");
+    expect(service.transferResource("world", "player", "energy", 5, "world", "trade-setup-player").accepted &&
+               service.transferResource("world", "sable", "coolant", 3, "world", "trade-setup-sable").accepted,
+           "trade parties receive inventories through the generic resource ledger");
+    expect(service.tradeResources("sable", "player", "coolant", 2, "energy", 3, "sable", "social-trade").accepted,
+           "two resource transfers settle as one auditable trade");
+    expect(service.state().inventories.at("npc:sable").at("coolant") == 1 &&
+               service.state().inventories.at("player").at("coolant") == 2 &&
+               service.state().inventories.at("npc:sable").at("energy") == 3 &&
+               service.state().inventories.at("player").at("energy") == 2,
+           "both sides of the trade settle in one transaction");
+    const auto beforeFailedTrade = service.state().inventories;
+    expect(!service.tradeResources("sable", "player", "coolant", 1, "energy", 99, "sable", "bad-trade").accepted,
+           "a trade fails when one side cannot pay");
+    expect(service.state().inventories == beforeFailedTrade,
+           "failed trade compensation restores the first leg");
+    const auto snapshot = service.snapshotJson();
+    const auto restored = WorldService::fromSnapshot(snapshot, fixtureRoot.string());
+    expect(restored.state().socialGroups.at("workshop_crew").metrics ==
+               service.state().socialGroups.at("workshop_crew").metrics &&
+               restored.state().npcs.at("sable").relationships.at("workshop_crew").respect ==
+               service.state().npcs.at("sable").relationships.at("workshop_crew").respect,
+           "social relations and group state survive snapshot restore");
 }
 
 }  // namespace
@@ -1023,6 +1072,7 @@ int main() {
     run("knowledge_and_experience_keep_provenance", knowledge_and_experience_keep_provenance);
     run("successful_actions_automatically_create_experience", successful_actions_automatically_create_experience);
     run("runtime_loads_a_world_without_village_identifiers", runtime_loads_a_world_without_village_identifiers);
+    run("social_groups_trade_and_relationships_are_shared_facts", social_groups_trade_and_relationships_are_shared_facts);
     run("npc_activity_slot_is_single_owner", npc_activity_slot_is_single_owner);
     run("evolution_proposals_are_governed", evolution_proposals_are_governed);
     run("evolution_sandbox_isolated_and_versioned", evolution_sandbox_isolated_and_versioned);

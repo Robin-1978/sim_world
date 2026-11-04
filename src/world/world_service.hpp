@@ -51,6 +51,11 @@ struct DialogueTurn {
     std::optional<WorldEvent> event;
 };
 
+struct SimulationMetrics {
+    std::uint64_t nearNpcTicks{0};
+    std::uint64_t farNpcTicks{0};
+};
+
 class WorldService {
 public:
     explicit WorldService(std::unique_ptr<IProvider> provider = std::make_unique<MockProvider>());
@@ -84,6 +89,7 @@ public:
     // number of results consumed; no Provider call is performed here.
     std::size_t pumpAsyncTurns();
     [[nodiscard]] std::size_t pendingAsyncTurns() const;
+    [[nodiscard]] const SimulationMetrics& simulationMetrics() const { return simulationMetrics_; }
 
     CommandResult createPromise(const std::string& from, const std::string& to,
                                 const std::string& description, int dueInDays,
@@ -101,6 +107,21 @@ public:
                                    const std::string& resource, int amount,
                                    const std::string& actor = kWorldActor,
                                    const std::string& turnId = {});
+    CommandResult tradeResources(const std::string& seller, const std::string& buyer,
+                                 const std::string& sellerResource, int sellerAmount,
+                                 const std::string& buyerResource, int buyerAmount,
+                                 const std::string& actor = kWorldActor,
+                                 const std::string& turnId = {});
+    CommandResult adjustRelationship(const std::string& npcId, const std::string& target,
+                                     RelationshipAxes delta, const std::string& actor = kWorldActor,
+                                     const std::string& turnId = {}, const std::string& reason = {});
+    CommandResult adjustGroupMetric(const std::string& groupId, const std::string& metric,
+                                    double delta, const std::string& actor = kWorldActor,
+                                    const std::string& turnId = {}, const std::string& reason = {});
+    CommandResult setGroupMembership(const std::string& groupId, const std::string& npcId,
+                                     const std::string& role, bool active,
+                                     const std::string& actor = kWorldActor,
+                                     const std::string& turnId = {});
     CommandResult moveNpc(const std::string& npcId, const std::string& destination,
                           const std::string& actor = kWorldActor,
                           const std::string& turnId = {});
@@ -150,6 +171,7 @@ private:
     std::vector<TransactionFrame> transactionFrames_;
     std::vector<WorldEvent> deferredEvents_;
     std::set<std::string> pendingAsyncTurnIds_;
+    SimulationMetrics simulationMetrics_;
     void beginTransaction();
     void commitTransaction();
     void rollbackTransaction();
@@ -182,8 +204,8 @@ private:
                                        const BehaviorNodeContent& node,
                                        const std::map<std::string, int>* reservedResources);
     [[nodiscard]] const BehaviorRecipeContent* recipeForAction(const std::string& actionId) const;
-    void tickProcesses();
-    void resumeSuspendedProcesses();
+    void tickProcesses(const std::set<std::string>& dueNpcIds);
+    void resumeSuspendedProcesses(const std::set<std::string>& dueNpcIds);
     void completeProcess(const std::string& npcId, ProcessExecution process);
     void suspendProcess(const std::string& npcId, ProcessExecution& process, const std::string& reason);
     void cancelProcess(const std::string& npcId, ProcessExecution& process, const std::string& reason);
