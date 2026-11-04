@@ -22,11 +22,11 @@
 | 存档 schema 与事件因果链 | 已完成 | `world_state_json.*`, `save_schema_version=18`, `simulation_version=adaptive-runtime-p1.19`, 事件 schema 4、稳定 `event_id`、事务 `correlation_id`、直接 `causation_sequence`、逐事件内容/模拟版本、Snapshot 因果与版本完整性校验、`event_sequence`, `instance_id`, `inventories`, `relationships`, `social_groups`, `exchange_contracts`, `NpcActivity` 聚合、`lastSimulationTick/lastDriveTick`、`definition_id` 引用、实例/内容版本校验与可重放 overlay 栈；运行态不复制角色定义 |
 | 内驱/需求模型 | 需求域是内容定义的标签，村庄默认四域、Glass Orchard 使用 stewardship/ecological；`DriveEvaluation` 统一 urgency、effective weight、预期满足、证据置信度和效用贡献，同一行动满足多个需求时逐项求和；显式满足配方和有界预期适应已实现，安全事实已支持冲突/威胁/防守/撤离/修复并通过 Stimulus 投射 | `src/npc/drive_system.*`, `src/npc/goal_selector.*`, `NeedContent`, `NeedState`, `need.*` events, `tests/fixtures/glass-orchard-pack` |
 | 外驱/结构上下文 | 已实现结构化 Stimulus/Constraint、到期、习惯化和快照；结构演化治理、沙箱和版本化激活均已接入 | `DecisionContext.stimuli`, `constraints`, `WorldService::projectStimuli`, `src/evolution/evolution.*` |
-| LLM 解释与权衡 | 同步对话/自驱提案、channel 策略、Qwen JSON Schema、两阶段话语理解、失败关闭和异步 TurnQueue 已完成；有效上下文由主线程提交，过期结果只写审计事件 | `IntentProposal`, `IProvider`, `TurnQueue`, `decision_channels`, `WorldService::converse/deliberate/pumpAsyncTurns` |
+| LLM 解释与权衡 | 同步对话/自驱提案、channel 策略、Qwen 结构化输出、两阶段话语理解、失败关闭和异步 TurnQueue 已完成；有效上下文按主体可见性拆成 `worldSnapshot/selfState/planCatalog`，候选计划暴露 BT 摘要与参数 Schema；演化使用强制 function call，Runtime 校验错误最多反馈修正两次 | `IntentProposal.parameters`, `DecisionContext`, `IProvider`, `TurnQueue`, `decision_channels`, `WorldService::converse/deliberate/pumpAsyncTurns` |
 | 长过程执行 | 数据驱动时长、单一活动槽、配方声明的输入预留、完成/挂起/恢复事件和 Snapshot 恢复均已实现；挂起释放预留，刺激清除且资源可用时按原计划恢复并顺延完成时间；配置允许的高优先级过程可抢占低优先级预留，整组仲裁原子提交；Goal、Process、FSM、BT 是同一活动的四个投影 | `ProcessExecution.priority/preemptionPolicy`, `NpcActivity`, `reservation_mode`, `WorldService::planResourcePreemption`, `src/npc/state_machine.*` |
 | 通用资源与实例活动 | 通用资源数量、可选输入预留、声明式抢占、实体库存、资源转移、生产、原子交易、承诺和定时 Activity 已实现；Activity 可组合已注册 operator 并在嵌套事务中失败补偿 | `ResourceContent`, `ResourceState(amount,reserved)`, `WorldState.inventories`, `GameInstanceContent.inventoryInitial`, `reservation_mode`, `priority`, `preemption_policy`, `tradeResources`, `ActivityContent`；承诺关系增量与重谈时长已由 `promise_policy` 驱动 |
 | 社会关系与组织 | 已实现 NPC/玩家/组织四轴关系、声明式社会组成员与指标、交易和快照恢复；港区与 Glass Orchard 分别使用自己的组织、阵营和制度事实，没有 Runtime 特例 | `NpcState.relationships`, `WorldState.socialGroups`, `SocialGroupContent`, `relationship.adjust`, `trade.execute`, `tests/fixtures/port-pack`, `tests/fixtures/glass-orchard-pack` |
-| 元动作语义目录 | 已冻结；故事动作 ID 由内容包绑定到通用 operator，行为配方在运行时编译为 BT | `src/world/meta_actions.*`, `src/npc/behavior_recipe.*`, `data/behaviors/village.json` |
+| 元动作语义目录 | 已冻结；故事动作 ID 由内容包绑定到通用 operator，行为配方在运行时编译为 BT；Recipe 可声明参数 Schema，`IntentProposal.parameters` 经校验后绑定到通用能力（含动态移动目标）并随过程保存 | `src/world/meta_actions.*`, `src/npc/behavior_recipe.*`, `src/npc/action_validator.*`, `data/behaviors/village.json` |
 | NPC 基线日程 | 已实现确定性小时边界投影；当前不由 LLM 直接修改，临时偏离通过行动表达 | `NpcContent.schedule`, `NpcState.location/scheduleLabel`, `WorldService::processHourBoundary`; `ScheduleProposal`/版本化日程 Overlay 属于后续治理工作 |
 | World Intelligence 演化提案 | 提案持久化、来源事件证据、验证、沙箱、版本化 overlay 激活/恢复/栈式回滚、内容声明异常检测和反事实场景实验已完成；配方节点引用和整批 overlay 原子性均由 Runtime 校验 | `src/evolution/evolution.*`, `src/evolution/anomaly.*`, `src/evolution/scenario.*`, `src/world/world_service.*`, `data/schemas/evolution-proposal.schema.json`, `data/schemas/scenario-proposal.schema.json`; 校验白名单、EventLog 来源、治理类别、禁止 Core mutation、独立审批、快照重放和结果 JSON 审计已覆盖 |
 | 3D 表现和 Blender 场景 | 已完成内容化投影 | `src/client_main.cpp` 从当前内容包读取空间实体、连接、NPC、资源、场景资产与相机模式，无村庄 `world_id` 或角色分支；Xvfb 烟雾测试覆盖村庄和 Glass Orchard |
@@ -53,7 +53,7 @@
 - 任意最小内容包可以启动，不依赖 Mira、Lorn、Eve 或村庄专用 API。
 - 实体创建、休眠、激活和销毁经过事务，销毁身份保留在事实层并可从 Snapshot 恢复。
 - Promise、资源、关系、NPC 日程和事件在两日离线推进中可观察。
-- LLM 不可用时，自驱世界推进可走无语言理解的确定性候选回退；玩家对话失败关闭，不猜测语义、不写事实。
+- 默认产品路径使用 LLM；LLM 不可用时，时间、衰减和已批准过程仍可恢复，但自驱提案和玩家对话都失败关闭，不用确定性候选冒充模型决策、不猜测语义、不写事实。Mock Provider 仅由测试和离线回归显式注入。
 - Snapshot/Replay 不访问 LLM；事件只在事务提交后发布。Snapshot 用于普通读档，Replay 只在显式生成时做一次聚合状态重建和审计校验。
 - 每个事件都有稳定 `event_id`，并冻结提交时的内容与模拟版本；同事务事件共享 `correlation_id` 并以前序 `causation_sequence` 形成直接因果链。嵌套保存点失败时暂存事件与因果位置一起撤销，Snapshot 会拒绝越序、跨链或缺少版本来源的事件。
 - `event_sequence` 与 `world_revision` 已分离：时间推进即使没有业务事件也推进 World Revision；同根事务事件共享同一个 Revision；异步上下文绑定事务即将提交的 Revision，避免边界刚完成就把自身判为过期。
@@ -66,6 +66,9 @@
 - 3D 客户端在默认构建和 raylib 构建中均通过编译；Xvfb 实测村庄与 Glass Orchard 都能完成窗口、OpenGL 和内容初始化并连续绘制。村庄 GLB 只在内容声明 `scene_asset` 且显式设置 `TIDE_MARKS_USE_GLB=1` 时加载。
 - 承诺的关系轴增量和重谈延长时长来自 `promise_policy`，修改内容即可改变结果。
 - 行为树由 `recipes` 自动构造；Mira、Lorn、Eve 与故事动作没有专用 C++ BT。
+- NPC 普通决策选择完整的已登记 BT 计划，不直接选择元动作；新 BT 只能由 Level 1/2 的 `register_behavior_recipe` 提案创建，必须经过节点/operator 引用校验、沙箱和独立批准。
+- 行为参数由内容声明 JSON Schema；动态 `goto` 目标通过 `{"bind":"parameter_name"}` 绑定，Runtime 校验实体生命周期、权限和拓扑后才执行，并把已接受参数保存到 `ProcessExecution`。
+- Level 1/Level 2 的真实 Qwen function-call 回归均已通过；Level 1 返回策略 Overlay，Level 2 返回声明式内容/能力提案。Provider 校验失败最多触发两次带 `code/message/path` 的修正请求，超过次数失败关闭。
 - 对话与自驱由 `decision_channels` 声明；通道属性、话语权限、事件/记忆投影和 Provider 策略不再依赖 trigger 字符串分支。
 - 嵌套配方失败只回滚自己的保存点，不会把所在世界时间步一起恢复；快照回滚不复制不可变事件历史。
 - 冲突与安全 operator 的 attack、sabotage、threaten、defend、evacuate、repair 均覆盖事实变化、主事件与 Snapshot；关闭的 authored topology 会阻止移动，生产输入不足或输出超重不会留下部分资源或事件。
@@ -100,9 +103,9 @@
 3. ~~让一次有效决策启动持久化为 `ProcessExecution`，过程中不重复调用 LLM~~ 已完成：候选行为声明时长、可中断策略和显著性阈值；完成/中断才提交对应效果。`NpcActivity` 现在是唯一活动槽和生命周期状态源，Goal/Process/FSM/BT 不再各自维护生命周期。
 4. 已提交行动统一形成 WorldEvent，并驱动资源、需求、记忆和下一轮外部刺激；更丰富的关系/合同元动作属于 P1。
 5. ~~把真实 Provider 的自主审议接入异步 TurnQueue~~ 延后到 P1；当前同步路径只用于受控推进，不能被误称为非阻塞调度。
-6. ~~对模型关闭、模型迟到、过期提案、未知动作、重复提案、过程恢复和中断释放预留增加回归测试~~ 已覆盖；对话 Provider 失败时失败关闭且不提交事实，自驱缺少必需 action 时才回退到同一候选集的确定性 Provider。
+6. ~~对模型关闭、模型迟到、过期提案、未知动作、重复提案、过程恢复和中断释放预留增加回归测试~~ 已覆盖；对话和自驱 Provider 失败时都失败关闭且不提交事实，测试通过显式 Mock Provider 保持可重复。
 
-P0-K 的提案校验、对话失败关闭、自驱确定性回退、过期提案、重复提案、过程恢复、嵌套事务回滚和中断释放预留已有回归覆盖。异步 Provider TurnQueue 属于 P1；当前同步路径只服务于受控推进。
+P0-K 的提案校验、对话/自驱失败关闭、过期提案、重复提案、过程恢复、嵌套事务回滚和中断释放预留已有回归覆盖。异步 Provider TurnQueue 属于 P1；当前同步路径只服务于受控推进。
 
 ### P0-L：小村庄因果演示（已完成）
 
@@ -196,7 +199,7 @@ ctest --test-dir build --output-on-failure
 
 ## 风险与当前处理
 
-- LLM 延迟或断开：自驱世界时间可走无语言理解的确定性候选回退；玩家对话返回错误且不提交事件或行动，模型不拥有提交权限。
+- LLM 延迟或断开：世界时间和已批准规则可继续推进；自驱和玩家对话返回错误且不提交事件或行动，模型不拥有提交权限。离线回归必须显式选择 Mock Provider。
 - 内驱过于写死：参数、需求、动作满足关系和阈值来自 JSON；新驱动力必须走提案和沙箱，不在 C++ 添加 NPC 特例。
 - LLM 越权：候选动作、结构化 IntentProposal、版本检查和 ActionValidator。
 - 世界事实分叉：单一 WorldState 写入入口、事务、EventLog 和提交后 EventBus。

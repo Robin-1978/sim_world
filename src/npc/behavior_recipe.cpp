@@ -16,6 +16,9 @@ std::unique_ptr<BehaviorNode> compileNode(const BehaviorNodeContent& node, Compi
         throw std::runtime_error("duplicate behavior node id: " + node.id);
     }
     if (node.type == "sequence" || node.type == "selector") {
+        if (node.children.empty()) {
+            throw std::runtime_error("composite behavior node requires at least one child: " + node.id);
+        }
         std::vector<std::unique_ptr<BehaviorNode>> children;
         children.reserve(node.children.size());
         for (const auto& child : node.children) children.push_back(compileNode(child, tree));

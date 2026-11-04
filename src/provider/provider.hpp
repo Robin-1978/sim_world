@@ -21,6 +21,10 @@ struct ActionCandidate {
     std::string preemptionPolicy{"none"};
     double utilityScore{0.0};
     Json utilityContributions = Json::object();
+    // Optional, content-authored input contract for a behavior plan.  The
+    // model may fill these parameters, but Runtime validates them before a
+    // recipe can resolve a dynamic target such as a destination.
+    Json parameterSchema = Json::object();
     // Author-declared, bounded utility terms. Runtime never invents story
     // weights; it only combines these terms with deterministic drive relief.
     double resourceCost{0.0};
@@ -82,6 +86,14 @@ struct DecisionContext {
     std::string internalDrives;
     std::string externalStimuli;
     std::string structuralConstraints;
+    // The provider-facing projection is deliberately split into bounded,
+    // typed sections.  These are not a second WorldState: they are a
+    // visibility-filtered decision snapshot assembled for one NPC and one
+    // trigger.  The Runtime always includes time/revision metadata, while
+    // world facts are limited to what the actor can observe or already knows.
+    Json worldSnapshot = Json::object();
+    Json selfState = Json::object();
+    Json planCatalog = Json::array();
     Json currentActivity = Json{{"status", "idle"}};
     std::vector<SpeechActPermissionView> speechActs;
     std::vector<ExternalStimulus> stimuli;
@@ -106,6 +118,7 @@ struct IntentProposal {
     std::string speechAct;
     Json utteranceUnderstanding = Json::object();
     bool worldActionRequested{false};
+    Json parameters = Json::object();
 };
 
 struct ProviderResponse {
@@ -113,6 +126,10 @@ struct ProviderResponse {
     IntentProposal proposal;
     std::string dialogue;
     std::string error;
+    // Level 1/Level 2 evolution uses the same provider boundary as NPC
+    // intent. The Runtime parses and governs this JSON; the provider never
+    // mutates WorldState or approves its own proposal.
+    Json evolutionProposal = Json::object();
 };
 
 // A decision policy is content/runtime configuration, not a model name
@@ -129,6 +146,34 @@ public:
     virtual ~IProvider() = default;
     virtual ProviderResponse decide(const DecisionContext& context,
                                     const std::string& playerInput) = 0;
+    // Runtime validation may return one bounded, structured repair hint. The
+    // default adapter preserves existing providers and tests that only
+    // implement the one-shot decision contract.
+    virtual ProviderResponse decide(const DecisionContext& context,
+                                    const std::string& playerInput,
+                                    const Json& validationFeedback) {
+        (void)validationFeedback;
+        return decide(context, playerInput);
+    }
+    // Evolution is explicit and infrequent, so it has a separate structured
+    // request. A provider that does not implement an LLM evolution path must
+    // fail closed instead of silently inventing a deterministic proposal.
+    virtual ProviderResponse proposeEvolution(const Json& context,
+                                              const std::string& evolutionLevel) {
+        (void)context;
+        (void)evolutionLevel;
+        return ProviderResponse{false, {}, {}, "evolution_provider_unavailable", Json::object()};
+    }
+    // A validation result may be returned to the same provider request as a
+    // bounded repair hint. Providers that do not support iterative repair
+    // retain the one-shot behavior above; they never receive authority to
+    // bypass Runtime validation.
+    virtual ProviderResponse proposeEvolution(const Json& context,
+                                              const std::string& evolutionLevel,
+                                              const Json& validationFeedback) {
+        (void)validationFeedback;
+        return proposeEvolution(context, evolutionLevel);
+    }
     [[nodiscard]] virtual std::string name() const = 0;
 };
 
@@ -154,6 +199,14 @@ public:
     explicit LlamaCppProvider(LlamaCppConfig config = {});
     ProviderResponse decide(const DecisionContext& context,
                             const std::string& playerInput) override;
+    ProviderResponse decide(const DecisionContext& context,
+                            const std::string& playerInput,
+                            const Json& validationFeedback) override;
+    ProviderResponse proposeEvolution(const Json& context,
+                                      const std::string& evolutionLevel) override;
+    ProviderResponse proposeEvolution(const Json& context,
+                                      const std::string& evolutionLevel,
+                                      const Json& validationFeedback) override;
     [[nodiscard]] std::string name() const override { return "llama.cpp"; }
 
 private:

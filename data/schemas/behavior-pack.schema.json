@@ -169,6 +169,18 @@
           "default": "none",
           "description": "lower_priority may suspend interruptible lower-priority reservation owners."
         },
+        "allowed_actors": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1},
+          "uniqueItems": true,
+          "default": [],
+          "description": "Optional propagation scope for an evolved recipe. Empty means actor bindings come from the world content."
+        },
+        "parameters": {
+          "type": "object",
+          "description": "JSON Schema for decision inputs bound into this behavior recipe.",
+          "default": {}
+        },
         "root": {
           "$ref": "#/$defs/behavior_node"
         }

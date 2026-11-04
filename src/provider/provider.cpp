@@ -67,12 +67,23 @@ ProviderJsonResult requestProviderJson(const LlamaCppConfig& config, const Json&
             std::cerr << "provider_debug stage=" << stage
                       << " finish_reason=" << choice.value("finish_reason", "")
                       << " usage=" << outer.value("usage", Json::object()).dump()
-                      << " content=" << choice.at("message").value("content", "") << "\n";
+                      << " content=" << choice.at("message").value("content", "")
+                      << " tool_calls=" << choice.at("message").value("tool_calls", Json::array()).dump()
+                      << "\n";
         }
         if (choice.value("finish_reason", "") == "length") {
             return {false, {}, "provider_truncated:" + stage};
         }
-        return {true, Json::parse(choice.at("message").at("content").get<std::string>()), {}};
+        const auto& message = choice.at("message");
+        // OpenAI-compatible providers may return a forced function call
+        // instead of assistant content. Treat the function arguments as the
+        // structured payload; no natural-language repair is attempted.
+        if (message.contains("tool_calls") && message.at("tool_calls").is_array() &&
+            !message.at("tool_calls").empty()) {
+            const auto& function = message.at("tool_calls").at(0).at("function");
+            return {true, Json::parse(function.at("arguments").get<std::string>()), {}};
+        }
+        return {true, Json::parse(message.at("content").get<std::string>()), {}};
     } catch (const std::exception& error) {
         return {false, {}, "invalid_provider_json:" + stage + ":" + error.what()};
     }
@@ -143,6 +154,11 @@ LlamaCppProvider::LlamaCppProvider(LlamaCppConfig config) : config_(std::move(co
 }
 
 ProviderResponse LlamaCppProvider::decide(const DecisionContext& context, const std::string& playerInput) {
+    return decide(context, playerInput, Json::object());
+}
+
+ProviderResponse LlamaCppProvider::decide(const DecisionContext& context, const std::string& playerInput,
+                                          const Json& validationFeedback) {
     Json candidates = Json::array();
     for (const auto& candidate : context.candidates) {
         candidates.push_back(Json{{"action_id", candidate.actionId}, {"plan_id", candidate.planId},
@@ -151,6 +167,7 @@ ProviderResponse LlamaCppProvider::decide(const DecisionContext& context, const 
                                   {"interrupt_salience_threshold", candidate.interruptSalienceThreshold},
                                   {"reservation_mode", candidate.reservationMode},
                                   {"reservations", candidate.reservations},
+                                  {"parameter_schema", candidate.parameterSchema},
                                   {"priority", candidate.priority},
                                   {"preemption_policy", candidate.preemptionPolicy},
                                   {"utility_score", candidate.utilityScore},
@@ -265,6 +282,9 @@ ProviderResponse LlamaCppProvider::decide(const DecisionContext& context, const 
 
     const Json userContent{{"npc_id", context.npcId}, {"time", context.now.toString()},
                            {"decision_channel", context.channel}, {"decision_trigger", context.trigger},
+                           {"world_snapshot", context.worldSnapshot},
+                           {"self_state", context.selfState},
+                           {"plan_catalog", context.planCatalog},
                            {"utterance_understanding", utteranceUnderstanding},
                            {"selected_speech_act", selectedSpeechAct},
                            {"world_action_allowed", worldActionPermitted},
@@ -278,6 +298,7 @@ ProviderResponse LlamaCppProvider::decide(const DecisionContext& context, const 
                            {"constraints", constraints},
                            {"current_activity", context.currentActivity},
                            {"player_input", playerInput},
+                           {"validation_feedback", validationFeedback},
                            {"candidates", candidates}};
     std::vector<std::string> stimulusIds;
     stimulusIds.reserve(context.stimuli.size());
@@ -287,7 +308,11 @@ ProviderResponse LlamaCppProvider::decide(const DecisionContext& context, const 
     for (const auto& drive : context.drives) needIds.push_back(drive.id);
     const std::string systemPrompt =
         "Return one JSON object only. The utterance_understanding stage has already classified the player's communication. "
-        "Choose exactly one action_id from the supplied candidates, or use an empty action_id for a conversation-only response or refusal. "
+        "Choose exactly one action_id from plan_catalog, or use an empty action_id for a conversation-only response or refusal. "
+        "Each non-empty action_id selects one registered behavior plan: Runtime will execute its complete content-authored behavior tree. "
+        "The behavior_tree shown in plan_catalog is descriptive context; do not invent or partially execute its nodes in this response. "
+        "If the selected plan has a parameter_schema, fill only those declared parameters (for example destination); "
+        "parameters are proposals for Runtime validation, not direct world writes. Use an empty object when none are needed. "
         "A non-empty action_id starts an authored world process and may change world facts; it is never merely a dialogue style or answer type. "
         "For a conversation-only answer, action_id MUST be empty even when a candidate label sounds like 'explain' or 'report'. "
         "world_action_allowed is derived by Runtime from the selected_speech_act. If it is false, action_id MUST be empty and the dialogue must answer without promising or performing a world action. "
@@ -300,6 +325,8 @@ ProviderResponse LlamaCppProvider::decide(const DecisionContext& context, const 
         Json(needIds).dump() + ". Use empty arrays/objects when none are supplied, and expected_relief MUST be empty when action_id is empty. "
         "confidence and expected_relief values must be numbers from 0 to 1. dialogue must be one or two natural first-person sentences spoken by the NPC, never a dump of context fields. "
         "knowledge and experiences are NPC-scoped, sourced context; they may guide a proposal but never authorize bypassing current facts or constraints. "
+        "If validation_feedback is non-empty, repair only the reported action or parameter problem in one response. "
+        "Do not repeat an invalid action or parameter, and do not invent a candidate outside plan_catalog. "
         "motivation and tradeoffs explain the decision; they are not actions. Do not use markdown or add explanation outside the JSON object.";
     Json messages = Json::array();
     messages.push_back(Json{{"role", "system"}, {"content", systemPrompt}});
@@ -307,7 +334,7 @@ ProviderResponse LlamaCppProvider::decide(const DecisionContext& context, const 
     const Json responseSchema{
         {"type", "object"}, {"additionalProperties", false},
         {"required", Json::array({"action_id", "intent", "motivation", "expected_outcome", "confidence",
-                                   "dialogue", "cited_stimulus_ids", "tradeoffs", "expected_relief"})},
+                                   "dialogue", "cited_stimulus_ids", "tradeoffs", "expected_relief", "parameters"})},
         {"properties", Json{{"action_id", Json{{"type", "string"}}},
                              {"intent", Json{{"type", "string"}}},
                              {"motivation", Json{{"type", "string"}}},
@@ -317,7 +344,8 @@ ProviderResponse LlamaCppProvider::decide(const DecisionContext& context, const 
                              {"cited_stimulus_ids", Json{{"type", "array"}, {"items", Json{{"type", "string"}}}}},
                              {"tradeoffs", Json{{"type", "array"}, {"items", Json{{"type", "string"}}}}},
                              {"expected_relief", Json{{"type", "object"},
-                                                       {"additionalProperties", Json{{"type", "number"}, {"minimum", 0.0}, {"maximum", 1.0}}}}}}}};
+                                                       {"additionalProperties", Json{{"type", "number"}, {"minimum", 0.0}, {"maximum", 1.0}}}}},
+                             {"parameters", Json{{"type", "object"}}}}}};
     Json request{{"model", config_.model}, {"temperature", config_.temperature}, {"max_tokens", policy.maxTokens},
                  {"messages", messages},
                  {"response_format", Json{{"type", "json_schema"},
@@ -350,6 +378,8 @@ ProviderResponse LlamaCppProvider::decide(const DecisionContext& context, const 
             if (!item.value().is_number()) return ProviderResponse{false, {}, {}, "invalid_expected_relief"};
             proposal.expectedRelief[item.key()] = std::clamp(item.value().get<double>(), 0.0, 1.0);
         }
+        proposal.parameters = answer.value("parameters", Json::object());
+        if (!proposal.parameters.is_object()) return ProviderResponse{false, {}, {}, "invalid_action_parameters"};
         proposal.speechAct = selectedSpeechAct;
         proposal.utteranceUnderstanding = utteranceUnderstanding;
         proposal.worldActionRequested = !proposal.actionId.empty();
@@ -357,6 +387,191 @@ ProviderResponse LlamaCppProvider::decide(const DecisionContext& context, const 
     } catch (const std::exception& error) {
         return ProviderResponse{false, {}, {}, std::string("invalid_provider_json:") + error.what()};
     }
+}
+
+ProviderResponse LlamaCppProvider::proposeEvolution(const Json& context,
+                                                     const std::string& evolutionLevel) {
+    return proposeEvolution(context, evolutionLevel, Json::object());
+}
+
+ProviderResponse LlamaCppProvider::proposeEvolution(const Json& context,
+                                                     const std::string& evolutionLevel,
+                                                     const Json& validationFeedback) {
+    const auto configuredPolicy = config_.decisionPolicies.find("evolution_proposal");
+    if (configuredPolicy == config_.decisionPolicies.end()) {
+        return ProviderResponse{false, {}, {}, "missing_provider_policy:evolution_proposal", Json::object()};
+    }
+    const DecisionPolicy& policy = configuredPolicy->second;
+    const std::string systemPrompt =
+        "You are the World Intelligence evolution proposer. Return exactly one JSON object and no prose. "
+        "Propose a bounded declarative change for the supplied evolution level. "
+        "Use only operation names and registered references from the context. "
+        "For level1, the operation MUST be overlay_strategy or register_behavior_recipe. For level2, the operation MUST be "
+        "create_entity_archetype or register_behavior_recipe; never use overlay_strategy for level2. "
+        "Cite only evidence event sequences present in the context. "
+        "Never request Runtime Core mutation, arbitrary code, scripts, permissions, transactions, event schemas, "
+        "or persistence changes. A proposal is only a suggestion: the Runtime will validate it, run it in an isolated "
+        "sandbox, and require independent approval before activation. "
+        "For level1, prefer an NPC strategy or behavior recipe change. For level2, prefer a content/archetype or "
+        "behavior capability change that can be expressed by the registered declarative operations. "
+        "The proposal object uses proposal_kind (content, knowledge, strategy, or declarative_capability); the operation "
+        "create_entity_archetype separately uses kind for the entity kind. Every operation MUST use the exact keys operation and id. "
+        "For create_entity_archetype, kind is REQUIRED and "
+        "must be a short noun such as facility, place, or object; use optional "
+        "default_metadata. For register_behavior_recipe use plan_id, duration_minutes, interruptible, available_to "
+        "(a non-empty list of NPC ids from the supplied world), and a complete "
+        "root behavior node with type/id/name/args/children. A recipe may declare a parameters JSON Schema for "
+        "dynamic bindings such as destination. Do not use name, params, entity_type, recipe_id, or "
+        "free-form behavior keys in place of the registered operation schema. Prefer one small valid operation over "
+        "multiple speculative operations. A valid minimal Level 2 archetype operation is "
+        "{\"operation\":\"create_entity_archetype\",\"id\":\"new_facility\",\"kind\":\"facility\"}. "
+        "A valid minimal behavior recipe root is "
+        "{\"type\":\"meta_action\",\"id\":\"root\",\"name\":\"relieve_need\",\"args\":{\"action\":\"rest\"},\"max_ticks\":0,\"children\":[]}. "
+        "Do not claim that an operation was applied; provide a concise rationale in the rationale field. "
+        "If validation_feedback is non-empty, repair only the reported schema/reference problem while keeping the "
+        "same world evidence; do not argue with the validator or invent a new Runtime capability. "
+        "If feedback says level_operation_mismatch for level2, replace the entire operation with a valid "
+        "create_entity_archetype operation containing operation, id, kind and default_metadata; do not retain "
+        "npc_id, peer_id, strategy, memory or event_type fields. If feedback says invalid_behavior_recipe, use a "
+        "single meta_action root with a registered name from content.registered_meta_actions and children=[]; do not "
+        "invent a node name or create an empty sequence/selector.";
+    Json responseSchema = Json::object();
+    responseSchema["type"] = "object";
+    responseSchema["additionalProperties"] = false;
+    responseSchema["required"] = Json::array({"id", "proposal_kind", "evidence_event_sequences", "operations", "rationale"});
+    responseSchema["properties"] = Json::object();
+    responseSchema["properties"]["id"] = Json{{"type", "string"}, {"minLength", 1}};
+    responseSchema["properties"]["proposal_kind"] = Json{{"type", "string"},
+                                                             {"enum", Json::array({"content", "knowledge", "strategy", "declarative_capability"})}};
+    Json evidenceItem = Json{{"type", "integer"}, {"minimum", 1}};
+    if (context.contains("evidence_events") && context.at("evidence_events").is_array()) {
+        Json validSequences = Json::array();
+        for (const auto& event : context.at("evidence_events")) {
+            if (event.is_object() && event.contains("sequence") && event.at("sequence").is_number_unsigned()) {
+                validSequences.push_back(event.at("sequence"));
+            }
+        }
+        if (!validSequences.empty()) evidenceItem["enum"] = std::move(validSequences);
+    }
+    responseSchema["properties"]["evidence_event_sequences"] =
+        Json{{"type", "array"}, {"minItems", 1}, {"items", std::move(evidenceItem)}};
+    Json createOperation = Json::object();
+    createOperation["type"] = "object";
+    createOperation["additionalProperties"] = false;
+    createOperation["required"] = Json::array({"operation", "id", "kind", "default_metadata"});
+    createOperation["properties"] = Json{
+        {"operation", Json{{"const", "create_entity_archetype"}}},
+        {"id", Json{{"type", "string"}, {"minLength", 1}}},
+        {"kind", Json{{"type", "string"}, {"minLength", 1}}},
+        {"default_metadata", Json{{"type", "object"}}}};
+
+    Json strategyOperation = Json::object();
+    strategyOperation["type"] = "object";
+    strategyOperation["additionalProperties"] = false;
+    strategyOperation["required"] = Json::array({"operation", "id", "npc_id", "peer_id", "min_peer_trust",
+                                                   "strategy", "goal_stage", "memory", "event_type"});
+    strategyOperation["properties"] = Json{
+        {"operation", Json{{"const", "overlay_strategy"}}},
+        {"id", Json{{"type", "string"}, {"minLength", 1}}},
+        {"npc_id", Json{{"type", "string"}, {"minLength", 1}}},
+        {"peer_id", Json{{"type", "string"}, {"minLength", 1}}},
+        {"min_peer_trust", Json{{"type", "number"}, {"minimum", 0.0}, {"maximum", 1.0}}},
+        {"strategy", Json{{"type", "string"}, {"minLength", 1}}},
+        {"goal_stage", Json{{"type", "integer"}, {"minimum", 0}}},
+        {"memory", Json{{"type", "string"}}},
+        {"event_type", Json{{"type", "string"}, {"minLength", 1}}}};
+
+    Json node = Json::object();
+    node["type"] = "object";
+    node["additionalProperties"] = false;
+    node["required"] = Json::array({"type", "id", "name", "args", "max_ticks", "children"});
+    Json nodeName = Json{{"type", "string"}};
+    Json registeredNames = Json::array();
+    if (context.contains("content") && context.at("content").is_object()) {
+        for (const auto& key : {"registered_meta_actions", "registered_conditions"}) {
+            const auto names = context.at("content").value(key, Json::array());
+            if (!names.is_array()) continue;
+            for (const auto& name : names) if (name.is_string()) registeredNames.push_back(name);
+        }
+    }
+    if (!registeredNames.empty()) nodeName["enum"] = std::move(registeredNames);
+    node["properties"] = Json{
+        {"type", Json{{"enum", Json::array({"sequence", "selector", "condition", "meta_action", "interruptible", "timeout"})}}},
+        {"id", Json{{"type", "string"}, {"minLength", 1}}},
+        {"name", std::move(nodeName)},
+        {"args", Json{{"type", "object"}}},
+        {"max_ticks", Json{{"type", "integer"}, {"minimum", 0}}},
+        {"children", Json{{"type", "array"}, {"items", Json{{"type", "object"}}}}}};
+
+    Json recipeOperation = Json::object();
+    recipeOperation["type"] = "object";
+    recipeOperation["additionalProperties"] = false;
+    recipeOperation["required"] = Json::array({"operation", "id", "plan_id", "duration_minutes", "interruptible",
+                                                 "interrupt_salience_threshold", "reservation_mode", "priority",
+                                                 "preemption_policy", "parameters", "available_to", "root"});
+    recipeOperation["properties"] = Json{
+        {"operation", Json{{"const", "register_behavior_recipe"}}},
+        {"id", Json{{"type", "string"}, {"minLength", 1}}},
+        {"plan_id", Json{{"type", "string"}, {"minLength", 1}}},
+        {"duration_minutes", Json{{"type", "integer"}, {"minimum", 0}}},
+        {"interruptible", Json{{"type", "boolean"}}},
+        {"interrupt_salience_threshold", Json{{"type", "number"}, {"minimum", 0.0}, {"maximum", 1.0}}},
+        {"reservation_mode", Json{{"enum", Json::array({"none", "input_resources"})}}},
+        {"priority", Json{{"type", "integer"}, {"minimum", 0}}},
+        {"preemption_policy", Json{{"enum", Json::array({"none", "lower_priority"})}}},
+        {"parameters", Json{{"type", "object"}}},
+        {"available_to", Json{{"type", "array"}, {"minItems", 1}, {"uniqueItems", true},
+                                {"items", Json{{"type", "string"}, {"minLength", 1}}}}},
+        {"root", node}};
+
+    Json operationItems = Json::object();
+    operationItems["oneOf"] = evolutionLevel == "level1"
+                                    ? Json::array({strategyOperation, recipeOperation})
+                                    : Json::array({createOperation, recipeOperation});
+    responseSchema["properties"]["operations"] = Json::object();
+    responseSchema["properties"]["operations"]["type"] = "array";
+    responseSchema["properties"]["operations"]["minItems"] = 1;
+    responseSchema["properties"]["operations"]["maxItems"] = 1;
+    responseSchema["properties"]["operations"]["items"] = std::move(operationItems);
+    responseSchema["properties"]["rationale"] = Json{{"type", "string"}};
+    Json request = Json::object();
+    request["model"] = config_.model;
+    request["temperature"] = config_.temperature;
+    request["max_tokens"] = policy.maxTokens;
+    request["messages"] = Json::array({
+        Json{{"role", "system"}, {"content", systemPrompt}},
+        Json{{"role", "user"}, {"content", Json{{"evolution_level", evolutionLevel},
+                                                     {"world", context},
+                                                     {"validation_feedback", validationFeedback}}.dump()}}});
+    // Use a single forced tool call for proposals.  This follows the same
+    // provider boundary as BieTheirBed: the model emits typed arguments, and
+    // Runtime validates those arguments before treating them as data.  The
+    // JSON-content parser remains as an interoperability path for older
+    // llama.cpp builds that ignore tools but honor structured output.
+    const std::string toolName = "propose_evolution_" + evolutionLevel;
+    request["tools"] = Json::array({Json{{"type", "function"},
+                                          {"function", Json{{"name", toolName},
+                                                             {"description", "Propose one bounded, declarative world evolution change for this exact level."},
+                                                             {"parameters", responseSchema}, {"strict", true}}}}});
+    // llama.cpp accepts the OpenAI-compatible string form here.  There is
+    // exactly one tool in this request, so `required` is equivalent to naming
+    // that function and avoids a provider-specific object warning.
+    request["tool_choice"] = "required";
+    auto configureDecoding = [](Json& target, const DecisionPolicy& selectedPolicy) {
+        target["chat_template_kwargs"] = Json{{"enable_thinking", selectedPolicy.enableThinking}};
+        if (selectedPolicy.enableThinking) {
+            target["reasoning_budget_tokens"] = selectedPolicy.reasoningBudgetTokens;
+        } else {
+            target["reasoning_effort"] = "none";
+        }
+    };
+    configureDecoding(request, policy);
+    auto completed = requestProviderJson(config_, request, "evolution_" + evolutionLevel);
+    if (!completed.ok) return ProviderResponse{false, {}, {}, completed.error, Json::object()};
+    if (!completed.value.is_object()) {
+        return ProviderResponse{false, {}, {}, "invalid_evolution_proposal", Json::object()};
+    }
+    return ProviderResponse{true, {}, completed.value.value("rationale", ""), {}, completed.value};
 }
 
 

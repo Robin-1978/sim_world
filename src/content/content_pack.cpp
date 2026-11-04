@@ -148,6 +148,20 @@ void parseBehaviorPack(WorldContentPack& pack, const Json& document, const std::
         recipe.reservationMode = item.value("reservation_mode", "none");
         recipe.priority = item.value("priority", 0);
         recipe.preemptionPolicy = item.value("preemption_policy", "none");
+        const auto allowedActors = item.value("allowed_actors", Json::array());
+        if (!allowedActors.is_array()) {
+            throw std::runtime_error("behavior recipe allowed_actors must be an array: " + id);
+        }
+        for (const auto& actor : allowedActors) {
+            if (!actor.is_string() || actor.get<std::string>().empty()) {
+                throw std::runtime_error("behavior recipe allowed_actors entries must be non-empty strings: " + id);
+            }
+            recipe.allowedActors.push_back(actor.get<std::string>());
+        }
+        recipe.parameterSchema = item.value("parameters", Json::object());
+        if (!recipe.parameterSchema.is_object()) {
+            throw std::runtime_error("behavior recipe parameters must be an object: " + id);
+        }
         if (recipe.reservationMode != "none" && recipe.reservationMode != "input_resources") {
             throw std::runtime_error("unsupported reservation_mode in behavior recipe: " + id);
         }
@@ -301,6 +315,7 @@ std::vector<ActionCandidate> parseActions(const Json& beats, const std::string& 
                                       recipe->interruptible, recipe->interruptSalienceThreshold,
                                       recipe->reservationMode, recipe->id, {}, recipe->priority,
                                       recipe->preemptionPolicy};
+            candidate.parameterSchema = recipe->parameterSchema;
             const auto utility = definition.value("utility_profile", Json::object());
             if (!utility.is_object()) throw std::runtime_error("utility_profile must be an object: " + id);
             const auto bounded = [&utility, &id](const char* key, double minimum, double maximum) {
@@ -520,6 +535,10 @@ ActivityContent parseActivity(const Json& value, const std::string& path) {
     result.conditionBelow = value.value("condition_below", 0);
     result.eventType = requiredString(value, "event_type", path);
     result.detail = value.value("detail", result.id);
+    result.decisionChannel = value.value("decision_channel", "");
+    if (!result.decisionChannel.empty() && result.actor == "world") {
+        throw std::runtime_error("world activities cannot request an NPC decision channel in " + path);
+    }
     if (!value.contains("effects") || !value.at("effects").is_array()) {
         throw std::runtime_error("activity needs an effects array in " + path);
     }

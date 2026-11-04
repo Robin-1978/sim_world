@@ -165,7 +165,7 @@ utility(a) = Σ(drive_i × expected_relief_i)
              - resource_cost - risk_cost - constraint_penalty
 ```
 
-这里的需求收益由 `GoalSelector` 对同一 `action_id` 满足的所有需求贡献求和，并把 `utility_score` 与每项 `utility_contributions` 放入决策上下文和意图事件。行动可以由内容声明 `utility_profile`，包括 `resource_cost`、`risk`、`relationship_effect`、`future_value` 和 `constraint_penalty`；Runtime 校验范围后按声明组合这些分项，不在 C++ 里按角色或故事写死权重。LLM 可以在复杂社会情境中解释和权衡这些项，但它不能伪造已经不存在的事实。参数和候选来自内容包。LLM 可以提出 `IntentProposal`，但只能从当前 Context 的 `action_id`、`beat_id`、谈判立场和策略候选中选择；它不能凭空创建资源、任务、关系变化或事件。C++ 校验结构约束后把意图转成 Command，事务成功后的结果才改变世界，并生成下一轮外驱和内驱输入。
+这里的需求收益由 `GoalSelector` 对同一 `action_id` 满足的所有需求贡献求和，并把 `utility_score` 与每项 `utility_contributions` 放入决策上下文和意图事件。行动可以由内容声明 `utility_profile`，包括 `resource_cost`、`risk`、`relationship_effect`、`future_value` 和 `constraint_penalty`；Runtime 校验范围后按声明组合这些分项，不在 C++ 里按角色或故事写死权重。LLM 可以在复杂社会情境中解释和权衡这些项，但它不能伪造已经不存在的事实。候选计划和参数契约来自内容包，模型只能填写声明的参数，例如一个通用 `goto` 计划的 `destination`。Runtime 校验参数类型、目标实体、权限和当前拓扑后，才把参数绑定到 BT 的元动作；模型不能凭空创建资源、任务、关系变化或事件。C++ 校验结构约束后把意图转成 Command，事务成功后的结果才改变世界，并生成下一轮外驱和内驱输入。
 
 ### 社会和集体驱力
 
@@ -259,7 +259,7 @@ NPC 不每帧调用 LLM。日常移动、进食、休息、工作、资源结算
 
 ## 6. 对话、记忆和 LLM 演化
 
-对话输入先进入 LLM 的 `utterance_understanding` 阶段，由模型根据内容包为每类话语行为提供的 `description` 和 `world_action_allowed` 识别通信意图；Runtime 不扫描玩家文本，也不保存关键词表，更不能从候选动作反推玩家意图。随后 `player_dialogue` 阶段读取结构化理解、当前活动、记忆和授权事实，生成回答以及可选的 `action_id`。Provider 失败时，对话 Turn 直接失败且不写事件、不启动过程；Runtime 不会用关键词或固定台词伪造一次语义理解。Runtime 永远根据模型返回的话语行为 ID 和内容包权限重新校验是否允许行动，不接受模型自行授予权限。问候、询问、结束和普通陈述可以配置为仅对话；请求、命令、谈判和承诺可以配置为允许产生行动提案。结构化理解包含 `speech_act`、`communication_goal`、`action_requested`、引用实体和歧义；结构化决策包含 `action_id`、`intent`、`motivation`、`dialogue`、`cited_stimulus_ids`、`tradeoffs`、`expected_relief`、候选记忆和上下文版本。`cited_stimulus_ids` 指出模型实际依据的外驱，`tradeoffs` 解释权衡，`expected_relief` 表达预测；这些字段用于审计、学习和回放校验，不能直接写入事实。`motivation` 只用于解释和诊断；`action_id` 必须属于当前 DecisionContext。仅对话响应使用空 `action_id`，不会进入行为树或修改世界事实。
+对话输入先进入 LLM 的 `utterance_understanding` 阶段，由模型根据内容包为每类话语行为提供的 `description` 和 `world_action_allowed` 识别通信意图；Runtime 不扫描玩家文本，也不保存关键词表，更不能从候选动作反推玩家意图。随后 `player_dialogue` 阶段读取结构化理解、当前活动、记忆和授权事实，生成回答以及可选的 `action_id`。Provider 失败时，对话 Turn 直接失败且不写事件、不启动过程；Runtime 不会用关键词或固定台词伪造一次语义理解。Runtime 永远根据模型返回的话语行为 ID 和内容包权限重新校验是否允许行动，不接受模型自行授予权限。问候、询问、结束和普通陈述可以配置为仅对话；请求、命令、谈判和承诺可以配置为允许产生行动提案。结构化理解包含 `speech_act`、`communication_goal`、`action_requested`、引用实体和歧义；结构化决策包含 `action_id`、`parameters`、`intent`、`motivation`、`dialogue`、`cited_stimulus_ids`、`tradeoffs`、`expected_relief`、候选记忆和上下文版本。`parameters` 只能填充候选计划声明的 JSON Schema，并随 `ProcessExecution` 保存，恢复时不要求模型重建。`cited_stimulus_ids` 指出模型实际依据的外驱，`tradeoffs` 解释权衡，`expected_relief` 表达预测；这些字段用于审计、学习和回放校验，不能直接写入事实。`motivation` 只用于解释和诊断；`action_id` 必须属于当前 DecisionContext。仅对话响应使用空 `action_id`，不会进入行为树或修改世界事实。
 
 对话和自驱不是 Runtime 中的两个写死分支，而是世界内容包中的 `decision_channels`。每个 channel 配置是否是会话、是否进行话语行为分类、默认行动权限、事件类型、记忆类型、事件目标和对应的 Intelligence Profile 策略；`conversation_channel` 与 `autonomous_channel` 只是当前实例选择的两个入口。Runtime 按 channel 属性执行同一条提案校验和事务路径，因此新的观察者、定时器、群体审议或外部传感器入口只需增加 JSON channel，不需要增加 `if (trigger == ...)` 的业务耦合。
 
@@ -277,11 +277,13 @@ Observe -> Understand / Evaluate -> Intent or Evolution Proposal
 
 世界演化对象包括 Content、Knowledge、Strategy 和 Declarative Capability。提案统一使用 `schema_version=1` 的 JSON，带提案 ID、来源模型和上下文、依据事实的事件 Sequence、影响范围、类型化 operations、预期指标、资源预算、过期时间、兼容版本、沙箱结果和回滚点。当前 Runtime 强制校验 `source`、治理类别和 `evidence_event_sequences`：只接受当前 EventLog 中真实存在且不重复的事件引用，不能用一个模型名称或虚构事实替代审计依据。模型可以提出新聚落、路线、组织、策略、需求或行为组合；不能修改 Runtime Core、注入 C++、任意加载脚本或绕过权限。
 
-Level 2 的“世界底座演化”只改变可声明、可验证的 Simulation Framework/Content Overlay：新的实体原型、组件组合、行为配方、社会策略、知识归纳或规则参数都先以 Proposal 进入快照沙箱，比较事件差异和指标，再由独立开发/设计审批激活。Entity、事务、事件、权限、回放和回滚这些 Runtime Core 不属于 LLM 可演化对象；需要新的 C++ 能力时只能形成 capability request，待开发者发布注册 operator。
+Level 1 是主体行为演化：LLM 在现有 Runtime 能力内泛化 NPC 的经验、社会证据和内外驱，提出新的策略 Overlay 或已注册元动作的行为配方。它改变以后如何形成目标和选择计划，不等于替 NPC 执行当前行动。Level 2 是世界底座/内容演化：LLM 根据多个主体和世界事件提出新的实体原型、行为能力组合、社会策略或规则参数。两级都只改变可声明、可验证的 Simulation Framework/Content Overlay；都经过 `LLM Proposal -> Validate -> Sandbox -> Independent Approval -> Versioned Activate`。`register_behavior_recipe` 是创建新 BT 的唯一在线入口；它只能组合注册节点、谓词和 operator，且新能力默认只进入提案声明的传播范围，不自动授予所有 NPC。请求入口是 `EvolutionManager::propose(world, level, trigger)`，产品 CLI 使用 `--evolve level1|level2`；提案生成阶段调用当前 Intelligence Profile 的 `evolution_proposal` 策略，采用单一强制 function call，校验失败最多把结构化错误反馈给模型修正两次，沙箱阶段只重放捕获的上下文，不重新调用 LLM。Entity、事务、事件、权限、回放和回滚这些 Runtime Core 不属于 LLM 可演化对象；需要新的 C++ 能力时只能形成 capability request，待开发者发布注册 operator。
+
+演化不是每个 Tick 的后台调用。普通计划由玩家输入、刺激、需求压力和过程边界触发；Level 1 在有界的个人经验窗口、显著预测误差、连续失败或日边界触发并受冷却/预算限制；Level 2 只在跨主体异常、资源/关系指标持续偏离或世界周期边界触发。Runtime 先确定性聚合证据，LLM 在一次结构化提案中完成总结、反思和最小创新，之后仍必须经过治理链。NPC 的 DecisionContext 使用按主体可见性、地点、关系、承诺和当前候选计划裁剪的 `worldSnapshot`，并分别提供 `selfState`、`planCatalog`、记忆、知识、经验、刺激和约束；不把全量 WorldState 或内部版本号当作模型语义材料。
 
 同一机制可以承载场景实验：例如“在周边小区开一个小店”“提高利率”“发布一个政策”。LLM 把自然语言转成 `ScenarioProposal`，Validator 检查实体、参数和已注册机制，Sandbox 从同一快照克隆并运行 baseline/scenario，Runtime 输出资源、库存、组织指标、需求、位置、关系、承诺、异常和两侧事件序列；LLM 只把这些已计算结果整理为假设、因果链、敏感参数和不确定性说明。缺少经济或社会机制时必须报告“无法评估”，不能用语言补造数值。当前 P2 已实现资源、组织指标和 NPC 需求三类有界 intervention，以及面向不必填用的 CLI；小店、利率和政策只有在对应事实模型落地后才能增加专用 intervention。
 
-Provider 使用一个共享模型槽位和串行队列；本地 llama.cpp 是交互入口的默认语义 Provider，服务失败时玩家对话明确失败且不提交事实。自驱通道可以使用无语言理解的确定性候选回退维持世界时间推进，但它不会解释玩家文本。云 Provider 可用于调试或高质量表达，但不改变事实接口。API Key 不写入内容包、存档、日志、Prompt、崩溃报告或版本库。
+Provider 使用一个共享模型槽位和串行队列；本地 llama.cpp 是产品入口的默认语义 Provider，服务失败时玩家对话和 NPC 自驱提案都明确失败且不提交事实。Runtime 可以继续推进时间、衰减和已批准的过程，但不会用确定性候选冒充 LLM 的主体决策。Mock Provider 只由测试、沙箱重放和离线可重复回归显式注入；它不是产品默认行为。云 Provider 可用于调试或高质量表达，但不改变事实接口。API Key 不写入内容包、存档、日志、Prompt、崩溃报告或版本库。
 
 P0 的结构化 `IntentProposal` 是短输出任务；玩家对白拆成独立的 `utterance_understanding` 和 `player_dialogue` 两次结构化调用。前者需要理解自然语言和歧义，默认使用约 128 token 的 thinking；后者只根据已解析的通信意图和当前事实生成简短回答，默认关闭 thinking。自驱审议没有玩家给出的明确目标，需要依据内驱、外驱和结构约束进行短权衡，因此默认开启约 128 token 的 thinking。Provider 通过顶层 `reasoning_budget_tokens` 限制思考段预算；该预算不等于最终 JSON 的总输出预算。无论是否开启 thinking，Runtime 只解析最终 JSON，`reasoning_content` 永远不进入对白、记忆或世界事实。
 
@@ -446,7 +448,7 @@ Behavior DSL 只组合注册节点、条件和元动作，例如：
 }
 ```
 
- P0 不把这套 DSL 误称为通用编程语言，但它已经支持由 JSON 构造一棵受约束的行为树。内容包声明 `meta_actions`（故事动作 ID 到 Runtime 通用 operator 的绑定）、`conditions`（条件 ID 到只读谓词的绑定）和 `recipes`；加载器校验引用，`BehaviorRecipeRuntime` 在运行时编译 `Sequence`、`Selector`、`Interruptible`、`Timeout`、`Condition` 和 `Action` 节点。游戏代码不会为 Mira、Lorn、Eve 或某个故事动作创建专用 BT。`GoalSelector`/LLM 只选择候选 `recipe_id`，接受后由 Runtime 创建 `ProcessExecution` 并记录该 recipe；长过程等待由 ProcessExecution 管理，过程完成时才在事务中运行已编译配方的原子效果。新增行为只需新增 JSON 配方和已登记的通用 operator；只有新增底层事实变换原语才需要扩展 Runtime。
+ P0 不把这套 DSL 误称为通用编程语言，但它已经支持由 JSON 构造一棵受约束的行为树。内容包声明 `meta_actions`（故事动作 ID 到 Runtime 通用 operator 的绑定）、`conditions`（条件 ID 到只读谓词的绑定）和 `recipes`；加载器校验引用，`BehaviorRecipeRuntime` 在运行时编译 `Sequence`、`Selector`、`Interruptible`、`Timeout`、`Condition` 和 `Action` 节点。游戏代码不会为 Mira、Lorn、Eve 或某个故事动作创建专用 BT。`GoalSelector`/LLM 只选择候选 `recipe_id`，接受后由 Runtime 创建 `ProcessExecution` 并记录该 recipe；长过程等待由 ProcessExecution 管理，过程完成时才在事务中运行已编译配方的原子效果。Recipe 可以声明参数 JSON Schema，节点通过 `{"bind":"parameter_name"}` 引用运行时输入；因此 `goto`、交易对象、协作对象和调查目标都是能力参数，而不是写死在 operator 中的故事 ID。普通决策只能选择已批准计划并填写参数；LLM 要创建全新的 BT，必须通过 Level 1/2 的 `register_behavior_recipe` 提案，经过引用验证、沙箱和独立批准后才会进入候选目录。新增行为只需新增 JSON 配方、参数契约和已登记的通用 operator；只有新增底层事实变换原语才需要扩展 Runtime。
 
 演化操作是类型化的，例如 `create_entity_archetype`、`overlay_strategy`、`register_behavior_recipe`、`add_relationship` 和 `schedule_event`；不是任意 JSON Patch。新增 C++ Component、System、权限、调度、事件格式、存档迁移或可执行代码必须由开发者发布。
 
@@ -520,7 +522,7 @@ P0 同时支持两种产物：Snapshot 负责普通检查点恢复；可选 Repl
 -> EventLog 和 Snapshot/Replay 可解释
 ```
 
-P0 必须支持：任意最小内容包启动；NPC 无玩家继续运行；需求随时间衰减并产生 `need.*` 事件；已提交行动产生满足；Goal/FSM/BT 分层；非法动作不改变事实；实体生命周期可审计；模型关闭时世界仍可玩；Snapshot 恢复和回放不调用 LLM；文本界面能显示驱动力和拒绝原因。
+P0 必须支持：任意最小内容包启动；NPC 无玩家继续运行并由默认 LLM 产生自主提案；需求随时间衰减并产生 `need.*` 事件；已提交行动产生满足；Goal/FSM/BT 分层；非法动作不改变事实；实体生命周期可审计；LLM 不可用时已批准规则和存档仍可恢复，但不会伪造新的 NPC 意图；Snapshot 恢复和回放不调用 LLM；文本界面能显示驱动力和拒绝原因。
 
 首个验收场景要求玩家与三个重要 NPC 各交谈多轮后仍保持角色底稿、知识边界和已确认事实；接受、拒绝和违背同一承诺会产生不同任务、关系和后续表达；玩家推进两天时至少两个 NPC 在无玩家参与下改变位置、资源或目标阶段；未知实体、过期承诺、版本冲突、非法动作和重复 turn 不改变事实。模型服务关闭时，世界时间推进、任务和存档仍可用；玩家对话返回可重试错误且不猜测语义、不提交行动。
 

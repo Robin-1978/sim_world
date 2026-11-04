@@ -26,12 +26,22 @@
           "operation": {"type": "string", "enum": ["create_entity_archetype", "register_behavior_recipe", "overlay_strategy"]},
           "id": {"type": "string", "minLength": 1},
           "kind": {"type": "string"},
+          "available_to": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+          "plan_id": {"type": "string", "minLength": 1},
+          "duration_minutes": {"type": "integer", "minimum": 0},
+          "interruptible": {"type": "boolean"},
+          "interrupt_salience_threshold": {"type": "number", "minimum": 0, "maximum": 1},
+          "reservation_mode": {"enum": ["none", "input_resources"]},
+          "priority": {"type": "integer", "minimum": 0},
+          "preemption_policy": {"enum": ["none", "lower_priority"]},
+          "parameters": {"type": "object"},
           "meta_actions": {"type": "array", "items": {"type": "string"}}
         },
-        "additionalProperties": true
+        "additionalProperties": false
       }
     },
     "status": {"type": "string", "enum": ["proposed", "validated", "approved", "rejected"]}
+    ,"evolution_level": {"type": "string", "enum": ["level1", "level2"]}
   },
   "additionalProperties": false
 }

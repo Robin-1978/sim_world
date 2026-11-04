@@ -17,6 +17,8 @@
 #include <optional>
 #include <set>
 #include <string>
+#include <tuple>
+#include <utility>
 #include <vector>
 
 namespace tide_marks {
@@ -61,18 +63,18 @@ struct SimulationMetrics {
 
 class WorldService {
 public:
-    explicit WorldService(std::unique_ptr<IProvider> provider = std::make_unique<MockProvider>(),
+    explicit WorldService(std::unique_ptr<IProvider> provider = nullptr,
                           std::unique_ptr<IWorldPersistence> persistence = nullptr);
 
     static WorldService load(std::string contentRoot = ContentPackLoader::defaultRoot(),
-                             std::unique_ptr<IProvider> provider = std::make_unique<MockProvider>());
+                             std::unique_ptr<IProvider> provider = nullptr);
     static WorldService fromContent(const WorldContentPack& content,
-                                    std::unique_ptr<IProvider> provider = std::make_unique<MockProvider>());
+                                    std::unique_ptr<IProvider> provider = nullptr);
     static WorldService fromSnapshot(const Json& json,
                                      std::string contentRoot = ContentPackLoader::defaultRoot(),
-                                     std::unique_ptr<IProvider> provider = std::make_unique<MockProvider>());
+                                     std::unique_ptr<IProvider> provider = nullptr);
     static WorldService fromContentSnapshot(const WorldContentPack& content, const Json& json,
-                                             std::unique_ptr<IProvider> provider = std::make_unique<MockProvider>());
+                                             std::unique_ptr<IProvider> provider = nullptr);
 
     [[nodiscard]] const WorldState& state() const { return state_; }
     [[nodiscard]] const WorldContentPack& content() const { return content_; }
@@ -89,6 +91,11 @@ public:
                           const std::string& turnId);
     DialogueTurn deliberate(const std::string& npcId, const std::string& trigger,
                             const std::string& turnId = {});
+    // Explicit Level 1/Level 2 evolution entry point. It only asks the
+    // configured provider for a structured proposal; no world fact changes.
+    [[nodiscard]] ProviderResponse requestEvolutionProposal(const std::string& evolutionLevel,
+                                                             const std::string& trigger,
+                                                             const Json& validationFeedback = Json::object()) const;
     // Main-thread boundary for decisions produced by the worker. Returns the
     // number of results consumed; no Provider call is performed here.
     std::size_t pumpAsyncTurns();
@@ -159,7 +166,7 @@ public:
     void writeReplay(const std::string& path) const;
     static WorldService replay(const std::string& path,
                                std::string contentRoot = ContentPackLoader::defaultRoot(),
-                               std::unique_ptr<IProvider> provider = std::make_unique<MockProvider>());
+                               std::unique_ptr<IProvider> provider = nullptr);
 
 private:
     class TransactionScope;
@@ -192,6 +199,7 @@ private:
     Json replayBaseline_ = Json::object();
     std::vector<WorldEvent> replayBaselineEvents_;
     std::set<std::string> pendingAsyncTurnIds_;
+    std::vector<std::tuple<std::string, std::string, std::string>> pendingDecisionTriggers_;
     SimulationMetrics simulationMetrics_;
     void beginTransaction();
     void commitTransaction();
@@ -204,7 +212,8 @@ private:
     void projectStimuli(const WorldEvent& event);
     void expireStimuli();
     void processAutonomousTurns(const std::set<std::string>& dueNpcIds);
-    void enqueueAutonomousTurn(const std::string& npcId, const std::string& trigger);
+    void enqueueAutonomousTurn(const std::string& npcId, const std::string& trigger,
+                               const std::string& channelId = {});
     [[nodiscard]] TurnRequest makeTurnRequest(const std::string& npcId, const std::string& input,
                                               const std::string& turnId, const std::string& channelId,
                                               const std::string& trigger) const;
@@ -219,12 +228,14 @@ private:
     void processActivity(const ActivityContent& activity);
     [[nodiscard]] bool applyActionEffects(const std::string& npcId, const std::string& actionId);
     [[nodiscard]] bool applyActionEffects(const std::string& npcId, const std::string& actionId,
-                                           const std::map<std::string, int>* reservedResources);
+                                           const std::map<std::string, int>* reservedResources,
+                                           const Json* parameters = nullptr);
     [[nodiscard]] bool evaluateBehaviorCondition(const std::string& npcId,
                                                  const BehaviorNodeContent& node) const;
     [[nodiscard]] bool applyMetaAction(const std::string& npcId, const std::string& actionId,
                                        const BehaviorNodeContent& node,
-                                       const std::map<std::string, int>* reservedResources);
+                                       const std::map<std::string, int>* reservedResources,
+                                       const Json* parameters = nullptr);
     [[nodiscard]] const BehaviorRecipeContent* recipeForAction(const std::string& actionId) const;
     void tickProcesses(const std::set<std::string>& dueNpcIds);
     void resumeSuspendedProcesses(const std::set<std::string>& dueNpcIds);

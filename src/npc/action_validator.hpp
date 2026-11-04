@@ -13,7 +13,8 @@ struct ValidationResult {
 class ActionValidator {
 public:
     [[nodiscard]] static ValidationResult validate(const DecisionContext& context,
-                                                    const std::string& actionId);
+                                                    const std::string& actionId,
+                                                    const Json& parameters = Json::object());
 };
 
 }  // namespace tide_marks

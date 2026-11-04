@@ -53,6 +53,10 @@ struct BehaviorRecipeContent {
     std::string reservationMode{"none"};
     std::vector<std::string> allowedActors;
     std::map<std::string, int> reservations;
+    // JSON Schema for decision parameters supplied by the LLM.  The schema
+    // is a content contract; it never grants authority and is checked again
+    // by Runtime before a recipe runs.
+    Json parameterSchema = Json::object();
     BehaviorNodeContent root;
     // Resource arbitration is explicit content policy. A process with a
     // higher priority may suspend lower-priority reserving processes only

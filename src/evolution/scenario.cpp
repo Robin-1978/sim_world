@@ -226,12 +226,17 @@ ScenarioExperimentResult ScenarioManager::run(const ScenarioProposal& proposal, 
     result.message = validation.message;
     if (!validation.valid) return result;
     try {
-        auto baselineWorld = WorldService::fromContentSnapshot(world.content(), world.snapshotJson());
+        // Scenario comparison replays the already captured world decisions;
+        // it must not issue fresh provider calls or make the result depend on
+        // an external LLM service.
+        auto baselineWorld = WorldService::fromContentSnapshot(
+            world.content(), world.snapshotJson(), std::make_unique<MockProvider>());
         auto scenarioSnapshot = world.snapshotJson();
         for (const auto& intervention : proposal.interventions) {
             result.appliedInterventions.push_back(applyIntervention(scenarioSnapshot, intervention, world));
         }
-        auto scenarioWorld = WorldService::fromContentSnapshot(world.content(), scenarioSnapshot);
+        auto scenarioWorld = WorldService::fromContentSnapshot(
+            world.content(), scenarioSnapshot, std::make_unique<MockProvider>());
         const auto eventCutoff = world.state().events.size();
         if (proposal.durationMinutes > 0) {
             baselineWorld.advanceMinutes(proposal.durationMinutes);

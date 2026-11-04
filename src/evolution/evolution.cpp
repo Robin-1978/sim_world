@@ -94,6 +94,20 @@ EvolutionValidation applyOperations(WorldContentPack& content, const EvolutionPr
             BehaviorRecipeContent recipe;
             recipe.id = id;
             recipe.planId = operation.value("plan_id", id);
+            recipe.parameterSchema = operation.value("parameters", Json::object());
+            const auto actors = operation.value("available_to", Json::array());
+            if (!actors.is_array() || actors.empty()) {
+                return {false, "behavior_recipe_actors_missing",
+                        "An evolved behavior recipe must declare a non-empty available_to actor scope."};
+            }
+            for (const auto& actor : actors) {
+                if (!actor.is_string() || actor.get<std::string>().empty() ||
+                    !hasNpc(content, actor.get<std::string>())) {
+                    return {false, "unknown_behavior_recipe_actor",
+                            "An evolved behavior recipe references an unknown available_to NPC."};
+                }
+                recipe.allowedActors.push_back(actor.get<std::string>());
+            }
             recipe.durationMinutes = operation.value("duration_minutes", 0);
             recipe.interruptible = operation.value("interruptible", true);
             recipe.interruptSalienceThreshold = operation.value("interrupt_salience_threshold", 1.0);
@@ -153,6 +167,10 @@ EvolutionProposal EvolutionManager::fromJson(const Json& value) {
         throw std::runtime_error("unsupported evolution proposal status");
     }
     proposal.status = evolutionProposalStatusFromString(status);
+    proposal.evolutionLevel = value.value("evolution_level", "level2");
+    if (proposal.evolutionLevel != "level1" && proposal.evolutionLevel != "level2") {
+        throw std::runtime_error("unsupported evolution proposal evolution_level");
+    }
     return proposal;
 }
 
@@ -163,7 +181,96 @@ Json EvolutionManager::toJson(const EvolutionProposal& proposal) {
                 {"base_content_version", proposal.baseContentVersion},
                 {"base_world_revision", proposal.baseWorldRevision},
                 {"evidence_event_sequences", evidence}, {"operations", proposal.operations},
-                {"status", toString(proposal.status)}};
+                {"status", toString(proposal.status)}, {"evolution_level", proposal.evolutionLevel}};
+}
+
+EvolutionProposalRequestResult EvolutionManager::propose(const WorldService& world,
+                                                          const std::string& evolutionLevel,
+                                                          const std::string& trigger) {
+    EvolutionProposalRequestResult result;
+    result.provider = world.providerName();
+    Json feedback = Json::object();
+    // A malformed/unsupported proposal may be repaired twice using the same
+    // captured world context. Keeping this bound prevents an LLM validation
+    // loop from becoming the simulation scheduler while allowing a generated
+    // behavior tree to fix both its root and nested-node errors.
+    for (int attempt = 0; attempt < 3; ++attempt) {
+        const auto response = world.requestEvolutionProposal(evolutionLevel, trigger, feedback);
+        if (!response.ok) {
+            result.code = response.error.empty() ? "evolution_provider_unavailable" : response.error;
+            result.message = "The configured LLM did not return an evolution proposal.";
+            return result;
+        }
+        try {
+            if (!response.evolutionProposal.is_object()) {
+                result.code = "invalid_evolution_proposal";
+                result.message = "The provider returned a non-object evolution proposal.";
+                return result;
+            }
+            Json normalized = response.evolutionProposal;
+        normalized["schema_version"] = 1;
+        static const std::set<std::string> proposalKinds{
+            "content", "knowledge", "strategy", "declarative_capability"};
+        // The tool schema calls the proposal category `proposal_kind` so it
+        // cannot be confused with create_entity_archetype.kind.  Accept an
+        // older provider payload as an adapter, but derive the category only
+        // from the registered operation when the payload is not a governed
+        // proposal kind; never treat an entity noun such as "facility" as a
+        // new governance category.
+        const auto operationKind = [&normalized]() {
+            if (!normalized.contains("operations") || !normalized.at("operations").is_array() ||
+                normalized.at("operations").empty() || !normalized.at("operations").at(0).is_object()) {
+                return std::string{};
+            }
+            return normalized.at("operations").at(0).value("operation", "");
+        }();
+        std::string proposalKind = normalized.value("proposal_kind", "");
+        if (!proposalKinds.contains(proposalKind)) proposalKind = normalized.value("kind", "");
+        if (!proposalKinds.contains(proposalKind)) {
+            proposalKind = operationKind == "overlay_strategy" ? "strategy"
+                          : operationKind == "register_behavior_recipe" ? "declarative_capability"
+                                                                          : "content";
+        }
+        normalized["kind"] = proposalKind;
+        normalized["id"] = normalized.value("id", "llm-evolution-" + std::to_string(world.state().revision));
+        normalized["source"] = "llm:" + result.provider;
+        normalized["base_content_version"] = world.content().contentVersion;
+        normalized["base_world_revision"] = world.state().revision;
+        normalized["status"] = "proposed";
+        normalized["evolution_level"] = evolutionLevel;
+            const auto proposal = EvolutionManager::fromJson(normalized);
+            const auto validation = EvolutionManager::validate(proposal, world.content(), world.state());
+            if (!validation.valid) {
+                if (attempt == 0) {
+                    feedback = Json{{"attempt", attempt + 1}, {"code", validation.code},
+                                    {"message", validation.message}, {"previous_proposal", normalized}};
+                    continue;
+                }
+                result.code = validation.code;
+                result.message = validation.message;
+                return result;
+            }
+            result.accepted = true;
+            result.code = "ok";
+            result.message = attempt == 0
+                                 ? "The LLM produced a validated proposal; sandbox and independent approval are still required."
+                                 : "The LLM repaired its proposal after Runtime validation feedback; sandbox and independent approval are still required.";
+            result.proposal = proposal;
+            return result;
+        } catch (const std::exception& error) {
+            if (attempt == 0) {
+                feedback = Json{{"attempt", attempt + 1}, {"code", "invalid_evolution_proposal"},
+                                {"message", error.what()}, {"previous_proposal", response.evolutionProposal}};
+                continue;
+            }
+            result.code = "invalid_evolution_proposal";
+            result.message = error.what();
+            return result;
+        }
+    }
+    result.code = "invalid_evolution_proposal";
+    result.message = "The provider did not produce a valid proposal after bounded repair.";
+    return result;
 }
 
 void EvolutionProposalStore::append(const std::string& path, const EvolutionProposal& proposal) {
@@ -231,11 +338,35 @@ EvolutionValidation EvolutionManager::validate(const EvolutionProposal& proposal
         const auto type = operation.at("operation").get<std::string>();
         if (forbidden.contains(type)) return {false, "core_mutation_forbidden", "The proposal attempts to mutate Runtime Core."};
         if (!allowed.contains(type)) return {false, "operation_not_allowed", "The operation is outside the declarative capability allowlist."};
+        if (proposal.evolutionLevel == "level1" && type == "create_entity_archetype") {
+            return {false, "level_operation_mismatch", "Level 1 may change an NPC strategy or behavior capability, not world content."};
+        }
+        if (proposal.evolutionLevel == "level2" && type == "overlay_strategy") {
+            return {false, "level_operation_mismatch", "Level 2 may change world content or behavior capability, not one NPC strategy."};
+        }
         if (!operation.contains("id") || !operation.at("id").is_string() || operation.at("id").get<std::string>().empty()) {
             return {false, "operation_identity_missing", "Every operation needs a stable id."};
         }
         if (!ids.insert(operation.at("id").get<std::string>()).second) {
             return {false, "duplicate_operation", "Operation ids must be unique within a proposal."};
+        }
+        const std::set<std::string> commonFields{"operation", "id"};
+        std::set<std::string> fields = commonFields;
+        if (type == "create_entity_archetype") {
+            fields.insert("kind");
+            fields.insert("default_metadata");
+        } else if (type == "overlay_strategy") {
+            for (const auto& field : {"npc_id", "peer_id", "min_peer_trust", "strategy", "goal_stage",
+                                      "memory", "event_type"}) fields.insert(field);
+        } else if (type == "register_behavior_recipe") {
+            for (const auto& field : {"plan_id", "duration_minutes", "interruptible",
+                                      "interrupt_salience_threshold", "reservation_mode", "priority",
+                                      "preemption_policy", "parameters", "available_to", "root"}) fields.insert(field);
+        }
+        for (auto item = operation.begin(); item != operation.end(); ++item) {
+            if (!fields.contains(item.key())) {
+                return {false, "unknown_operation_field", "Operation field is not allowed for this operation: " + item.key()};
+            }
         }
         if (operation.contains("meta_actions")) {
             if (!operation.at("meta_actions").is_array()) return {false, "invalid_meta_actions", "meta_actions must be an array."};
@@ -248,6 +379,13 @@ EvolutionValidation EvolutionManager::validate(const EvolutionProposal& proposal
         if (type == "create_entity_archetype" && operation.value("kind", "").empty()) {
             return {false, "archetype_kind_missing", "An entity archetype needs a kind."};
         }
+        if (type == "overlay_strategy") {
+            for (const auto& field : {"npc_id", "peer_id", "strategy"}) {
+                if (!operation.contains(field) || !operation.at(field).is_string() || operation.at(field).get<std::string>().empty()) {
+                    return {false, "strategy_field_missing", "A strategy overlay needs " + std::string(field) + "."};
+                }
+            }
+        }
         if (type == "register_behavior_recipe") {
             try {
                 if (!operation.contains("root") || !operation.at("root").is_object()) {
@@ -256,6 +394,22 @@ EvolutionValidation EvolutionManager::validate(const EvolutionProposal& proposal
                 BehaviorRecipeContent recipe;
                 recipe.id = operation.at("id").get<std::string>();
                 recipe.planId = operation.value("plan_id", recipe.id);
+                recipe.parameterSchema = operation.value("parameters", Json::object());
+                if (!recipe.parameterSchema.is_object()) {
+                    return {false, "invalid_behavior_parameters", "Behavior recipe parameters must be an object schema."};
+                }
+                const auto actors = operation.value("available_to", Json::array());
+                if (!actors.is_array() || actors.empty()) {
+                    return {false, "behavior_recipe_actors_missing",
+                            "An evolved behavior recipe must declare a non-empty available_to actor scope."};
+                }
+                for (const auto& actor : actors) {
+                    if (!actor.is_string() || actor.get<std::string>().empty() ||
+                        !hasNpc(content, actor.get<std::string>())) {
+                        return {false, "unknown_behavior_recipe_actor",
+                                "An evolved behavior recipe references an unknown available_to NPC."};
+                    }
+                }
                 recipe.root = behaviorNodeFromJson(operation.at("root"));
                 BehaviorRecipeRuntime::validate(recipe);
                 const auto references = validateBehaviorRecipeReferences(recipe.root, content);
@@ -340,7 +494,10 @@ EvolutionSandboxResult EvolutionManager::sandbox(const EvolutionProposal& propos
     // top of that view; activation persists the stack separately.
     snapshot["active_overlays"] = Json::array();
     try {
-        auto sandboxWorld = WorldService::fromContentSnapshot(overlay, snapshot);
+        // Evolution sandbox evaluation is a deterministic replay of the
+        // captured context; it must not create new LLM decisions.
+        auto sandboxWorld = WorldService::fromContentSnapshot(
+            overlay, snapshot, std::make_unique<MockProvider>());
         const auto beforeEvents = sandboxWorld.state().events.size();
         if (advanceMinutes > 0) sandboxWorld.advanceMinutes(advanceMinutes);
         result.finalRevision = sandboxWorld.state().revision;

@@ -1,4 +1,5 @@
 #include "tide_marks.hpp"
+#include "evolution/evolution.hpp"
 
 #include <cstdlib>
 #include <fstream>
@@ -14,7 +15,7 @@ void usage(const char* program) {
     std::cout << "Usage: " << program
               << " [--content-root PATH] [--days N] [--profile PATH]"
                  " [--provider mock|profile|llama_cpp] [--replay PATH] [--dump-events]"
-                 " [--anomalies] [--experiment PATH]\n";
+                 " [--anomalies] [--experiment PATH] [--evolve level1|level2]\n";
 }
 
 }  // namespace
@@ -24,6 +25,7 @@ int main(int argc, char** argv) {
     std::string replayPath;
     std::string contentRoot = ContentPackLoader::defaultRoot();
     std::string experimentPath;
+    std::string evolutionLevel;
     std::string providerName = "profile";
     std::string profilePath = defaultIntelligenceProfilePath();
     bool dumpEvents = false;
@@ -40,6 +42,8 @@ int main(int argc, char** argv) {
             experimentPath = argv[++i];
         } else if (argument == "--anomalies") {
             dumpAnomalies = true;
+        } else if (argument == "--evolve" && i + 1 < argc) {
+            evolutionLevel = argv[++i];
         } else if (argument == "--days" && i + 1 < argc) {
             days = std::max(0, std::atoi(argv[++i]));
         } else if (argument == "--replay" && i + 1 < argc) {
@@ -66,6 +70,15 @@ int main(int argc, char** argv) {
                                : service.content().worldId;
     std::cout << "《潮痕》 " << worldName << " | provider=" << service.providerName() << '\n';
     std::cout << summarize(service.state()) << '\n';
+
+    if (!evolutionLevel.empty()) {
+        const auto proposal = EvolutionManager::propose(service, evolutionLevel, "headless_explicit_request");
+        Json output{{"accepted", proposal.accepted}, {"code", proposal.code},
+                    {"message", proposal.message}, {"provider", proposal.provider}};
+        if (proposal.accepted) output["proposal"] = EvolutionManager::toJson(proposal.proposal);
+        std::cout << "evolution: " << output.dump() << '\n';
+        return proposal.accepted ? 0 : 3;
+    }
 
     if (dumpAnomalies) {
         Json findings = Json::array();

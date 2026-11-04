@@ -179,6 +179,10 @@ struct ActivityContent {
     std::string eventType;
     std::string detail;
     std::vector<EffectContent> effects;
+    // When set, the activity is an opportunity for a configured decision
+    // channel. The runtime records the trigger and asks the provider; it does
+    // not apply the listed effects as a hidden NPC script.
+    std::string decisionChannel;
 };
 
 struct StrategyRuleContent {

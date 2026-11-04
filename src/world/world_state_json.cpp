@@ -88,7 +88,7 @@ Json processJson(const ProcessExecution& process) {
                 {"progress", process.progress},
                 {"status", toString(process.status)}, {"interruption_reason", process.interruptionReason},
                 {"behavior_node_id", process.behaviorNodeId}, {"behavior_step", process.behaviorStep},
-                {"behavior_status", process.behaviorStatus},
+                {"behavior_status", process.behaviorStatus}, {"parameters", process.parameters},
                 {"interruptible", process.interruptible},
                 {"interrupt_salience_threshold", process.interruptSalienceThreshold},
                 {"reservation_mode", process.reservationMode},
@@ -117,6 +117,8 @@ ProcessExecution processFromJson(const Json& json) {
     process.behaviorNodeId = jsonValue<std::string>(json, "behavior_node_id", process.planId);
     process.behaviorStep = jsonValue<std::size_t>(json, "behavior_step", 0);
     process.behaviorStatus = jsonValue<std::string>(json, "behavior_status", "running");
+    process.parameters = json.value("parameters", Json::object());
+    if (!process.parameters.is_object()) throw std::runtime_error("process parameters must be an object");
     process.interruptible = jsonValue<bool>(json, "interruptible", true);
     process.interruptSalienceThreshold = jsonValue<double>(json, "interrupt_salience_threshold", 1.0);
     process.reservationMode = jsonValue<std::string>(json, "reservation_mode", "none");

@@ -4,6 +4,7 @@
 #include "npc/state_machine.hpp"
 #include "world/ids.hpp"
 #include "world/meta_actions.hpp"
+#include "provider/provider_profile.hpp"
 #include "evolution/evolution.hpp"
 #include <algorithm>
 #include <cstddef>
@@ -40,6 +41,26 @@ Json mergedBehaviorArgs(const MetaActionDefinition& definition, const BehaviorNo
 Json quantityMapJson(const std::map<std::string, int>& quantities) {
     Json result = Json::object();
     for (const auto& [resource, amount] : quantities) result[resource] = amount;
+    return result;
+}
+
+// A behavior tree is content, not an opaque prompt string.  The projection
+// shown to the model is intentionally compact: it identifies the registered
+// plan and its bounded node vocabulary without dumping the whole content
+// pack.  Runtime still validates and executes the complete authored recipe.
+Json behaviorNodeProjection(const BehaviorNodeContent& node, int depth = 0) {
+    Json result{{"type", node.type}, {"id", node.id}};
+    if (!node.name.empty()) result["name"] = node.name;
+    if (!node.args.empty()) result["args"] = node.args;
+    if (node.maxTicks > 0) result["max_ticks"] = node.maxTicks;
+    if (depth < 4 && !node.children.empty()) {
+        result["children"] = Json::array();
+        const std::size_t limit = std::min<std::size_t>(node.children.size(), 8);
+        for (std::size_t index = 0; index < limit; ++index) {
+            result["children"].push_back(behaviorNodeProjection(node.children[index], depth + 1));
+        }
+        if (node.children.size() > limit) result["children_truncated"] = true;
+    }
     return result;
 }
 
@@ -252,7 +273,7 @@ std::string join(const std::vector<std::string>& values, std::string_view separa
 }  // namespace
 WorldService::WorldService(std::unique_ptr<IProvider> provider,
                            std::unique_ptr<IWorldPersistence> persistence)
-    : provider_(provider ? std::move(provider) : std::make_unique<MockProvider>()),
+    : provider_(provider ? std::move(provider) : makeDefaultRuntimeProvider()),
       turnQueue_(std::make_unique<TurnQueue>(*provider_)),
       persistence_(persistence ? std::move(persistence) : std::make_unique<JsonFilePersistence>()) {}
 
@@ -542,6 +563,36 @@ DecisionContext WorldService::decisionContext(const std::string& npcId) const {
     {
             context.candidates = authoredContent->actions;
             needs = authoredContent->needs;
+            // Approved evolved recipes carry an explicit actor propagation
+            // scope. They become ordinary candidates only for those actors;
+            // activation never grants a new behavior to every NPC by default.
+            for (const auto& recipe : content_.behaviorRecipes) {
+                if (recipe.allowedActors.empty() ||
+                    std::find(recipe.allowedActors.begin(), recipe.allowedActors.end(), npcId) ==
+                        recipe.allowedActors.end()) {
+                    continue;
+                }
+                if (std::any_of(context.candidates.begin(), context.candidates.end(),
+                                [&recipe](const auto& candidate) {
+                                    return candidate.actionId == recipe.id || candidate.recipeId == recipe.id;
+                                })) {
+                    continue;
+                }
+                ActionCandidate candidate;
+                candidate.actionId = recipe.id;
+                candidate.planId = recipe.planId;
+                candidate.label = recipe.planId.empty() ? recipe.id : recipe.planId;
+                candidate.durationMinutes = recipe.durationMinutes;
+                candidate.interruptible = recipe.interruptible;
+                candidate.interruptSalienceThreshold = recipe.interruptSalienceThreshold;
+                candidate.reservationMode = recipe.reservationMode;
+                candidate.recipeId = recipe.id;
+                candidate.reservations = recipe.reservations;
+                candidate.priority = recipe.priority;
+                candidate.preemptionPolicy = recipe.preemptionPolicy;
+                candidate.parameterSchema = recipe.parameterSchema;
+                context.candidates.push_back(std::move(candidate));
+            }
             for (const auto& needDefinition : needs) {
                 const auto state = npc.needs.find(needDefinition.id);
                 if (state != npc.needs.end()) {
@@ -587,6 +638,84 @@ DecisionContext WorldService::decisionContext(const std::string& npcId) const {
         }
     }
     context.candidates = std::move(ordered);
+
+    // Build a bounded, actor-scoped projection for the LLM.  The model gets
+    // enough world state to reason about this decision, but never receives a
+    // blind dump of the complete instance.  Visibility is a Runtime fact;
+    // memories/knowledge below are the actor's own accumulated projection.
+    context.worldSnapshot = Json{
+        {"time", state_.now.toString()},
+        {"observer_location", npc.location},
+        {"public_resources", Json::object()},
+        {"visible_entities", Json::array()},
+        {"visible_links", Json::array()},
+        {"active_stimuli", Json::array()}};
+    for (const auto& [resourceId, resource] : state_.resources) {
+        context.worldSnapshot["public_resources"][resourceId] =
+            Json{{"amount", resource.amount}, {"reserved", resource.reserved}};
+    }
+    for (const auto& [peerId, peer] : state_.npcs) {
+        if (peerId == npcId || peer.location != npc.location) continue;
+        context.worldSnapshot["visible_entities"].push_back(
+            Json{{"id", peerId}, {"kind", "npc"}, {"location", peer.location}, {"mode", peer.mode}});
+    }
+    for (const auto& link : content_.links) {
+        if (std::find(link.link.endpoints.begin(), link.link.endpoints.end(), npc.location) ==
+            link.link.endpoints.end()) continue;
+        const auto runtime = state_.links.find(link.id);
+        const RuntimeLinkState state = runtime == state_.links.end() ? RuntimeLinkState{} : runtime->second;
+        context.worldSnapshot["visible_links"].push_back(
+            Json{{"id", link.id}, {"endpoints", link.link.endpoints},
+                 {"traversable", state.traversable}, {"locked", state.locked}});
+    }
+    for (const auto& stimulus : context.stimuli) {
+        context.worldSnapshot["active_stimuli"].push_back(
+            Json{{"id", stimulus.id}, {"category", stimulus.category},
+                 {"source_sequence", stimulus.sourceSequence},
+                 {"salience", stimulus.effectiveSalience}, {"expires", stimulus.expiresAt.toString()}});
+    }
+
+    const auto inventory = state_.inventories.find(npcEntityId(npcId));
+    const auto inventoryQuantities = inventory == state_.inventories.end()
+                                         ? std::map<std::string, int>{}
+                                         : inventory->second;
+    context.selfState = Json{{"id", npcId}, {"name", authoredDefinition.name},
+                             {"role", authoredDefinition.role}, {"location", npc.location},
+                             {"mode", npc.mode}, {"strategy", npc.strategy},
+                             {"goal_stage", npc.goalStage}, {"state_version", npc.stateVersion},
+                             {"needs", Json::object()}, {"relationships", Json::object()},
+                             {"inventory", quantityMapJson(inventoryQuantities)},
+                             {"activity", context.currentActivity}};
+    for (const auto& [needId, need] : npc.needs) {
+        const auto authoredNeed = std::find_if(needs.begin(), needs.end(),
+                                               [&needId](const auto& item) { return item.id == needId; });
+        const double drive = authoredNeed == needs.end() ? 0.0 : DriveSystem::drive(*authoredNeed, need);
+        context.selfState["needs"][needId] =
+            Json{{"deficit", need.deficit}, {"drive", drive}, {"sensitivity", need.sensitivity},
+                 {"confidence", need.evidenceConfidence}};
+    }
+    for (const auto& [peerId, relation] : npc.relationships) {
+        context.selfState["relationships"][peerId] =
+            Json{{"trust", relation.trust}, {"respect", relation.respect},
+                 {"fear", relation.fear}, {"owed", relation.owed}};
+    }
+    for (const auto& candidate : context.candidates) {
+        Json plan{{"action_id", candidate.actionId}, {"plan_id", candidate.planId},
+                  {"recipe_id", candidate.recipeId}, {"label", candidate.label},
+                  {"duration_minutes", candidate.durationMinutes},
+                  {"interruptible", candidate.interruptible}, {"priority", candidate.priority},
+                  {"preemption_policy", candidate.preemptionPolicy},
+                  {"utility_score", candidate.utilityScore},
+                  {"utility_contributions", candidate.utilityContributions},
+                  {"reservations", candidate.reservations},
+                  {"parameter_schema", candidate.parameterSchema}};
+        const auto recipe = std::find_if(content_.behaviorRecipes.begin(), content_.behaviorRecipes.end(),
+                                         [&candidate](const auto& item) { return item.id == candidate.recipeId; });
+        if (recipe != content_.behaviorRecipes.end()) {
+            plan["behavior_tree"] = behaviorNodeProjection(recipe->root);
+        }
+        context.planCatalog.push_back(std::move(plan));
+    }
     return context;
 }
 
@@ -601,36 +730,49 @@ void WorldService::advanceMinutes(std::int64_t minutes) {
         // sequence of committed steps, not one unbounded transaction; this
         // keeps event publication and observation aligned with the step that
         // produced the fact.
-        TransactionScope transaction(*this);
-        ++state_.now.minute;
-        ++simulationMetrics_.simulatedMinutes;
-        expireStimuli();
         std::set<std::string> dueNpcIds;
-        for (auto& [id, npc] : state_.npcs) {
-            const auto* authored = authoredNpc(id);
-            const auto tier = authored != nullptr ? authored->simulationTier : std::string("near");
-            const int interval = tier == "far" ? content_.simulationPolicy.farTickMinutes
-                                                : content_.simulationPolicy.nearTickMinutes;
-            if (state_.now.minute % interval != 0) {
-                ++simulationMetrics_.skippedNpcTicks;
-                continue;
+        bool autonomousBoundary = false;
+        {
+            TransactionScope transaction(*this);
+            ++state_.now.minute;
+            ++simulationMetrics_.simulatedMinutes;
+            expireStimuli();
+            for (auto& [id, npc] : state_.npcs) {
+                const auto* authored = authoredNpc(id);
+                const auto tier = authored != nullptr ? authored->simulationTier : std::string("near");
+                const int interval = tier == "far" ? content_.simulationPolicy.farTickMinutes
+                                                    : content_.simulationPolicy.nearTickMinutes;
+                if (state_.now.minute % interval != 0) {
+                    ++simulationMetrics_.skippedNpcTicks;
+                    continue;
+                }
+                dueNpcIds.insert(id);
+                if (tier == "far") ++simulationMetrics_.farNpcTicks;
+                else ++simulationMetrics_.nearNpcTicks;
+                npc.lastSimulationTick = state_.now;
             }
-            dueNpcIds.insert(id);
-            if (tier == "far") ++simulationMetrics_.farNpcTicks;
-            else ++simulationMetrics_.nearNpcTicks;
-            npc.lastSimulationTick = state_.now;
+            resumeSuspendedProcesses(dueNpcIds);
+            tickProcesses(dueNpcIds);
+            if (state_.now.minute % kMinutesPerHour == 0) {
+                autonomousBoundary = true;
+                processHourBoundary(state_.now.day(), state_.now.hour(), dueNpcIds);
+            }
+            if (state_.now.minute % kMinutesPerDay == 0) processDayBoundary(state_.now.day(), dueNpcIds);
+            applyPromiseDeadline();
+            applyExchangeDeadlines();
+            // Time itself is authoritative state. Even an otherwise quiet minute
+            // invalidates proposals captured before that minute elapsed.
+            transaction.markChanged();
         }
-        resumeSuspendedProcesses(dueNpcIds);
-        tickProcesses(dueNpcIds);
-        if (state_.now.minute % kMinutesPerHour == 0) {
-            processHourBoundary(state_.now.day(), state_.now.hour(), dueNpcIds);
+        // Provider requests must capture the revision after the time-step
+        // transaction commits. Scheduling them from inside that transaction
+        // made every result stale as soon as the clock advanced.
+        for (const auto& [npcId, trigger, channelId] : pendingDecisionTriggers_) {
+            enqueueAutonomousTurn(npcId, trigger, channelId);
         }
-        if (state_.now.minute % kMinutesPerDay == 0) processDayBoundary(state_.now.day(), dueNpcIds);
-        applyPromiseDeadline();
-        applyExchangeDeadlines();
-        // Time itself is authoritative state. Even an otherwise quiet minute
-        // invalidates proposals captured before that minute elapsed.
-        transaction.markChanged();
+        pendingDecisionTriggers_.clear();
+        if (autonomousBoundary) processAutonomousTurns(dueNpcIds);
+        pumpAsyncTurns();
     }
     pumpAsyncTurns();
     syncNpcEntityState();
@@ -703,10 +845,29 @@ void WorldService::processHourBoundary(int day, int hour, const std::set<std::st
         if (!activity.conditionResource.empty() && resourceValue(activity.conditionResource) >= activity.conditionBelow) continue;
         processActivity(activity);
     }
-    processAutonomousTurns(dueNpcIds);
 }
 
 void WorldService::processActivity(const ActivityContent& activity) {
+    if (!activity.decisionChannel.empty()) {
+        if (activity.actor == kWorldActor || !hasNpc(activity.actor)) {
+            addEvent("activity.failed", activity.actor, activity.target,
+                     "An activity requested a decision channel for a non-NPC actor",
+                     Json{{"activity_id", activity.id}, {"decision_channel", activity.decisionChannel}});
+            return;
+        }
+        const auto& npc = state_.npcs.at(activity.actor);
+        if (npc.activity.status == ActivityStatus::Active) return;
+        // This is a trigger, not an action. Effects remain in the content as
+        // authored affordances for review, but they are only applied by the
+        // selected recipe after the LLM proposal passes Runtime validation.
+        addEvent("npc.activity_opportunity", activity.actor, activity.target,
+                 activity.detail, Json{{"activity_id", activity.id},
+                                       {"decision_channel", activity.decisionChannel},
+                                       {"effects_deferred_to_provider", true}});
+        pendingDecisionTriggers_.emplace_back(activity.actor, "scheduled_activity:" + activity.id,
+                                              activity.decisionChannel);
+        return;
+    }
     std::map<std::string, int> required;
     for (const auto& effect : activity.effects) {
         if (effect.operation == "resource.consume" || effect.operation == "resource.reserve") {
@@ -945,7 +1106,7 @@ void WorldService::cancelProcess(const std::string& npcId, ProcessExecution& pro
 void WorldService::completeProcess(const std::string& npcId, ProcessExecution process) {
     if (!state_.npcs.contains(npcId)) return;
     const bool applied = applyActionEffects(npcId, process.recipeId.empty() ? process.actionId : process.recipeId,
-                                            &process.reservedResources);
+                                            &process.reservedResources, &process.parameters);
     process.progress = 1.0;
     process.status = applied ? ProcessStatus::Completed : ProcessStatus::Failed;
     process.behaviorStatus = applied ? "success" : "failure";
@@ -2100,6 +2261,62 @@ DialogueTurn WorldService::deliberate(const std::string& npcId, const std::strin
     return executeTurn(npcId, {}, turnId, content_.autonomousChannelId, trigger);
 }
 
+ProviderResponse WorldService::requestEvolutionProposal(const std::string& evolutionLevel,
+                                                         const std::string& trigger,
+                                                         const Json& validationFeedback) const {
+    if (evolutionLevel != "level1" && evolutionLevel != "level2") {
+        return ProviderResponse{false, {}, {}, "invalid_evolution_level", Json::object()};
+    }
+    Json events = Json::array();
+    const std::size_t first = state_.events.size() > 32 ? state_.events.size() - 32 : 0;
+    for (std::size_t index = first; index < state_.events.size(); ++index) {
+        const auto& event = state_.events[index];
+        events.push_back(Json{{"sequence", event.sequence}, {"at", event.at.minute},
+                              {"type", event.type}, {"actor", event.actor}, {"target", event.target},
+                              {"detail", event.detail}, {"data", event.data}});
+    }
+    Json resources = Json::object();
+    for (const auto& [id, resource] : state_.resources) {
+        resources[id] = Json{{"amount", resource.amount}, {"reserved", resource.reserved}};
+    }
+    Json npcs = Json::object();
+    for (const auto& [id, npc] : state_.npcs) {
+        Json needs = Json::object();
+        for (const auto& [needId, need] : npc.needs) {
+            needs[needId] = Json{{"deficit", need.deficit}, {"sensitivity", need.sensitivity},
+                                  {"confidence", need.evidenceConfidence}};
+        }
+        npcs[id] = Json{{"location", npc.location}, {"strategy", npc.strategy}, {"goal_stage", npc.goalStage},
+                        {"needs", needs}, {"active_process", npc.activity.process.has_value()},
+                        {"memory_count", npc.memories.size()}, {"knowledge_count", npc.knowledge.size()},
+                        {"experience_count", npc.experiences.size()}};
+    }
+    Json allowedOperations = evolutionLevel == "level1"
+                                 ? Json::array({"overlay_strategy", "register_behavior_recipe"})
+                                 : Json::array({"create_entity_archetype", "register_behavior_recipe"});
+    Json contentSummary{
+        {"content_id", content_.id}, {"content_version", content_.contentVersion},
+        {"entity_archetypes", content_.entityArchetypes.size()},
+        {"behavior_recipes", content_.behaviorRecipes.size()},
+        {"strategy_rules", content_.strategyRules.size()},
+        {"registered_meta_actions", Json::array()}, {"registered_conditions", Json::array()} };
+    for (const auto& [id, definition] : content_.metaActions) {
+        (void)definition;
+        contentSummary["registered_meta_actions"].push_back(id);
+    }
+    for (const auto& [id, definition] : content_.conditions) {
+        (void)definition;
+        contentSummary["registered_conditions"].push_back(id);
+    }
+    const Json context{{"trigger", trigger}, {"evolution_level", evolutionLevel},
+                       {"base_content_version", content_.contentVersion},
+                       {"base_world_revision", state_.revision}, {"world_time", state_.now.minute},
+                       {"resources", resources}, {"npcs", npcs}, {"content", contentSummary},
+                       {"allowed_operations", allowedOperations}, {"evidence_events", events},
+                       {"validation_feedback", validationFeedback}};
+    return provider_->proposeEvolution(context, evolutionLevel, validationFeedback);
+}
+
 TurnRequest WorldService::makeTurnRequest(const std::string& npcId, const std::string& input,
                                           const std::string& turnId, const std::string& channelId,
                                           const std::string& trigger) const {
@@ -2162,7 +2379,27 @@ DialogueTurn WorldService::executeTurn(const std::string& npcId, const std::stri
     }
     auto request = makeTurnRequest(npcId, input, turnId, channelId, trigger);
     auto response = provider_->decide(request.context, input);
-    return commitTurn(request, std::move(response));
+    auto turnResult = commitTurn(request, response);
+    // A provider response can be structurally valid while its parameters do
+    // not satisfy the authored plan contract. Give the real LLM one bounded,
+    // structured repair opportunity. Resource, permission, revision and
+    // topology failures remain closed: retrying those would merely repeat an
+    // impossible world action and increase player latency.
+    const auto retryable = [](const std::string& code) {
+        return code == "missing_action_parameter" || code == "unknown_action_parameter" ||
+               code == "invalid_action_parameter_type" || code == "unexpected_action_parameters" ||
+               code == "invalid_action_parameters" || code == "invalid_action_parameter_value";
+    };
+    if (!turnResult.accepted && response.ok && provider_->name() == "llama.cpp" && retryable(turnResult.error)) {
+        const Json feedback{{"attempt", 1},
+                            {"code", turnResult.error},
+                            {"message", "Runtime rejected the proposed action parameters; repair only the declared plan input."},
+                            {"previous_action_id", response.proposal.actionId},
+                            {"previous_parameters", response.proposal.parameters}};
+        auto repaired = provider_->decide(request.context, input, feedback);
+        if (repaired.ok) turnResult = commitTurn(request, std::move(repaired));
+    }
+    return turnResult;
 }
 
 DialogueTurn WorldService::commitTurn(const TurnRequest& request, ProviderResponse response) {
@@ -2196,17 +2433,13 @@ DialogueTurn WorldService::commitTurn(const TurnRequest& request, ProviderRespon
     }
     const auto& context = request.context;
     if (!response.ok) {
-        if (channel->second.conversation) {
-            // Conversation semantics must come from the configured intelligence
-            // provider. Guessing intent from tokens would produce a second,
-            // ungoverned semantic authority inside Runtime.
-            result.error = response.error.empty() ? "provider_unavailable" : response.error;
-            return result;
-        }
-        const std::string providerError = response.error;
-        response = MockProvider{}.decide(context, request.playerInput);
-        result.provider += "+deterministic_fallback";
-        result.error = "provider_fallback:" + providerError;
+        // The provider is the decision authority.  Runtime never silently
+        // substitutes a deterministic choice when an LLM fails, because that
+        // would make an apparently autonomous world advance without the
+        // intelligence profile that the run was configured to use.  Tests and
+        // offline tools can still inject MockProvider explicitly.
+        result.error = response.error.empty() ? "provider_unavailable" : response.error;
+        return result;
     }
     const std::string effectiveSpeechAct = channel->second.conversation
                                                ? (response.proposal.speechAct.empty()
@@ -2227,9 +2460,8 @@ DialogueTurn WorldService::commitTurn(const TurnRequest& request, ProviderRespon
     // validly refuse or answer without one, so their empty action_id is kept.
     if (response.ok && !channel->second.conversation && worldActionAllowed &&
         response.proposal.actionId.empty()) {
-        response = MockProvider{}.decide(context, request.playerInput);
-        result.provider += "+proposal_fallback";
-        result.error = "provider_fallback:world_action_required";
+        result.error = "world_action_required";
+        return result;
     }
     if (response.proposal.worldRevision != context.worldRevision ||
         response.proposal.npcStateVersion != context.npcStateVersion) {
@@ -2286,7 +2518,8 @@ DialogueTurn WorldService::commitTurn(const TurnRequest& request, ProviderRespon
         result.error = "speech_act_disallows_world_action";
         return result;
     }
-    const auto validation = ActionValidator::validate(context, response.proposal.actionId);
+    const auto validation = ActionValidator::validate(context, response.proposal.actionId,
+                                                      response.proposal.parameters);
     if (!validation.valid) {
         result.error = validation.code;
         return result;
@@ -2344,7 +2577,8 @@ DialogueTurn WorldService::commitTurn(const TurnRequest& request, ProviderRespon
             return result;
         }
     }
-    if (candidate->durationMinutes <= 0 && !applyActionEffects(request.npcId, candidate->actionId)) {
+    if (candidate->durationMinutes <= 0 &&
+        !applyActionEffects(request.npcId, candidate->actionId, nullptr, &response.proposal.parameters)) {
         transaction.rollback();
         result.error = "insufficient_resource";
         return result;
@@ -2369,6 +2603,7 @@ DialogueTurn WorldService::commitTurn(const TurnRequest& request, ProviderRespon
         process.startedAt = state_.now;
         process.completesAt = GameTime{state_.now.minute + candidate->durationMinutes};
         process.behaviorNodeId = candidate->planId;
+        process.parameters = response.proposal.parameters;
         process.interruptible = candidate->interruptible;
         process.interruptSalienceThreshold = candidate->interruptSalienceThreshold;
         process.reservationMode = candidate->reservationMode;
@@ -2400,6 +2635,7 @@ DialogueTurn WorldService::commitTurn(const TurnRequest& request, ProviderRespon
              {"cited_stimulus_ids", response.proposal.citedStimulusIds},
              {"tradeoffs", response.proposal.tradeoffs},
              {"expected_relief", response.proposal.expectedRelief},
+             {"parameters", response.proposal.parameters},
              {"utility_score", candidate->utilityScore},
              {"utility_contributions", candidate->utilityContributions},
              {"confidence", response.proposal.confidence}, {"provider", result.provider},
@@ -2414,12 +2650,15 @@ DialogueTurn WorldService::commitTurn(const TurnRequest& request, ProviderRespon
     return result;
 }
 
-void WorldService::enqueueAutonomousTurn(const std::string& npcId, const std::string& trigger) {
+void WorldService::enqueueAutonomousTurn(const std::string& npcId, const std::string& trigger,
+                                         const std::string& channelId) {
     if (!hasNpc(npcId)) return;
+    const std::string selectedChannel = channelId.empty() ? content_.autonomousChannelId : channelId;
+    if (!content_.decisionChannels.contains(selectedChannel)) return;
     const std::string turnId = "autonomous:" + npcId + ":" + std::to_string(state_.now.minute) + ":" +
                                std::to_string(state_.revision);
     if (pendingAsyncTurnIds_.contains(turnId)) return;
-    const auto request = makeTurnRequest(npcId, {}, turnId, content_.autonomousChannelId, trigger);
+    const auto request = makeTurnRequest(npcId, {}, turnId, selectedChannel, trigger);
     const auto submitted = turnQueue_->submit(request);
     if (!submitted.accepted) return;
     for (const auto& supersededId : submitted.supersededTurnIds) pendingAsyncTurnIds_.erase(supersededId);
@@ -2538,10 +2777,22 @@ bool WorldService::evaluateBehaviorCondition(const std::string& npcId,
 
 bool WorldService::applyMetaAction(const std::string& npcId, const std::string& actionId,
                                    const BehaviorNodeContent& node,
-                                   const std::map<std::string, int>* reservedResources) {
+                                   const std::map<std::string, int>* reservedResources,
+                                   const Json* parameters) {
     const auto definition = content_.metaActions.find(node.name);
     if (definition == content_.metaActions.end()) return false;
-    const Json args = mergedBehaviorArgs(definition->second, node);
+    Json args = mergedBehaviorArgs(definition->second, node);
+    // A content recipe may leave an input slot bound to the accepted
+    // decision parameters. Bindings are data, but their resolved values still
+    // pass the operator's normal Runtime validation below.
+    if (parameters != nullptr && parameters->is_object()) {
+        for (auto it = args.begin(); it != args.end(); ++it) {
+            if (!it.value().is_object() || !it.value().contains("bind")) continue;
+            const auto binding = it.value().at("bind");
+            if (!binding.is_string() || !parameters->contains(binding.get<std::string>())) return false;
+            it.value() = parameters->at(binding.get<std::string>());
+        }
+    }
     const auto& operation = definition->second.operation;
     if (operation == "resource.consume") {
         const auto resource = args.value("resource", "");
@@ -2798,11 +3049,12 @@ bool WorldService::applyMetaAction(const std::string& npcId, const std::string& 
 }
 
 bool WorldService::applyActionEffects(const std::string& npcId, const std::string& actionId) {
-    return applyActionEffects(npcId, actionId, nullptr);
+    return applyActionEffects(npcId, actionId, nullptr, nullptr);
 }
 
 bool WorldService::applyActionEffects(const std::string& npcId, const std::string& actionId,
-                                      const std::map<std::string, int>* reservedResources) {
+                                      const std::map<std::string, int>* reservedResources,
+                                      const Json* parameters) {
     const auto* recipe = recipeForAction(actionId);
     if (recipe == nullptr) return false;
     const std::size_t eventCountBefore = state_.events.size();
@@ -2814,8 +3066,8 @@ bool WorldService::applyActionEffects(const std::string& npcId, const std::strin
         [this, &npcId](const BehaviorNodeContent& node) {
             return evaluateBehaviorCondition(npcId, node);
         },
-        [this, &npcId, &actionId, reservedResources](const BehaviorNodeContent& node) {
-            return applyMetaAction(npcId, actionId, node, reservedResources);
+        [this, &npcId, &actionId, reservedResources, parameters](const BehaviorNodeContent& node) {
+            return applyMetaAction(npcId, actionId, node, reservedResources, parameters);
         });
     if (result.status != NodeStatus::Success) {
         recipeTransaction.rollback();

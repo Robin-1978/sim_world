@@ -160,6 +160,10 @@ struct ProcessExecution {
     std::string behaviorNodeId;
     std::size_t behaviorStep{0};
     std::string behaviorStatus{"running"};
+    // The accepted, validated inputs for this plan (for example a dynamic
+    // destination). They are part of the process fact so a resumed process
+    // does not ask the model to reconstruct its parameters.
+    Json parameters = Json::object();
     std::string interruptionReason;
     bool interruptible{true};
     double interruptSalienceThreshold{1.0};

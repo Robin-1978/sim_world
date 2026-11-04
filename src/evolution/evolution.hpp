@@ -21,6 +21,18 @@ struct EvolutionProposal {
     Json operations = Json::array();
     EvolutionProposalStatus status{EvolutionProposalStatus::Proposed};
     std::vector<std::uint64_t> evidenceEventSequences;
+    // Explicitly records which governed evolution lane produced the proposal.
+    // Existing hand-authored proposals default to level2 for compatibility
+    // inside the still-unreleased prototype.
+    std::string evolutionLevel{"level2"};
+};
+
+struct EvolutionProposalRequestResult {
+    bool accepted{false};
+    std::string code;
+    std::string message;
+    std::string provider;
+    EvolutionProposal proposal;
 };
 
 struct EvolutionValidation {
@@ -59,6 +71,11 @@ public:
                                                        bool sandboxPassed);
     [[nodiscard]] static EvolutionProposal fromJson(const Json& value);
     [[nodiscard]] static Json toJson(const EvolutionProposal& proposal);
+    // Calls the configured LLM explicitly. The returned proposal is still
+    // Proposed and must pass validate -> sandbox -> independent approval.
+    [[nodiscard]] static EvolutionProposalRequestResult propose(const WorldService& world,
+                                                                 const std::string& evolutionLevel,
+                                                                 const std::string& trigger);
     [[nodiscard]] static EvolutionValidation applyOverlay(WorldContentPack& content,
                                                             const EvolutionProposal& proposal);
     [[nodiscard]] static EvolutionSandboxResult sandbox(const EvolutionProposal& proposal,

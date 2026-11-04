@@ -25,6 +25,11 @@
       "thinking": true,
       "reasoning_budget_tokens": 128,
       "max_tokens": 1024
+    },
+    "evolution_proposal": {
+      "thinking": true,
+      "reasoning_budget_tokens": 256,
+      "max_tokens": 1024
     }
   }
 }

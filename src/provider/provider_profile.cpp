@@ -129,4 +129,9 @@ std::unique_ptr<IProvider> makeProviderFromProfile(const IntelligenceProfile& pr
     throw std::runtime_error("unsupported provider override: " + type);
 }
 
+std::unique_ptr<IProvider> makeDefaultRuntimeProvider() {
+    const auto profile = loadIntelligenceProfile(defaultIntelligenceProfilePath());
+    return makeProviderFromProfile(profile);
+}
+
 }  // namespace tide_marks

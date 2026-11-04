@@ -157,8 +157,9 @@ public:
 
 class ScriptedActionProvider final : public IProvider {
 public:
-    explicit ScriptedActionProvider(std::vector<std::string> actions)
-        : actions_(std::move(actions)) {}
+    explicit ScriptedActionProvider(std::vector<std::string> actions,
+                                    std::map<std::string, Json> parameters = {})
+        : actions_(std::move(actions)), parameters_(std::move(parameters)) {}
 
     ProviderResponse decide(const DecisionContext& context, const std::string&) override {
         if (next_ >= actions_.size()) return ProviderResponse{false, {}, {}, "script_exhausted"};
@@ -172,13 +173,55 @@ public:
         proposal.worldRevision = context.worldRevision;
         proposal.npcStateVersion = context.npcStateVersion;
         proposal.worldActionRequested = true;
+        if (const auto parameters = parameters_.find(proposal.actionId); parameters != parameters_.end()) {
+            proposal.parameters = parameters->second;
+        }
         return ProviderResponse{true, std::move(proposal), "The test provider selected an action.", {}};
     }
     [[nodiscard]] std::string name() const override { return "scripted-test"; }
 
 private:
     std::vector<std::string> actions_;
+    std::map<std::string, Json> parameters_;
     std::size_t next_{0};
+};
+
+class RepairingLlamaProvider final : public IProvider {
+public:
+    ProviderResponse decide(const DecisionContext& context, const std::string&) override {
+        ++calls;
+        return makeProposal(context, "offer_ration", Json{{"unexpected", true}});
+    }
+
+    ProviderResponse decide(const DecisionContext& context, const std::string&,
+                            const Json& validationFeedback) override {
+        ++calls;
+        sawFeedback = !validationFeedback.empty();
+        return makeProposal(context, "rest", Json::object());
+    }
+
+    [[nodiscard]] std::string name() const override { return "llama.cpp"; }
+
+    int calls{0};
+    bool sawFeedback{false};
+
+private:
+    static ProviderResponse makeProposal(const DecisionContext& context,
+                                         const std::string& action,
+                                         Json parameters) {
+        IntentProposal proposal;
+        proposal.actionId = action;
+        proposal.speechAct = context.speechAct;
+        proposal.intent = action;
+        proposal.rationale = "A test LLM repaired its authored parameter contract.";
+        proposal.expectedOutcome = "Runtime executes the repaired authored plan.";
+        proposal.confidence = 1.0;
+        proposal.worldRevision = context.worldRevision;
+        proposal.npcStateVersion = context.npcStateVersion;
+        proposal.worldActionRequested = true;
+        proposal.parameters = std::move(parameters);
+        return ProviderResponse{true, std::move(proposal), "The model selected a repaired plan.", {}};
+    }
 };
 
 class NpcActionProvider final : public IProvider {
@@ -207,8 +250,48 @@ private:
     std::map<std::string, std::string> actions_;
 };
 
+class EvolutionProposalProvider final : public IProvider {
+public:
+    ProviderResponse decide(const DecisionContext& context, const std::string& input) override {
+        return MockProvider{}.decide(context, input);
+    }
+
+    ProviderResponse proposeEvolution(const Json& context, const std::string& level) override {
+        observedLevel = level;
+        observedContext = context;
+        const auto evidence = context.at("evidence_events").at(0).at("sequence");
+        Json proposal;
+        if (level == "level1") {
+            Json operation{{"operation", "overlay_strategy"}, {"id", "llm.strategy.rule"},
+                           {"npc_id", "mira"}, {"peer_id", "lorn"}, {"min_peer_trust", 0.0},
+                           {"strategy", "cooperate"}, {"goal_stage", 1},
+                           {"memory", "The model proposed a cooperative strategy."}};
+            proposal = Json::object();
+            proposal["id"] = "llm.strategy.overlay";
+            proposal["kind"] = "strategy";
+            proposal["evidence_event_sequences"] = Json::array({evidence});
+            proposal["operations"] = Json::array({operation});
+            proposal["rationale"] = "The observed social evidence supports a bounded strategy change.";
+        } else {
+            Json operation{{"operation", "create_entity_archetype"}, {"id", "llm.market_stall"},
+                           {"kind", "facility"}};
+            proposal = Json::object();
+            proposal["id"] = "llm.archetype";
+            proposal["kind"] = "declarative_capability";
+            proposal["evidence_event_sequences"] = Json::array({evidence});
+            proposal["operations"] = Json::array({operation});
+            proposal["rationale"] = "The model proposed a declarative facility grounded in the event history.";
+        }
+        return ProviderResponse{true, {}, proposal.at("rationale").get<std::string>(), {}, proposal};
+    }
+
+    [[nodiscard]] std::string name() const override { return "evolution-test-llm"; }
+    std::string observedLevel;
+    Json observedContext = Json::object();
+};
+
 void village_has_three_independent_npcs() {
-    const auto service = WorldService::load();
+    const auto service = WorldService::load(ContentPackLoader::defaultRoot(), std::make_unique<MockProvider>());
     expect(service.content().instance && service.content().instance->id == "tide_marks.village.instance",
            "default world is launched through an explicit game instance");
     expect(service.state().npcs.size() == 3, "village has exactly three important NPCs");
@@ -295,7 +378,7 @@ void authored_utility_profile_is_bounded_and_auditable() {
 }
 
 void offline_progression_changes_village() {
-    auto service = WorldService::load();
+    auto service = WorldService::load(ContentPackLoader::defaultRoot(), std::make_unique<MockProvider>());
     const auto before = summarize(service.state());
     service.advanceMinutes(2 * kMinutesPerDay);
     const auto after = summarize(service.state());
@@ -309,7 +392,7 @@ void offline_progression_changes_village() {
 }
 
 void needs_are_data_driven_and_replayable() {
-    auto service = WorldService::load();
+    auto service = WorldService::load(ContentPackLoader::defaultRoot(), std::make_unique<MockProvider>());
     const auto before = service.state().npcs.at("mira").needs.at("food_security").deficit;
     service.advanceMinutes(60);
     const auto after = service.state().npcs.at("mira").needs.at("food_security").deficit;
@@ -836,6 +919,17 @@ void provider_and_action_validation_are_safe() {
            "Runtime passes the semantic vocabulary to the provider without preclassifying player text");
 }
 
+void llm_action_validation_returns_bounded_repair_feedback() {
+    auto provider = std::make_unique<RepairingLlamaProvider>();
+    auto* raw = provider.get();
+    auto service = WorldService::load(ContentPackLoader::defaultRoot(), std::move(provider));
+    const auto turn = service.deliberate("mira", "test_invalid_parameters", "llm-repair");
+    expect(turn.accepted && turn.actionId == "rest" && raw->calls == 2 && raw->sawFeedback,
+           "a real LLM action validation error is returned once for a bounded repair");
+    expect(service.state().events.back().data.at("action_id") == "rest",
+           "the repaired proposal is the only action committed to the event log");
+}
+
 void meta_actions_are_loaded_from_content() {
     const auto content = ContentPackLoader::load(ContentPackLoader::defaultRoot());
     expect(content.metaActions.contains("consume_resource"),
@@ -924,7 +1018,7 @@ void bounded_drive_expectation_adapts_from_outcomes() {
 }
 
 void external_stimuli_and_structures_are_observable_and_persistent() {
-    auto service = WorldService::load();
+    auto service = WorldService::load(ContentPackLoader::defaultRoot(), std::make_unique<MockProvider>());
     service.advanceMinutes(14 * kMinutesPerHour);
     expect(!service.state().links.at("ferry_square").traversable,
            "authored structural activity automatically closes the ferry at night");
@@ -956,7 +1050,7 @@ void promise_policy_comes_from_content() {
     auto content = ContentPackLoader::load(ContentPackLoader::defaultRoot());
     content.promisePolicy.acceptedActor.trust = 0.5;
     content.promisePolicy.renegotiationExtensionMinutes = 60;
-    auto service = WorldService::fromContent(content);
+    auto service = WorldService::fromContent(content, std::make_unique<MockProvider>());
     const double before = service.state().npcs.at("mira").relationships.at("player").trust;
     const auto made = service.createPromise("player", "mira", "bring a ledger", 1, "policy-create");
     expect(made.accepted, "policy test creates a promise");
@@ -973,7 +1067,7 @@ void promise_policy_comes_from_content() {
 }
 
 void promises_cover_accept_renegotiate_refuse_and_break() {
-    auto service = WorldService::load();
+    auto service = WorldService::load(ContentPackLoader::defaultRoot(), std::make_unique<MockProvider>());
     const auto made = service.createPromise("mira", "lorn", "repair the east ferry", 1, "promise-create");
     expect(made.accepted, "promise can be created");
     const auto id = made.message;
@@ -1121,7 +1215,7 @@ void persistence_adapter_receives_committed_representations() {
 }
 
 void event_history_has_causal_identity() {
-    auto service = WorldService::load();
+    auto service = WorldService::load(ContentPackLoader::defaultRoot(), std::make_unique<MockProvider>());
     service.converse("mira", "please offer a ration", "causal-ration");
     service.advanceMinutes(30);
     const auto& events = service.state().events;
@@ -1227,7 +1321,7 @@ void event_bus_is_ordered_and_filterable() {
 }
 
 void world_service_publishes_committed_events() {
-    auto service = WorldService::load();
+    auto service = WorldService::load(ContentPackLoader::defaultRoot(), std::make_unique<MockProvider>());
     std::size_t delivered = 0;
     bool observedCommittedState = true;
     const auto token = service.eventBus().subscribe("life.day", [&service, &delivered, &observedCommittedState](const WorldEvent& event) {
@@ -1240,7 +1334,7 @@ void world_service_publishes_committed_events() {
     expect(observedCommittedState,
            "each event is published after its own time-step transaction is committed");
 
-    auto submitted = WorldService::load();
+    auto submitted = WorldService::load(ContentPackLoader::defaultRoot(), std::make_unique<MockProvider>());
     std::vector<std::int64_t> eventMinutes;
     (void)submitted.eventBus().subscribe("need.deprived", [&eventMinutes](const WorldEvent& event) {
         eventMinutes.push_back(event.at.minute);
@@ -1303,7 +1397,7 @@ void entity_registry_accepts_feature_components_without_core_changes() {
 }
 
 void entity_projection_tracks_committed_npc_movement() {
-    auto service = WorldService::load();
+    auto service = WorldService::load(ContentPackLoader::defaultRoot(), std::make_unique<MockProvider>());
     service.advanceMinutes(6 * kMinutesPerHour);
     const auto* location = service.entities().get<LocationComponent>("npc:mira");
     expect(location != nullptr && location->locationId == service.state().npcs.at("mira").location,
@@ -1311,7 +1405,7 @@ void entity_projection_tracks_committed_npc_movement() {
 }
 
 void world_entity_lifecycle_is_transactional_and_persistent() {
-    auto service = WorldService::load();
+    auto service = WorldService::load(ContentPackLoader::defaultRoot(), std::make_unique<MockProvider>());
     const auto created = service.createEntity("object:field-note", "world_object",
                                                Json{{"author", "mira"}}, "entity-create");
     expect(created.accepted, "world can create an entity from an authored archetype");
@@ -1343,7 +1437,7 @@ void world_entity_lifecycle_is_transactional_and_persistent() {
 }
 
 void resource_transfer_is_atomic_and_persistent() {
-    auto service = WorldService::load();
+    auto service = WorldService::load(ContentPackLoader::defaultRoot(), std::make_unique<MockProvider>());
     const auto initial = service.state().resources.at("grain").amount;
     const auto delivered = service.transferResource("world", "mira", "grain", 7, kPlayerId, "transfer-1");
     expect(delivered.accepted, "registered transfer moves a resource from the public pool to an entity");
@@ -1366,7 +1460,7 @@ void resource_transfer_is_atomic_and_persistent() {
 }
 
 void movement_operator_obeys_authored_topology() {
-    auto service = WorldService::load();
+    auto service = WorldService::load(ContentPackLoader::defaultRoot(), std::make_unique<MockProvider>());
     const auto moved = service.moveNpc("mira", "village_square", "mira", "move-1");
     expect(moved.accepted && service.state().npcs.at("mira").location == "village_square",
            "movement operator commits an arrival along an authored route");
@@ -1403,8 +1497,38 @@ void movement_operator_obeys_authored_topology() {
            "restoring the authored topology makes the same route available again");
 }
 
+void behavior_plan_resolves_dynamic_targets_through_runtime() {
+    auto content = ContentPackLoader::load(ContentPackLoader::defaultRoot());
+    content.metaActions["goto_target"] = MetaActionDefinition{
+        "goto_target", "movement", "Move to the proposed destination", "movement.traverse", Json::object()};
+    BehaviorRecipeContent recipe;
+    recipe.id = "goto_dynamic";
+    recipe.planId = "goto_dynamic_plan";
+    recipe.parameterSchema = Json{{"type", "object"}, {"required", Json::array({"destination"})},
+                                  {"properties", Json{{"destination", Json{{"type", "string"}}}}},
+                                  {"additionalProperties", false}};
+    recipe.root = BehaviorNodeContent{
+        "meta_action", "goto_dynamic.node", "goto_target",
+        Json{{"destination", Json{{"bind", "destination"}}}}, 0, {}};
+    content.behaviorRecipes.push_back(recipe);
+    for (auto& npc : content.npcs) {
+        if (npc.definition.id != "mira") continue;
+        ActionCandidate candidate{"goto_dynamic", recipe.planId, "dynamic movement", 0, true, 1.0,
+                                  "none", recipe.id, {}, 0, "none"};
+        candidate.parameterSchema = recipe.parameterSchema;
+        npc.actions.push_back(std::move(candidate));
+    }
+    auto provider = std::make_unique<ScriptedActionProvider>(
+        std::vector<std::string>{"goto_dynamic"},
+        std::map<std::string, Json>{{"goto_dynamic", Json{{"destination", "archive"}}}});
+    auto service = WorldService::fromContent(content, std::move(provider));
+    const auto turn = service.converse("mira", "go to the archive", "dynamic-goto");
+    expect(turn.accepted && service.state().npcs.at("mira").location == "archive",
+           "a generic behavior plan can bind a model-proposed destination through the authored topology");
+}
+
 void conflict_and_security_operators_change_facts_then_stimuli() {
-    auto service = WorldService::load();
+    auto service = WorldService::load(ContentPackLoader::defaultRoot(), std::make_unique<MockProvider>());
     const auto attack = service.submit(Command{
         "attack-1", "security", "mira", "", "", R"({"operation":"conflict.attack","target":"lorn","damage":0.4})"});
     expect(attack.accepted, "a registered conflict attack commits through the command boundary");
@@ -1448,7 +1572,7 @@ void conflict_and_security_operators_change_facts_then_stimuli() {
 }
 
 void knowledge_and_experience_keep_provenance() {
-    auto service = WorldService::load();
+    auto service = WorldService::load(ContentPackLoader::defaultRoot(), std::make_unique<MockProvider>());
     const auto promise = service.createPromise("player", "mira", "the ledger is safe", 1, "knowledge-source");
     expect(promise.accepted && promise.event.has_value(), "a committed event can become a learning source");
     const auto sourceSequence = promise.event->sequence;
@@ -1478,7 +1602,7 @@ void knowledge_and_experience_keep_provenance() {
 }
 
 void successful_actions_automatically_create_experience() {
-    auto service = WorldService::load();
+    auto service = WorldService::load(ContentPackLoader::defaultRoot(), std::make_unique<MockProvider>());
     const auto turn = service.converse("mira", "please offer a ration", "experience-action");
     expect(turn.accepted, "the action is committed before its experience is derived");
     service.advanceMinutes(30);
@@ -1838,7 +1962,7 @@ void glass_orchard_is_a_second_replaceable_world_instance() {
 }
 
 void offline_scheduler_baseline_is_measurable() {
-    auto village = WorldService::load();
+    auto village = WorldService::load(ContentPackLoader::defaultRoot(), std::make_unique<MockProvider>());
     auto harbor = WorldService::load(
         (std::filesystem::path(TIDE_MARKS_TEST_DATA_DIR) / "port-pack").string());
     const auto villageStart = village.state().now.minute;
@@ -1903,7 +2027,7 @@ void world_intelligence_detects_anomalies_and_runs_counterfactuals() {
 }  // namespace
 
 void npc_activity_slot_is_single_owner() {
-    auto service = WorldService::load();
+    auto service = WorldService::load(ContentPackLoader::defaultRoot(), std::make_unique<MockProvider>());
     expect(service.converse("mira", "please offer a ration", "activity-owner").accepted,
            "an accepted intent creates an activity slot");
     const auto& activity = service.state().npcs.at("mira").activity;
@@ -1947,11 +2071,12 @@ void npc_activity_slot_is_single_owner() {
 }
 
 void evolution_proposals_are_governed() {
-    const auto service = WorldService::load();
+    const auto service = WorldService::load(ContentPackLoader::defaultRoot(), std::make_unique<MockProvider>());
     EvolutionProposal proposal{
         "proposal.recipe.1", "declarative_capability", "llm", service.content().contentVersion,
         service.state().revision,
         Json::array({Json{{"operation", "register_behavior_recipe"}, {"id", "assist_neighbor"},
+                         {"available_to", Json::array({"mira"})},
                          {"root", Json{{"type", "meta_action"}, {"id", "assist"},
                                        {"name", "relieve_need"}}}}})};
     proposal.evidenceEventSequences = {service.state().events.back().sequence};
@@ -2024,6 +2149,7 @@ void evolution_proposals_are_governed() {
         "proposal.recipe.unknown_action", "declarative_capability", "llm", service.content().contentVersion,
         service.state().revision,
         Json::array({Json{{"operation", "register_behavior_recipe"}, {"id", "invalid_action_recipe"},
+                         {"available_to", Json::array({"mira"})},
                          {"root", Json{{"type", "meta_action"}, {"id", "action"},
                                        {"name", "not_a_registered_meta_action"}}}}})};
     unknownAction.evidenceEventSequences = proposal.evidenceEventSequences;
@@ -2039,6 +2165,7 @@ void evolution_proposals_are_governed() {
         "proposal.recipe.unknown_condition", "declarative_capability", "llm", service.content().contentVersion,
         service.state().revision,
         Json::array({Json{{"operation", "register_behavior_recipe"}, {"id", "invalid_condition_recipe"},
+                         {"available_to", Json::array({"mira"})},
                          {"root", Json{{"type", "condition"}, {"id", "condition"},
                                        {"name", "not_a_registered_condition"}}}}})};
     unknownCondition.evidenceEventSequences = proposal.evidenceEventSequences;
@@ -2055,6 +2182,7 @@ void evolution_proposals_are_governed() {
         "proposal.recipe.duplicate_node", "declarative_capability", "llm", service.content().contentVersion,
         service.state().revision,
         Json::array({Json{{"operation", "register_behavior_recipe"}, {"id", "duplicate_node_recipe"},
+                         {"available_to", Json::array({"mira"})},
                          {"root", duplicateRoot}}})};
     duplicateNode.evidenceEventSequences = proposal.evidenceEventSequences;
     expect(EvolutionManager::validate(duplicateNode, service.content(), service.state()).code ==
@@ -2063,7 +2191,7 @@ void evolution_proposals_are_governed() {
 }
 
 void evolution_sandbox_isolated_and_versioned() {
-    auto base = WorldService::load();
+    auto base = WorldService::load(ContentPackLoader::defaultRoot(), std::make_unique<MockProvider>());
     EvolutionProposal proposal{
         "overlay.archetype.sandbox", "declarative_capability", "llm", base.content().contentVersion,
         base.state().revision,
@@ -2142,8 +2270,37 @@ void evolution_sandbox_isolated_and_versioned() {
     std::filesystem::remove(path);
 }
 
+void evolved_behavior_recipe_is_bound_to_declared_npcs() {
+    auto service = WorldService::load(ContentPackLoader::defaultRoot(), std::make_unique<MockProvider>());
+    EvolutionProposal proposal{
+        "overlay.recipe.bound", "declarative_capability", "llm", service.content().contentVersion,
+        service.state().revision,
+        Json::array({Json{{"operation", "register_behavior_recipe"}, {"id", "observe_records"},
+                         {"available_to", Json::array({"eve"})}, {"plan_id", "observe_records"},
+                         {"duration_minutes", 10}, {"interruptible", true},
+                         {"root", Json{{"type", "meta_action"}, {"id", "observe"},
+                                       {"name", "relieve_need"}, {"args", Json{{"action", "share_record"}}}}}}})};
+    proposal.evidenceEventSequences = {service.state().events.back().sequence};
+    const auto validation = EvolutionManager::validate(proposal, service.content(), service.state());
+    expect(validation.valid, "an evolved recipe requires and validates an explicit actor propagation scope");
+    const auto sandbox = EvolutionManager::sandbox(proposal, service);
+    proposal.status = EvolutionProposalStatus::Validated;
+    expect(sandbox.passed && EvolutionManager::approve(proposal, "developer", true).valid &&
+               service.activateOverlay(proposal, sandbox).accepted,
+           "an approved behavior recipe overlay activates through the normal governance path");
+    const auto evePlans = service.decisionContext("eve").planCatalog;
+    const auto miraPlans = service.decisionContext("mira").planCatalog;
+    expect(std::any_of(evePlans.begin(), evePlans.end(), [](const auto& plan) {
+               return plan.value("action_id", "") == "observe_records";
+           }) &&
+               std::none_of(miraPlans.begin(), miraPlans.end(), [](const auto& plan) {
+                   return plan.value("action_id", "") == "observe_records";
+               }),
+           "an evolved behavior is visible only to the NPCs declared by the overlay");
+}
+
 void overlay_stack_restores_and_rolls_back_in_order() {
-    auto base = WorldService::load();
+    auto base = WorldService::load(ContentPackLoader::defaultRoot(), std::make_unique<MockProvider>());
     const auto rootVersion = base.content().contentVersion;
     EvolutionProposal first{
         "overlay.stack.first", "declarative_capability", "llm", rootVersion, base.state().revision,
@@ -2176,6 +2333,33 @@ void overlay_stack_restores_and_rolls_back_in_order() {
            "stacked overlays roll back in order after restore");
 }
 
+void llm_proposes_level_one_and_level_two_evolution() {
+    auto provider = std::make_unique<EvolutionProposalProvider>();
+    auto* providerRaw = provider.get();
+    auto service = WorldService::load(ContentPackLoader::defaultRoot(), std::move(provider));
+    const auto before = service.snapshotJson();
+
+    const auto level1 = EvolutionManager::propose(service, "level1", "test_strategy_reflection");
+    expect(level1.accepted && level1.proposal.evolutionLevel == "level1" &&
+               level1.proposal.source == "llm:evolution-test-llm" &&
+               level1.proposal.kind == "strategy",
+           "Level 1 evolution is proposed by the configured LLM and normalized with runtime context");
+    expect(providerRaw->observedLevel == "level1" &&
+               providerRaw->observedContext.value("base_world_revision", 0ULL) == service.state().revision,
+           "the Level 1 provider receives the current world revision and evidence context");
+
+    const auto level2 = EvolutionManager::propose(service, "level2", "test_world_foundation");
+    expect(level2.accepted && level2.proposal.evolutionLevel == "level2" &&
+               level2.proposal.operations.at(0).value("operation", "") == "create_entity_archetype",
+           "Level 2 evolution is also an LLM proposal over declarative world content");
+    expect(service.snapshotJson() == before,
+           "asking the LLM for evolution proposals never mutates the source world");
+
+    const auto sandbox = EvolutionManager::sandbox(level2.proposal, service);
+    expect(sandbox.passed && sandbox.overlayVersion.find(level2.proposal.id) != std::string::npos,
+           "an LLM proposal still requires isolated sandbox execution before activation");
+}
+
 void intelligence_profile_configures_decision_budgets() {
     const auto profile = loadIntelligenceProfile(defaultIntelligenceProfilePath());
     expect(profile.id == "village-qwen35-4b-v1", "village runs from an explicit intelligence profile");
@@ -2193,8 +2377,12 @@ void intelligence_profile_configures_decision_budgets() {
            "autonomous reappraisal uses its bounded thinking policy");
     expect(profile.llama.decisionPolicies.contains("player_dialogue") &&
                profile.llama.decisionPolicies.contains("utterance_understanding") &&
-               profile.llama.decisionPolicies.contains("autonomous_reappraisal"),
+               profile.llama.decisionPolicies.contains("autonomous_reappraisal") &&
+               profile.llama.decisionPolicies.contains("evolution_proposal"),
            "named decision policies are loaded independently of channel ids");
+    expect(profile.llama.decisionPolicies.at("evolution_proposal").enableThinking &&
+               profile.llama.decisionPolicies.at("evolution_proposal").reasoningBudgetTokens == 256,
+           "Level 1 and Level 2 evolution use a separate bounded thinking policy");
     const auto provider = makeProviderFromProfile(profile, "mock");
     expect(provider->name() == "mock", "the profile provider can be overridden for offline tests");
 }
@@ -2230,6 +2418,8 @@ int main() {
     run("exchange_contracts_are_durable_and_atomic", exchange_contracts_are_durable_and_atomic);
     run("behavior_tree_supports_sequence_timeout_and_interrupt", behavior_tree_supports_sequence_timeout_and_interrupt);
     run("provider_and_action_validation_are_safe", provider_and_action_validation_are_safe);
+    run("llm_action_validation_returns_bounded_repair_feedback",
+        llm_action_validation_returns_bounded_repair_feedback);
     run("meta_actions_are_loaded_from_content", meta_actions_are_loaded_from_content);
     run("needs_cover_domains_and_explicit_execution_paths", needs_cover_domains_and_explicit_execution_paths);
     run("bounded_drive_expectation_adapts_from_outcomes", bounded_drive_expectation_adapts_from_outcomes);
@@ -2250,6 +2440,7 @@ int main() {
     run("world_entity_lifecycle_is_transactional_and_persistent", world_entity_lifecycle_is_transactional_and_persistent);
     run("resource_transfer_is_atomic_and_persistent", resource_transfer_is_atomic_and_persistent);
     run("movement_operator_obeys_authored_topology", movement_operator_obeys_authored_topology);
+    run("behavior_plan_resolves_dynamic_targets_through_runtime", behavior_plan_resolves_dynamic_targets_through_runtime);
     run("conflict_and_security_operators_change_facts_then_stimuli", conflict_and_security_operators_change_facts_then_stimuli);
     run("knowledge_and_experience_keep_provenance", knowledge_and_experience_keep_provenance);
     run("successful_actions_automatically_create_experience", successful_actions_automatically_create_experience);
@@ -2267,7 +2458,11 @@ int main() {
     run("npc_activity_slot_is_single_owner", npc_activity_slot_is_single_owner);
     run("evolution_proposals_are_governed", evolution_proposals_are_governed);
     run("evolution_sandbox_isolated_and_versioned", evolution_sandbox_isolated_and_versioned);
+    run("evolved_behavior_recipe_is_bound_to_declared_npcs",
+        evolved_behavior_recipe_is_bound_to_declared_npcs);
     run("overlay_stack_restores_and_rolls_back_in_order", overlay_stack_restores_and_rolls_back_in_order);
+    run("llm_proposes_level_one_and_level_two_evolution",
+        llm_proposes_level_one_and_level_two_evolution);
     run("intelligence_profile_configures_decision_budgets", intelligence_profile_configures_decision_budgets);
     if (failures != 0) {
         std::cerr << failures << " test assertion(s) failed\n";
