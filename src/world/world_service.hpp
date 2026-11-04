@@ -255,8 +255,6 @@ private:
     void syncNpcEntityState();
     WorldEvent addEvent(std::string type, std::string actor, std::string target,
                         std::string detail, Json data = Json::object());
-    void projectStimuli(const WorldEvent& event);
-    void expireStimuli();
     void processAutonomousTurns(const std::set<std::string>& dueNpcIds);
     void enqueueAutonomousTurn(const std::string& npcId, const std::string& trigger,
                                const std::string& channelId = {});

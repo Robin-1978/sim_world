@@ -338,7 +338,7 @@ void WorldService::advanceMinutes(std::int64_t minutes) {
             state_.revision += static_cast<std::uint64_t>(elapsedMinutes - 1);
             simulationMetrics_.scheduledBoundaries++;
             simulationMetrics_.simulatedMinutes += elapsedMinutes;
-            expireStimuli();
+            StimulusSystem(*this).expire();
             for (auto& [id, npc] : state_.npcs) {
                 const auto* authored = authoredNpc(id);
                 const auto tier = authored != nullptr ? authored->simulationTier : std::string("near");
@@ -896,14 +896,6 @@ bool WorldService::applyActionEffects(const std::string& npcId, const std::strin
 
 void WorldService::applyNeedRelief(const std::string& npcId, const std::string& actionId) {
     BehaviorExecutionSystem(*this).applyNeedRelief(npcId, actionId);
-}
-
-void WorldService::projectStimuli(const WorldEvent& event) {
-    StimulusSystem(*this).project(event);
-}
-
-void WorldService::expireStimuli() {
-    StimulusSystem(*this).expire();
 }
 
 WorldEvent WorldService::addEvent(std::string type, std::string actor, std::string target,
