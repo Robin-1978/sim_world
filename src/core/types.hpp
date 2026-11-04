@@ -41,6 +41,37 @@ struct Memory {
     double confidence{1.0};
 };
 
+// A knowledge fact is an agent-scoped belief, never a second WorldState fact.
+// Its source event and confidence make provenance and later correction
+// explicit.
+struct KnowledgeFact {
+    std::string id;
+    std::string subject;
+    std::string predicate;
+    std::string value;
+    std::uint64_t sourceSequence{0};
+    std::string sourceType;
+    GameTime learnedAt;
+    double confidence{0.0};
+    std::string scope{"direct"};
+    bool confirmed{false};
+};
+
+// Experience is an abstraction over one or more episodes. It can influence
+// deliberation as a prior, but it cannot authorize an action or rewrite facts.
+struct Experience {
+    std::string id;
+    std::string domain;
+    std::string trigger;
+    std::string action;
+    std::string outcome;
+    std::vector<std::uint64_t> sourceSequences;
+    GameTime learnedAt;
+    GameTime lastUsed;
+    double confidence{0.0};
+    bool personal{true};
+};
+
 struct NpcDefinition {
     std::string id;
     std::string name;
@@ -164,6 +195,8 @@ struct NpcState {
     std::map<std::string, NeedState> needs;
     RelationshipAxes playerRelation;
     std::vector<Memory> memories;
+    std::vector<KnowledgeFact> knowledge;
+    std::vector<Experience> experiences;
     std::vector<std::string> openPromises;
     std::uint64_t stateVersion{0};
     std::string mode{"working"};

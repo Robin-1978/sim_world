@@ -344,6 +344,19 @@ DecisionContext WorldService::decisionContext(const std::string& npcId) const {
     std::vector<std::string> memories;
     for (const auto& memory : npc.memories) memories.push_back(memory.text);
     context.memories = join(memories, " | ");
+    std::vector<std::string> knowledge;
+    for (const auto& fact : npc.knowledge) {
+        knowledge.push_back(fact.subject + " " + fact.predicate + " " + fact.value +
+                           " [confidence=" + std::to_string(fact.confidence) + ", scope=" + fact.scope + "]");
+    }
+    context.knowledge = join(knowledge, " | ");
+    std::vector<std::string> experiences;
+    for (const auto& experience : npc.experiences) {
+        experiences.push_back(experience.domain + ": when " + experience.trigger + ", " +
+                              experience.action + " -> " + experience.outcome +
+                              " [confidence=" + std::to_string(experience.confidence) + "]");
+    }
+    context.experiences = join(experiences, " | ");
     context.character = authoredDefinition.name + ": " + authoredDefinition.role + "; public goal=" +
                         authoredDefinition.publicGoal + "; hidden goal=" + authoredDefinition.hiddenGoal +
                         "; boundary=" + authoredDefinition.boundary + "; strategy=" + npc.strategy;
@@ -831,6 +844,29 @@ CommandResult WorldService::submit(const Command& command) {
             return reject("invalid_security_operator", "Security command detail must be valid JSON.");
         }
     }
+    if (command.kind == "knowledge_assert" || command.kind == "experience_record") {
+        try {
+            const Json args = command.detail.empty() ? Json::object() : Json::parse(command.detail);
+            const auto npcId = args.value("npc", command.target);
+            const auto sourceSequence = args.value("source_sequence", 0ULL);
+            const auto confidence = args.value("confidence", 0.0);
+            if (command.kind == "knowledge_assert") {
+                return assertKnownFact(npcId, args.value("subject", std::string{}),
+                                       args.value("predicate", std::string{}),
+                                       args.value("value", std::string{}), sourceSequence,
+                                       args.value("scope", "direct"), confidence,
+                                       command.actor, command.turnId);
+            }
+            return recordExperience(npcId, args.value("domain", std::string{}),
+                                    args.value("trigger", std::string{}),
+                                    args.value("action", std::string{}),
+                                    args.value("outcome", std::string{}), sourceSequence,
+                                    confidence, args.value("personal", true),
+                                    command.actor, command.turnId);
+        } catch (...) {
+            return reject("invalid_knowledge_action", "Knowledge detail must be valid JSON.");
+        }
+    }
     return reject("unknown_command", "The command is not part of the registered action vocabulary.");
 }
 
@@ -1033,6 +1069,104 @@ CommandResult WorldService::moveNpc(const std::string& npcId, const std::string&
                   {"route", planRoute(previous, destination).value_or(std::vector<std::string>{})}});
     syncNpcEntityState();
     return CommandResult{true, "ok", destination, state_.events.back()};
+}
+
+CommandResult WorldService::assertKnownFact(const std::string& npcId, const std::string& subject,
+                                            const std::string& predicate, const std::string& value,
+                                            std::uint64_t sourceSequence, const std::string& scope,
+                                            double confidence, const std::string& actor,
+                                            const std::string& turnId) {
+    TransactionScope transaction(*this);
+    if (!turnId.empty() && state_.processedTurnIds.contains(turnId)) {
+        return reject("duplicate_turn", "The knowledge fact was already applied.");
+    }
+    auto npc = state_.npcs.find(npcId);
+    if (npc == state_.npcs.end()) return reject("unknown_npc", "Knowledge must belong to an existing NPC.");
+    if (actor != kWorldActor && actor != npcId && actor != kPlayerId) {
+        return reject("unauthorized", "The actor cannot write this NPC's knowledge.");
+    }
+    if (subject.empty() || predicate.empty() || value.empty()) {
+        return reject("invalid_knowledge", "Knowledge needs subject, predicate and value.");
+    }
+    if (confidence < 0.0 || confidence > 1.0) return reject("invalid_knowledge", "Knowledge confidence must be between 0 and 1.");
+    const auto source = std::find_if(state_.events.begin(), state_.events.end(), [sourceSequence](const auto& event) {
+        return event.sequence == sourceSequence;
+    });
+    if (source == state_.events.end()) return reject("unknown_knowledge_source", "Knowledge must cite a committed event.");
+    const bool participant = source->actor == npcId || source->target == npcId || source->target == npcEntityId(npcId);
+    if (scope == "direct" && !participant) {
+        return reject("source_not_observed", "An NPC cannot claim direct knowledge of an unrelated event.");
+    }
+    if (scope != "direct" && scope != "witness" && scope != "testimony" && scope != "inference") {
+        return reject("invalid_knowledge_scope", "Knowledge scope is not registered.");
+    }
+    const auto existing = std::find_if(npc->second.knowledge.begin(), npc->second.knowledge.end(),
+                                       [&subject, &predicate](const auto& fact) {
+                                           return fact.subject == subject && fact.predicate == predicate;
+                                       });
+    const std::string id = "knowledge-" + std::to_string(state_.events.size() + 1);
+    KnowledgeFact fact{id, subject, predicate, value, sourceSequence, source->type, state_.now,
+                       confidence, scope, true};
+    if (existing != npc->second.knowledge.end()) *existing = fact;
+    else npc->second.knowledge.push_back(fact);
+    ++npc->second.stateVersion;
+    if (!turnId.empty()) state_.processedTurnIds.insert(turnId);
+    addEvent("knowledge.asserted", actor, npcId, "An NPC recorded a sourced belief",
+             Json{{"knowledge_id", id}, {"subject", subject}, {"predicate", predicate},
+                  {"value", value}, {"source_sequence", sourceSequence}, {"source_type", source->type},
+                  {"scope", scope}, {"confidence", confidence}});
+    return CommandResult{true, "ok", id, state_.events.back()};
+}
+
+CommandResult WorldService::recordExperience(const std::string& npcId, const std::string& domain,
+                                             const std::string& trigger, const std::string& action,
+                                             const std::string& outcome, std::uint64_t sourceSequence,
+                                             double confidence, bool personal, const std::string& actor,
+                                             const std::string& turnId) {
+    TransactionScope transaction(*this);
+    if (!turnId.empty() && state_.processedTurnIds.contains(turnId)) {
+        return reject("duplicate_turn", "The experience was already applied.");
+    }
+    auto npc = state_.npcs.find(npcId);
+    if (npc == state_.npcs.end()) return reject("unknown_npc", "Experience must belong to an existing NPC.");
+    if (actor != kWorldActor && actor != npcId && actor != kPlayerId) {
+        return reject("unauthorized", "The actor cannot write this NPC's experience.");
+    }
+    if (domain.empty() || trigger.empty() || action.empty() || outcome.empty()) {
+        return reject("invalid_experience", "Experience needs domain, trigger, action and outcome.");
+    }
+    if (confidence < 0.0 || confidence > 1.0) return reject("invalid_experience", "Experience confidence must be between 0 and 1.");
+    const auto source = std::find_if(state_.events.begin(), state_.events.end(), [sourceSequence](const auto& event) {
+        return event.sequence == sourceSequence;
+    });
+    if (source == state_.events.end()) return reject("unknown_experience_source", "Experience must cite a committed event.");
+    const auto existing = std::find_if(npc->second.experiences.begin(), npc->second.experiences.end(),
+                                       [&domain, &trigger, &action](const auto& experience) {
+                                           return experience.domain == domain && experience.trigger == trigger &&
+                                                  experience.action == action;
+                                       });
+    if (existing != npc->second.experiences.end()) {
+        const double samples = static_cast<double>(existing->sourceSequences.size() + 1);
+        existing->confidence = std::clamp(existing->confidence + (confidence - existing->confidence) / samples,
+                                           0.0, 1.0);
+        existing->outcome = outcome;
+        existing->lastUsed = state_.now;
+        if (std::find(existing->sourceSequences.begin(), existing->sourceSequences.end(), sourceSequence) ==
+            existing->sourceSequences.end()) {
+            existing->sourceSequences.push_back(sourceSequence);
+        }
+    } else {
+        Experience experience{"experience-" + std::to_string(state_.events.size() + 1), domain, trigger,
+                               action, outcome, {sourceSequence}, state_.now, state_.now, confidence, personal};
+        npc->second.experiences.push_back(std::move(experience));
+    }
+    ++npc->second.stateVersion;
+    if (!turnId.empty()) state_.processedTurnIds.insert(turnId);
+    addEvent("experience.recorded", actor, npcId, "An outcome was abstracted into reusable experience",
+             Json{{"domain", domain}, {"trigger", trigger}, {"action", action},
+                  {"outcome", outcome}, {"source_sequence", sourceSequence},
+                  {"confidence", confidence}, {"personal", personal}});
+    return CommandResult{true, "ok", domain, state_.events.back()};
 }
 
 CommandResult WorldService::applySecurityOperator(const std::string& operation, const std::string& actor,
@@ -1586,6 +1720,39 @@ bool WorldService::applyMetaAction(const std::string& npcId, const std::string& 
                                                     "recipe:" + npcId + ":" + actionId + ":security");
         return security.accepted;
     }
+    if (operation == "memory.append") {
+        auto npc = state_.npcs.find(npcId);
+        if (npc == state_.npcs.end()) return false;
+        const auto text = args.value("text", "");
+        if (text.empty()) return false;
+        const auto sourceSequence = args.value("source_sequence", 0ULL);
+        if (sourceSequence != 0 && std::none_of(state_.events.begin(), state_.events.end(),
+                                                [sourceSequence](const auto& event) { return event.sequence == sourceSequence; })) {
+            return false;
+        }
+        npc->second.memories.push_back(Memory{args.value("kind", "episode"), text, state_.now,
+                                              args.value("confidence", 1.0)});
+        addEvent("memory.appended", npcId, args.value("target", "self"), text,
+                 Json{{"action_id", actionId}, {"kind", args.value("kind", "episode")},
+                      {"source_sequence", sourceSequence}});
+        return true;
+    }
+    if (operation == "knowledge.assert") {
+        const auto result = assertKnownFact(
+            npcId, args.value("subject", ""), args.value("predicate", ""), args.value("value", ""),
+            args.value("source_sequence", 0ULL), args.value("scope", "direct"),
+            args.value("confidence", 0.0), npcId,
+            "recipe:" + npcId + ":" + actionId + ":knowledge");
+        return result.accepted;
+    }
+    if (operation == "experience.record") {
+        const auto result = recordExperience(
+            npcId, args.value("domain", ""), args.value("trigger", ""), args.value("action", actionId),
+            args.value("outcome", ""), args.value("source_sequence", 0ULL),
+            args.value("confidence", 0.0), args.value("personal", true), npcId,
+            "recipe:" + npcId + ":" + actionId + ":experience");
+        return result.accepted;
+    }
     if (operation == "need.relieve") {
         const auto sourceAction = args.value("action", actionId);
         applyNeedRelief(npcId, sourceAction);
@@ -1625,6 +1792,7 @@ bool WorldService::applyActionEffects(const std::string& npcId, const std::strin
                                       const std::map<std::string, int>* reservedResources) {
     const auto* recipe = recipeForAction(actionId);
     if (recipe == nullptr) return false;
+    const std::size_t eventCountBefore = state_.events.size();
     // A recipe is one atomic transition. Its conditions and all meta-action
     // effects either commit together or disappear together.
     TransactionScope recipeTransaction(*this);
@@ -1636,7 +1804,44 @@ bool WorldService::applyActionEffects(const std::string& npcId, const std::strin
         [this, &npcId, &actionId, reservedResources](const BehaviorNodeContent& node) {
             return applyMetaAction(npcId, actionId, node, reservedResources);
         });
-    if (result.status != NodeStatus::Success) recipeTransaction.rollback();
+    if (result.status != NodeStatus::Success) {
+        recipeTransaction.rollback();
+        return false;
+    }
+    // A successfully committed action is an episode. Record a bounded prior
+    // candidate from its own event trail, never from model prose.
+    const auto effectEvent = std::find_if(state_.events.rbegin(), state_.events.rend(),
+                                          [eventCountBefore](const auto& event) { return event.sequence > eventCountBefore; });
+    if (effectEvent != state_.events.rend()) {
+        auto npc = state_.npcs.find(npcId);
+        if (npc != state_.npcs.end()) {
+            bool changed = false;
+            const auto existing = std::find_if(npc->second.experiences.begin(), npc->second.experiences.end(),
+                                               [&actionId](const auto& experience) {
+                                                   return experience.action == actionId && experience.domain == "action";
+                                               });
+            if (existing == npc->second.experiences.end()) {
+                npc->second.experiences.push_back(Experience{
+                    "experience:" + npcId + ":" + actionId, "action", "observed_context", actionId,
+                    effectEvent->type, {effectEvent->sequence}, state_.now, state_.now, 0.5, true});
+                changed = true;
+            } else if (std::find(existing->sourceSequences.begin(), existing->sourceSequences.end(),
+                                 effectEvent->sequence) == existing->sourceSequences.end()) {
+                const double samples = static_cast<double>(existing->sourceSequences.size() + 1);
+                existing->confidence = std::clamp(existing->confidence + (1.0 - existing->confidence) / samples,
+                                                   0.0, 1.0);
+                existing->lastUsed = state_.now;
+                existing->sourceSequences.push_back(effectEvent->sequence);
+                changed = true;
+            }
+            if (changed) {
+                addEvent("experience.observed", npcId, npcId,
+                         "A committed action outcome became reusable NPC experience",
+                         Json{{"action_id", actionId}, {"source_sequence", effectEvent->sequence},
+                              {"source_type", effectEvent->type}, {"domain", "action"}});
+            }
+        }
+    }
     return result.status == NodeStatus::Success;
 }
 

@@ -347,7 +347,7 @@ Runtime 只向内容和模型暴露一组可审计的原子元动作。元动作
 | P1 operator | 冲突 | `conflict.attack` / `conflict.sabotage` | 已实现安全事实入口：只改变完整性、可用性、威胁和暴露，不直接销毁实体或改需求数值 |
 | P1 operator | 安全 | `security.threaten` / `security.defend` / `security.evacuate` / `security.repair` | 已实现：更新 `SecurityState` 并由 StimulusRule 投射安全外驱；修复可消费已定义资源 |
 | P1 operator | 承诺 | `create_promise` / `transition_promise` | 建立、接受、重谈、兑现或违约；当前 P0 通过命令接口验证承诺生命周期 |
-| P1 operator | 知识 | `append_memory` / `assert_known_fact` | P1 知识层：记忆保留事件，知识/经验必须带来源序列、时间、置信度和可见范围；尚待 operator 化 |
+| P1 operator | 知识/经验 | `memory.append` / `knowledge.assert` / `experience.record` | 已实现为 NPC 作用域投影：记忆、知识和经验都必须引用已提交事件，保存时间、范围和置信度；它们不能直接改写客观事实 |
 | P0 command API | 实体 | `create_entity` / `set_entity_lifecycle` | 从注册原型创建实体，或休眠/销毁；当前不是 Behavior DSL operator |
 
 `emit_event` 不作为可由模型自由调用的独立“改写动作”；每个成功元动作和事务由 Runtime 自动产生 WorldEvent，避免事实与事件分开提交。`set_resource`、`adjust_resource` 和 `set_npc_resource` 这类可写入任意绝对值或第二份库存的接口不向内容和 LLM 暴露，内容使用受单位、所有权、预留、前置条件和容量约束的语义化元动作。
@@ -460,7 +460,7 @@ Behavior DSL 只组合注册节点、条件和元动作，例如：
 }
 ```
 
-交易合同至少记录双方、交换资源、数量/质量、报价或支付物、预留、交付地点和时间、有效期、结算及违约路径。承诺状态变化对关系轴的影响由内容包 `promise_policy` 声明，包括违约双方、拒绝方和接受方的 `trust/respect/fear/owed` 增量以及重谈延长时长；Runtime 只负责把增量原子写入事务，不在代码里写死数值。聊天记录至少包含 `speech_act`、发送者、接收者/观察者、渠道、事实引用、来源和置信度、会话轮次、回复期限及预期后果。对话里的“我答应给你粮食”只能提交 `promise.offer` 或合同提案，不能直接增加粮食或关系。P1 注册对应 operator 后，运行时才把确认后的定义编译成 `transfer_resource`、`create_promise`、`append_memory` 等元动作事务；当前 P0 已实现的配方只使用已注册资源、需求、关系和拓扑 operator。Event 由提交器自动产生。LLM 可以提出新的过程组合，但不能只凭一段文字生成不存在的产量、所有权或承诺结果。
+交易合同至少记录双方、交换资源、数量/质量、报价或支付物、预留、交付地点和时间、有效期、结算及违约路径。承诺状态变化对关系轴的影响由内容包 `promise_policy` 声明，包括违约双方、拒绝方和接受方的 `trust/respect/fear/owed` 增量以及重谈延长时长；Runtime 只负责把增量原子写入事务，不在代码里写死数值。聊天记录至少包含 `speech_act`、发送者、接收者/观察者、渠道、事实引用、来源和置信度、会话轮次、回复期限及预期后果。对话里的“我答应给你粮食”只能提交 `promise.offer` 或合同提案，不能直接增加粮食或关系。P1 注册对应 operator 后，运行时才把确认后的定义编译成 `transfer_resource`、`create_promise`、`append_memory` 等元动作事务；当前配方可使用已注册资源、需求、关系、拓扑、移动、安全和记忆/知识 operator，未注册能力仍会被内容加载器拒绝。Event 由提交器自动产生。LLM 可以提出新的过程组合，但不能只凭一段文字生成不存在的产量、所有权或承诺结果。
 
 ## 9. 存档、回放和调试
 

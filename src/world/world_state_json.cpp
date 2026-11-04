@@ -22,6 +22,49 @@ Memory memoryFromJson(const Json& json) {
                   jsonValue<double>(json, "confidence", 1.0)};
 }
 
+Json knowledgeJson(const KnowledgeFact& fact) {
+    return Json{{"id", fact.id}, {"subject", fact.subject}, {"predicate", fact.predicate},
+                {"value", fact.value}, {"source_sequence", fact.sourceSequence},
+                {"source_type", fact.sourceType}, {"learned_at", fact.learnedAt.minute},
+                {"confidence", fact.confidence}, {"scope", fact.scope}, {"confirmed", fact.confirmed}};
+}
+
+KnowledgeFact knowledgeFromJson(const Json& json) {
+    return KnowledgeFact{jsonValue<std::string>(json, "id", ""),
+                         jsonValue<std::string>(json, "subject", ""),
+                         jsonValue<std::string>(json, "predicate", ""),
+                         jsonValue<std::string>(json, "value", ""),
+                         jsonValue<std::uint64_t>(json, "source_sequence", 0),
+                         jsonValue<std::string>(json, "source_type", ""),
+                         GameTime{jsonValue<std::int64_t>(json, "learned_at", 0)},
+                         jsonValue<double>(json, "confidence", 0.0),
+                         jsonValue<std::string>(json, "scope", "direct"),
+                         jsonValue<bool>(json, "confirmed", false)};
+}
+
+Json experienceJson(const Experience& experience) {
+    return Json{{"id", experience.id}, {"domain", experience.domain}, {"trigger", experience.trigger},
+                {"action", experience.action}, {"outcome", experience.outcome},
+                {"source_sequences", experience.sourceSequences}, {"learned_at", experience.learnedAt.minute},
+                {"last_used", experience.lastUsed.minute}, {"confidence", experience.confidence},
+                {"personal", experience.personal}};
+}
+
+Experience experienceFromJson(const Json& json) {
+    Experience experience;
+    experience.id = jsonValue<std::string>(json, "id", "");
+    experience.domain = jsonValue<std::string>(json, "domain", "");
+    experience.trigger = jsonValue<std::string>(json, "trigger", "");
+    experience.action = jsonValue<std::string>(json, "action", "");
+    experience.outcome = jsonValue<std::string>(json, "outcome", "");
+    experience.sourceSequences = jsonValue<std::vector<std::uint64_t>>(json, "source_sequences", {});
+    experience.learnedAt = GameTime{jsonValue<std::int64_t>(json, "learned_at", 0)};
+    experience.lastUsed = GameTime{jsonValue<std::int64_t>(json, "last_used", 0)};
+    experience.confidence = jsonValue<double>(json, "confidence", 0.0);
+    experience.personal = jsonValue<bool>(json, "personal", true);
+    return experience;
+}
+
 Json stimulusJson(const ExternalStimulus& stimulus) {
     return Json{{"id", stimulus.id}, {"source_event", stimulus.sourceEvent},
                 {"source_sequence", stimulus.sourceSequence}, {"category", stimulus.category},
@@ -167,6 +210,10 @@ Json worldStateToJson(const WorldState& state) {
     for (const auto& [id, npc] : state.npcs) {
         Json memories = Json::array();
         for (const auto& memory : npc.memories) memories.push_back(memoryJson(memory));
+        Json knowledge = Json::array();
+        for (const auto& fact : npc.knowledge) knowledge.push_back(knowledgeJson(fact));
+        Json experiences = Json::array();
+        for (const auto& experience : npc.experiences) experiences.push_back(experienceJson(experience));
         Json peerTrust = Json::object();
         for (const auto& [peer, trust] : npc.peerTrust) peerTrust[peer] = trust;
         Json needs = Json::object();
@@ -197,7 +244,8 @@ Json worldStateToJson(const WorldState& state) {
                         {"needs", needs},
                         {"relation", {{"trust", npc.playerRelation.trust}, {"respect", npc.playerRelation.respect},
                                        {"fear", npc.playerRelation.fear}, {"owed", npc.playerRelation.owed}}},
-                        {"memories", memories}, {"open_promises", npc.openPromises},
+                        {"memories", memories}, {"knowledge", knowledge}, {"experiences", experiences},
+                        {"open_promises", npc.openPromises},
                         {"state_version", npc.stateVersion}, {"mode", npc.mode}, {"strategy", npc.strategy},
                         {"peer_trust", peerTrust}, {"stimulus_sensitivity", stimulusSensitivity},
                         {"stimuli", stimuli}, {"last_autonomous_turn", npc.lastAutonomousTurn.minute},
@@ -299,6 +347,10 @@ WorldState deserializeWorldState(const Json& json) {
                                               jsonValue<double>(relation, "fear", 0.0),
                                               jsonValue<double>(relation, "owed", 0.0)};
         for (const auto& memory : value.value("memories", Json::array())) npc.memories.push_back(memoryFromJson(memory));
+        for (const auto& fact : value.value("knowledge", Json::array())) npc.knowledge.push_back(knowledgeFromJson(fact));
+        for (const auto& experience : value.value("experiences", Json::array())) {
+            npc.experiences.push_back(experienceFromJson(experience));
+        }
         npc.openPromises = value.value("open_promises", std::vector<std::string>{});
         npc.stateVersion = jsonValue<std::uint64_t>(value, "state_version", 0);
         npc.mode = jsonValue<std::string>(value, "mode", "working");

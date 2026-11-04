@@ -20,6 +20,9 @@ const std::set<std::string>& MetaActionRegistry::executableOperators() {
         "security.defend",
         "security.evacuate",
         "security.repair",
+        "memory.append",
+        "knowledge.assert",
+        "experience.record",
     };
     return operators;
 }

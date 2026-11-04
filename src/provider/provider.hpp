@@ -60,6 +60,8 @@ struct DecisionContext {
     GameTime now;
     std::string perception;
     std::string memories;
+    std::string knowledge;
+    std::string experiences;
     std::string character;
     std::string internalDrives;
     std::string externalStimuli;

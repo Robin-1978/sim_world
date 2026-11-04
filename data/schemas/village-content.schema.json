@@ -376,6 +376,9 @@
                     "security.defend",
                     "security.evacuate",
                     "security.repair",
+                    "memory.append",
+                    "knowledge.assert",
+                    "experience.record",
                     "need.relieve",
                     "link.set_state",
                     "relationship.adjust"

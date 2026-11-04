@@ -709,6 +709,51 @@ void conflict_and_security_operators_change_facts_then_stimuli() {
            "security facts survive snapshot restore");
 }
 
+void knowledge_and_experience_keep_provenance() {
+    auto service = WorldService::load();
+    const auto promise = service.createPromise("player", "mira", "the ledger is safe", 1, "knowledge-source");
+    expect(promise.accepted && promise.event.has_value(), "a committed event can become a learning source");
+    const auto sourceSequence = promise.event->sequence;
+    const auto fact = service.assertKnownFact("mira", "lorn", "owes", "ledger", sourceSequence,
+                                              "direct", 0.9, "mira", "knowledge-1");
+    expect(fact.accepted, "an NPC can record a sourced knowledge fact");
+    const auto experience = service.recordExperience("mira", "social", "promise", "trust_lorn",
+                                                     "promise_created", sourceSequence, 0.8, true,
+                                                     "mira", "experience-1");
+    expect(experience.accepted, "an NPC can abstract a sourced personal experience");
+    expect(service.decisionContext("mira").knowledge.find("owes") != std::string::npos,
+           "knowledge is projected into the decision context");
+    expect(service.decisionContext("mira").experiences.find("trust_lorn") != std::string::npos,
+           "experience is projected into the decision context");
+    const auto snapshot = service.snapshotJson();
+    const auto restored = WorldService::fromSnapshot(snapshot);
+    expect(restored.state().npcs.at("mira").knowledge.size() == 1 &&
+               restored.state().npcs.at("mira").knowledge.front().sourceSequence == sourceSequence,
+           "knowledge provenance survives snapshot restore");
+    expect(restored.state().npcs.at("mira").experiences.size() == 1 &&
+               restored.state().npcs.at("mira").experiences.front().sourceSequences.front() == sourceSequence,
+           "experience provenance survives snapshot restore");
+    const auto rejected = service.assertKnownFact("mira", "secret", "known", "yes", 999999,
+                                                  "direct", 1.0, "mira", "knowledge-invalid");
+    expect(!rejected.accepted && rejected.code == "unknown_knowledge_source",
+           "an NPC cannot invent a fact without a committed source event");
+}
+
+void successful_actions_automatically_create_experience() {
+    auto service = WorldService::load();
+    const auto turn = service.converse("mira", "please offer a ration", "experience-action");
+    expect(turn.accepted, "the action is committed before its experience is derived");
+    service.advanceMinutes(30);
+    const auto& experiences = service.state().npcs.at("mira").experiences;
+    expect(!experiences.empty() && experiences.front().domain == "action" &&
+               !experiences.front().sourceSequences.empty(),
+           "a successful action records a reusable experience with event provenance");
+    expect(std::any_of(service.state().events.begin(), service.state().events.end(), [](const auto& event) {
+               return event.type == "experience.observed";
+           }),
+           "automatic experience derivation is itself audited");
+}
+
 void runtime_loads_a_world_without_village_identifiers() {
     const std::filesystem::path fixtureRoot = std::filesystem::path(TIDE_MARKS_TEST_DATA_DIR) / "minimal-pack";
     auto service = WorldService::load(fixtureRoot.string());
@@ -851,6 +896,8 @@ int main() {
     run("resource_transfer_is_atomic_and_persistent", resource_transfer_is_atomic_and_persistent);
     run("movement_operator_obeys_authored_topology", movement_operator_obeys_authored_topology);
     run("conflict_and_security_operators_change_facts_then_stimuli", conflict_and_security_operators_change_facts_then_stimuli);
+    run("knowledge_and_experience_keep_provenance", knowledge_and_experience_keep_provenance);
+    run("successful_actions_automatically_create_experience", successful_actions_automatically_create_experience);
     run("runtime_loads_a_world_without_village_identifiers", runtime_loads_a_world_without_village_identifiers);
     run("npc_activity_slot_is_single_owner", npc_activity_slot_is_single_owner);
     run("evolution_proposals_are_governed", evolution_proposals_are_governed);

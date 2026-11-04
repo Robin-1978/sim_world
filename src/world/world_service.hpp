@@ -99,6 +99,17 @@ public:
     CommandResult moveNpc(const std::string& npcId, const std::string& destination,
                           const std::string& actor = kWorldActor,
                           const std::string& turnId = {});
+    CommandResult assertKnownFact(const std::string& npcId, const std::string& subject,
+                                  const std::string& predicate, const std::string& value,
+                                  std::uint64_t sourceSequence, const std::string& scope,
+                                  double confidence, const std::string& actor = kWorldActor,
+                                  const std::string& turnId = {});
+    CommandResult recordExperience(const std::string& npcId, const std::string& domain,
+                                   const std::string& trigger, const std::string& action,
+                                   const std::string& outcome, std::uint64_t sourceSequence,
+                                   double confidence, bool personal = true,
+                                   const std::string& actor = kWorldActor,
+                                   const std::string& turnId = {});
     [[nodiscard]] std::optional<std::vector<std::string>> planRoute(const std::string& from,
                                                                      const std::string& to) const;
 

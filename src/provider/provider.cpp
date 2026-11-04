@@ -144,6 +144,7 @@ ProviderResponse LlamaCppProvider::decide(const DecisionContext& context, const 
                            {"decision_channel", context.channel}, {"decision_trigger", context.trigger},
                            {"speech_act", context.speechAct}, {"world_action_allowed", context.worldActionAllowed},
                            {"perception", context.perception}, {"memories", context.memories},
+                           {"knowledge", context.knowledge}, {"experiences", context.experiences},
                            {"character", context.character}, {"internal_drives", context.internalDrives},
                            {"drives", drives},
                            {"external_stimuli", context.externalStimuli},
@@ -168,6 +169,7 @@ ProviderResponse LlamaCppProvider::decide(const DecisionContext& context, const 
         "expected_relief may contain only need IDs from the supplied drives array; the valid need IDs for this request are " +
         Json(needIds).dump() + ". Use empty arrays/objects when none are supplied. "
         "confidence and expected_relief values must be numbers from 0 to 1. dialogue must be one or two natural first-person sentences spoken by the NPC, never a dump of context fields. "
+        "knowledge and experiences are NPC-scoped, sourced context; they may guide a proposal but never authorize bypassing current facts or constraints. "
         "motivation and tradeoffs explain the decision; they are not actions. Do not use markdown or add explanation outside the JSON object.";
     Json messages = Json::array();
     messages.push_back(Json{{"role", "system"}, {"content", systemPrompt}});
