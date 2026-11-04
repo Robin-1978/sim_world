@@ -19,8 +19,8 @@
 | NPC 状态机、行为树、全局/局部规划 | 已完成 | `src/npc/state_machine.*`, `src/npc/behavior_tree.*`, `src/navigation/*` |
 | 文本调试界面和 headless 回放 | 已完成 | `src/text_ui_main.cpp`, `src/headless_main.cpp` |
 | 内容包加载 | 已完成 | `WorldService::load/fromContent`, `data/`, `tests/fixtures/minimal-pack` |
-| 存档 schema 与事件因果链 | 已完成 | `world_state_json.*`, `save_schema_version=16`, `simulation_version=adaptive-runtime-p1.16`, 事件 schema 2、稳定 `event_id`、事务 `correlation_id`、直接 `causation_sequence`、Snapshot 因果完整性校验、`event_sequence`, `instance_id`, `inventories`, `relationships`, `social_groups`, `exchange_contracts`, `NpcActivity` 聚合、`lastSimulationTick/lastDriveTick`、`definition_id` 引用、实例/内容版本校验与可重放 overlay 栈；运行态不复制角色定义 |
-| 内驱/需求模型 | 需求域是内容定义的标签，村庄默认四域、Glass Orchard 使用 stewardship/ecological；显式满足配方和有界预期适应已实现，安全事实已支持冲突/威胁/防守/撤离/修复并通过 Stimulus 投射 | `src/npc/drive_system.*`, `NeedContent`, `NeedState`, `need.*` events, `tests/fixtures/glass-orchard-pack` |
+| 存档 schema 与事件因果链 | 已完成 | `world_state_json.*`, `save_schema_version=16`, `simulation_version=adaptive-runtime-p1.17`, 事件 schema 2、稳定 `event_id`、事务 `correlation_id`、直接 `causation_sequence`、Snapshot 因果完整性校验、`event_sequence`, `instance_id`, `inventories`, `relationships`, `social_groups`, `exchange_contracts`, `NpcActivity` 聚合、`lastSimulationTick/lastDriveTick`、`definition_id` 引用、实例/内容版本校验与可重放 overlay 栈；运行态不复制角色定义 |
+| 内驱/需求模型 | 需求域是内容定义的标签，村庄默认四域、Glass Orchard 使用 stewardship/ecological；`DriveEvaluation` 统一 urgency、effective weight、预期满足、证据置信度和效用贡献，同一行动满足多个需求时逐项求和；显式满足配方和有界预期适应已实现，安全事实已支持冲突/威胁/防守/撤离/修复并通过 Stimulus 投射 | `src/npc/drive_system.*`, `src/npc/goal_selector.*`, `NeedContent`, `NeedState`, `need.*` events, `tests/fixtures/glass-orchard-pack` |
 | 外驱/结构上下文 | 已实现结构化 Stimulus/Constraint、到期、习惯化和快照；结构演化治理、沙箱和版本化激活均已接入 | `DecisionContext.stimuli`, `constraints`, `WorldService::projectStimuli`, `src/evolution/evolution.*` |
 | LLM 解释与权衡 | 同步对话/自驱提案、channel 策略、Qwen JSON Schema、两阶段话语理解、失败关闭和异步 TurnQueue 已完成；有效上下文由主线程提交，过期结果只写审计事件 | `IntentProposal`, `IProvider`, `TurnQueue`, `decision_channels`, `WorldService::converse/deliberate/pumpAsyncTurns` |
 | 长过程执行 | 数据驱动时长、单一活动槽、配方声明的输入预留、完成/挂起/恢复事件和 Snapshot 恢复均已实现；挂起释放预留，刺激清除且资源可用时按原计划恢复并顺延完成时间；配置允许的高优先级过程可抢占低优先级预留，整组仲裁原子提交；Goal、Process、FSM、BT 是同一活动的四个投影 | `ProcessExecution.priority/preemptionPolicy`, `NpcActivity`, `reservation_mode`, `WorldService::planResourcePreemption`, `src/npc/state_machine.*` |
@@ -38,6 +38,7 @@
 - LLM 不可用时，自驱世界推进可走无语言理解的确定性候选回退；玩家对话失败关闭，不猜测语义、不写事实。
 - Snapshot/Replay 不访问 LLM；事件只在事务提交后发布。
 - 每个事件都有稳定 `event_id`；同事务事件共享 `correlation_id` 并以前序 `causation_sequence` 形成直接因果链。嵌套保存点失败时暂存事件与因果位置一起撤销，Snapshot 会拒绝越序或跨链 causation。
+- 候选行动的多需求收益按每个需求的 `effective_weight × expected_relief × evidence_confidence` 求和；排序分数和分项贡献进入 LLM 候选上下文与意图事件。
 - 需求缺口会随游戏时间增加，已提交动作会产生 `need.relieved`，跨阈值会产生 `need.critical`，需求状态可保存和恢复。
 - 运行态 NPC 只保存 `definition_id`；快照引用已删除的内容或不同 `content_version` 时会明确拒绝加载。
 - 第二个最小内容实例（`tests/fixtures/minimal-pack`，NPC `sable`）可以独立加载、保存和查询实体投影，证明 Runtime 不依赖村庄角色。

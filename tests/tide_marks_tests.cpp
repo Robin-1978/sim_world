@@ -11,6 +11,7 @@
 #include <cstdlib>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <condition_variable>
 #include <filesystem>
 #include <iostream>
@@ -211,6 +212,47 @@ void village_has_three_independent_npcs() {
     expect(service.content().sceneAsset == "../assets/blender/village.glb" &&
                service.content().cameraMode == "slanted_top_down",
            "presentation defaults are selected by content rather than the client");
+}
+
+void goal_ranking_aggregates_all_satisfied_needs() {
+    NpcState npc;
+    NeedContent food;
+    food.id = "food";
+    food.domain = "physiological";
+    food.dimension = "food";
+    food.weight = 1.0;
+    food.priority = 0.1;
+    food.criticalThreshold = 0.7;
+    food.satisfiers["shared"] = NeedSatisfier{0.4, {"relieve_need"}};
+    food.satisfiers["food_only"] = NeedSatisfier{0.4, {"relieve_need"}};
+    NeedContent social;
+    social.id = "social";
+    social.domain = "social";
+    social.dimension = "belonging";
+    social.weight = 0.7;
+    social.priority = 0.05;
+    social.criticalThreshold = 0.8;
+    social.satisfiers["shared"] = NeedSatisfier{0.3, {"relieve_need"}};
+    npc.needs["food"] = NeedState{0.9, GameTime{}, 0, 1.0, {{"shared", 0.4}, {"food_only", 0.4}}, 0.5};
+    npc.needs["social"] = NeedState{0.8, GameTime{}, 0, 0.7, {{"shared", 0.3}}, 0.5};
+    const std::vector<NeedContent> needs{food, social};
+    const auto foodEvaluation = DriveSystem::evaluate(food, npc.needs.at("food"), "shared");
+    const auto socialEvaluation = DriveSystem::evaluate(social, npc.needs.at("social"), "shared");
+    const auto ranking = GoalSelector::rank(npc, needs);
+    const auto shared = std::find_if(ranking.begin(), ranking.end(), [](const auto& choice) {
+        return choice.actionId == "shared";
+    });
+    const auto foodOnly = std::find_if(ranking.begin(), ranking.end(), [](const auto& choice) {
+        return choice.actionId == "food_only";
+    });
+    expect(shared != ranking.end() && foodOnly != ranking.end(), "goal ranking includes all satisfiers");
+    if (shared != ranking.end() && foodOnly != ranking.end()) {
+        const double expected = foodEvaluation.utilityContribution + socialEvaluation.utilityContribution;
+        expect(std::abs(shared->score - expected) < 1e-9,
+               "one action aggregates utility from every need it satisfies");
+        expect(shared->needContributions.size() == 2 && shared->score > foodOnly->score,
+               "multi-need utility changes candidate order and remains attributable");
+    }
 }
 
 void offline_progression_changes_village() {
@@ -2042,6 +2084,7 @@ int main() {
         std::cerr << "DONE " << name << " (" << elapsed << "s)\n";
     };
     run("village_has_three_independent_npcs", village_has_three_independent_npcs);
+    run("goal_ranking_aggregates_all_satisfied_needs", goal_ranking_aggregates_all_satisfied_needs);
     run("offline_progression_changes_village", offline_progression_changes_village);
     run("needs_are_data_driven_and_replayable", needs_are_data_driven_and_replayable);
     run("accepted_intent_runs_without_reasking_llm", accepted_intent_runs_without_reasking_llm);

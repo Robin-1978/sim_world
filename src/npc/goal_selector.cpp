@@ -17,15 +17,17 @@ std::vector<GoalChoice> GoalSelector::rank(const NpcState& npc,
         fallback.deficit = need.initialDeficit;
         fallback.sensitivity = need.weight;
         const NeedState current = state == npc.needs.end() ? fallback : state->second;
-        const double drive = DriveSystem::drive(need, current);
         for (const auto& [actionId, satisfier] : need.satisfiers) {
-            const auto learned = current.expectedRelief.find(actionId);
-            const double expected = learned == current.expectedRelief.end() ? satisfier.relief : learned->second;
-            const double score = drive * std::max(0.0, expected);
+            (void)satisfier;
+            const auto evaluation = DriveSystem::evaluate(need, current, actionId);
             auto found = ranked.find(actionId);
-            if (found == ranked.end() || score > found->second.score) {
-                ranked[actionId] = GoalChoice{actionId, score, need.domain + ":" + need.id};
+            if (found == ranked.end()) {
+                found = ranked.emplace(actionId, GoalChoice{actionId, 0.0, {}, {}}).first;
             }
+            found->second.score += evaluation.utilityContribution;
+            found->second.needContributions[need.id] = evaluation.utilityContribution;
+            found->second.reason += (found->second.reason.empty() ? "" : " + ") +
+                                    need.domain + ":" + need.id;
         }
     }
     for (const auto& [actionId, choice] : ranked) choices.push_back(choice);

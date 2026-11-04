@@ -510,7 +510,14 @@ DecisionContext WorldService::decisionContext(const std::string& npcId) const {
     for (const auto& choice : ranked) {
         const auto candidate = std::find_if(context.candidates.begin(), context.candidates.end(),
                                             [&choice](const auto& item) { return item.actionId == choice.actionId; });
-        if (candidate != context.candidates.end()) ordered.push_back(*candidate);
+        if (candidate != context.candidates.end()) {
+            auto rankedCandidate = *candidate;
+            rankedCandidate.utilityScore = choice.score;
+            for (const auto& [needId, contribution] : choice.needContributions) {
+                rankedCandidate.utilityContributions[needId] = contribution;
+            }
+            ordered.push_back(std::move(rankedCandidate));
+        }
     }
     for (const auto& candidate : context.candidates) {
         if (std::none_of(ordered.begin(), ordered.end(), [&candidate](const auto& item) {
@@ -2264,6 +2271,8 @@ DialogueTurn WorldService::commitTurn(const TurnRequest& request, ProviderRespon
              {"cited_stimulus_ids", response.proposal.citedStimulusIds},
              {"tradeoffs", response.proposal.tradeoffs},
              {"expected_relief", response.proposal.expectedRelief},
+             {"utility_score", candidate->utilityScore},
+             {"utility_contributions", candidate->utilityContributions},
              {"confidence", response.proposal.confidence}, {"provider", result.provider},
              {"context_world_revision", response.proposal.worldRevision},
              {"context_npc_state_version", response.proposal.npcStateVersion}});
@@ -2923,8 +2932,8 @@ WorldService WorldService::fromContentSnapshot(const WorldContentPack& content, 
         throw std::runtime_error("unsupported snapshot schema; expected save_schema_version=16");
     }
     if (!snapshot.contains("simulation_version") || !snapshot.at("simulation_version").is_string() ||
-        snapshot.at("simulation_version") != "adaptive-runtime-p1.16") {
-        throw std::runtime_error("unsupported snapshot simulation version; expected adaptive-runtime-p1.16");
+        snapshot.at("simulation_version") != "adaptive-runtime-p1.17") {
+        throw std::runtime_error("unsupported snapshot simulation version; expected adaptive-runtime-p1.17");
     }
     service.state_ = deserializeWorldState(snapshot);
     validateEventHistory(service.state_);

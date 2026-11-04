@@ -113,7 +113,9 @@ std::vector<NeedChange> DriveSystem::relieve(NpcState& npc,
     return changes;
 }
 
-double DriveSystem::drive(const NeedContent& definition, const NeedState& state) {
+DriveEvaluation DriveSystem::evaluate(const NeedContent& definition,
+                                      const NeedState& state,
+                                      const std::string& actionId) {
     const double deficit = std::clamp(state.deficit, 0.0, 1.0);
     const double base = deficit * deficit;
     const double threshold = std::clamp(definition.criticalThreshold, 0.0, 1.0);
@@ -122,7 +124,22 @@ double DriveSystem::drive(const NeedContent& definition, const NeedState& state)
         criticalMultiplier += 2.0 * (deficit - threshold) / (1.0 - threshold);
     }
     const double sensitivity = std::clamp(state.sensitivity, 0.0, 100.0);
-    return definition.priority + sensitivity * base * criticalMultiplier;
+    const double urgency = std::clamp(base * criticalMultiplier / 3.0, 0.0, 1.0);
+    const double effectiveWeight = std::max(0.0, definition.priority) + sensitivity * urgency;
+    const auto expectation = state.expectedRelief.find(actionId);
+    const auto authored = definition.satisfiers.find(actionId);
+    const double expectedRelief = expectation != state.expectedRelief.end()
+                                      ? std::clamp(expectation->second, 0.0, 1.0)
+                                      : authored == definition.satisfiers.end()
+                                            ? 0.0
+                                            : std::clamp(authored->second.relief, 0.0, 1.0);
+    const double confidence = std::clamp(state.evidenceConfidence, 0.0, 1.0);
+    return DriveEvaluation{urgency, effectiveWeight, expectedRelief, confidence,
+                           effectiveWeight * expectedRelief * confidence};
+}
+
+double DriveSystem::drive(const NeedContent& definition, const NeedState& state) {
+    return evaluate(definition, state, {}).effectiveWeight;
 }
 
 }  // namespace tide_marks

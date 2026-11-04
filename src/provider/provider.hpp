@@ -19,6 +19,8 @@ struct ActionCandidate {
     std::map<std::string, int> reservations;
     int priority{0};
     std::string preemptionPolicy{"none"};
+    double utilityScore{0.0};
+    Json utilityContributions = Json::object();
 };
 
 struct StructuralConstraintView {
