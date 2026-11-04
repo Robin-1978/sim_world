@@ -1393,6 +1393,21 @@ void sqlite_persistence_roundtrips_versioned_artifacts() {
                durable.at("processed_turn_ids").at(0) == "turn-1" &&
                durable.at("durable_replay") == replacement,
            "SQLite durable commit round-trips state, event history, idempotency and replay together");
+    bool missingSnapshotRejected = false;
+    try {
+        static_cast<void>(persistence.loadSnapshot("run/missing/snapshot"));
+    } catch (const std::runtime_error&) {
+        missingSnapshotRejected = true;
+    }
+    expect(missingSnapshotRejected, "SQLite reports a missing snapshot without leaking or double-closing its handle");
+    bool missingDurableCommitRejected = false;
+    try {
+        static_cast<void>(persistence.loadDurableCommit("run/missing/commit"));
+    } catch (const std::runtime_error&) {
+        missingDurableCommitRejected = true;
+    }
+    expect(missingDurableCommitRejected,
+           "SQLite reports a missing durable checkpoint without leaking or double-closing its handle");
     std::filesystem::remove(path);
 }
 #endif

@@ -221,7 +221,6 @@ Json SqlitePersistence::loadSnapshot(const std::string& path) const {
         const int step = sqlite3_step(statement);
         if (step == SQLITE_DONE) {
             sqlite3_finalize(statement);
-            close(database);
             throw std::runtime_error("SQLite snapshot does not exist: " + path);
         }
         check(step, database, "read snapshot");
@@ -278,7 +277,6 @@ Json SqlitePersistence::loadDurableCommit(const std::string& path) const {
         const int step = sqlite3_step(statement);
         if (step == SQLITE_DONE) {
             sqlite3_finalize(statement);
-            close(database);
             throw std::runtime_error("SQLite durable commit does not exist: " + path);
         }
         check(step, database, "read durable commit");

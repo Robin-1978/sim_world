@@ -23,3 +23,21 @@ jobs:
 
       - name: Check whitespace
         run: git diff --check
+
+  sqlite:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Configure with SQLite adapter
+        run: cmake -S . -B build-sqlite -G Ninja -DCMAKE_BUILD_TYPE=Debug -DTIDE_MARKS_ENABLE_SQLITE=ON
+
+      - name: Build
+        run: cmake --build build-sqlite -j2
+
+      - name: Test SQLite adapter
+        run: ctest --test-dir build-sqlite --output-on-failure
+
+      - name: Check whitespace
+        run: git diff --check
