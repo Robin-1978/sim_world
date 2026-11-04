@@ -140,7 +140,7 @@ P0-K 的提案校验、对话/自驱失败关闭、过期提案、重复提案�
 
 ### P2：World Intelligence 演化和沙箱（当前检查点已完成）
 
-Evolution Proposal Schema、提案库、EventLog 来源事实、回放沙箱、指标评估、审批策略、版本化 overlay、激活、快照恢复和栈式回滚已完成。提案的 `kind` 必须来自治理注册表，`evidence_event_sequences` 必须引用当前世界中已提交且不重复的事件，无法解析的证据在进入 Sandbox 前即被拒绝。内容包可声明 `resource.below/above`、`need.above`、`group_metric.below/above` 和 `promise.overdue` 异常规则；`AnomalyDetector` 输出带规则、观测值、阈值和最近事实事件证据的 JSON。`ScenarioProposal` 只允许对已建模的资源、组织指标和 NPC 需求做有边界的 delta，要求精确的内容版本和世界 Revision，从同一 Snapshot 分别运行 baseline/scenario，并输出指标、数值差、两侧事件和结果 Snapshot。CLI 的 `--anomalies` 与 `--experiment` 可复现实验，源世界不被修改。小店、利率和政策仍不是已实现机制；没有对应事实模型时会被拒绝，不能由 LLM 直接生成数值结果。
+Evolution Proposal Schema、提案库、EventLog 来源事实、回放沙箱、指标评估、审批策略、版本化 overlay、激活、快照恢复和栈式回滚已完成。提案的 `kind` 必须来自治理注册表，`evidence_event_sequences` 必须引用当前世界中已提交且不重复的事件，无法解析的证据在进入 Sandbox 前即被拒绝。`WorldEvolutionSystem` 现在向 Level 1 上下文提供有界的具体知识/经验条目及其来源、置信度和触发/结果字段，Level 2 只接收受权限裁剪的跨主体摘要；条目计数不再被当作演化证据。内容包可声明 `resource.below/above`、`need.above`、`group_metric.below/above` 和 `promise.overdue` 异常规则；`AnomalyDetector` 输出带规则、观测值、阈值和最近事实事件证据的 JSON。`ScenarioProposal` 只允许对已建模的资源、组织指标和 NPC 需求做有边界的 delta，要求精确的内容版本和世界 Revision，从同一 Snapshot 分别运行 baseline/scenario，并输出指标、数值差、两侧事件和结果 Snapshot。CLI 的 `--anomalies` 与 `--experiment` 可复现实验，源世界不被修改。小店、利率和政策仍不是已实现机制；没有对应事实模型时会被拒绝，不能由 LLM 直接生成数值结果。
 
 ### P3：可替换世界实例
 
