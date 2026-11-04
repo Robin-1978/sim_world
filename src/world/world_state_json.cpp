@@ -94,6 +94,8 @@ Json processJson(const ProcessExecution& process) {
                 {"reservation_mode", process.reservationMode},
                 {"reserved_resources", reserved},
                 {"required_resources", [&process] { Json required = Json::object(); for (const auto& [resource, amount] : process.requiredResources) required[resource] = amount; return required; }()},
+                {"priority", process.priority},
+                {"preemption_policy", process.preemptionPolicy},
                 {"proposal_world_revision", process.proposalWorldRevision},
                 {"proposal_npc_state_version", process.proposalNpcStateVersion}};
 }
@@ -126,6 +128,8 @@ ProcessExecution processFromJson(const Json& json) {
     for (auto it = required.begin(); it != required.end(); ++it) {
         process.requiredResources[it.key()] = it.value().get<int>();
     }
+    process.priority = jsonValue<int>(json, "priority", 0);
+    process.preemptionPolicy = jsonValue<std::string>(json, "preemption_policy", "none");
     process.proposalWorldRevision = jsonValue<std::uint64_t>(json, "proposal_world_revision", 0);
     process.proposalNpcStateVersion = jsonValue<std::uint64_t>(json, "proposal_npc_state_version", 0);
     return process;

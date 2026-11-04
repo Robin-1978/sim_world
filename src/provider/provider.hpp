@@ -17,6 +17,8 @@ struct ActionCandidate {
     std::string reservationMode{"none"};
     std::string recipeId;
     std::map<std::string, int> reservations;
+    int priority{0};
+    std::string preemptionPolicy{"none"};
 };
 
 struct StructuralConstraintView {

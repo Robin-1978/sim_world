@@ -209,9 +209,15 @@ private:
     void tickProcesses(const std::set<std::string>& dueNpcIds);
     void resumeSuspendedProcesses(const std::set<std::string>& dueNpcIds);
     void completeProcess(const std::string& npcId, ProcessExecution process);
-    void suspendProcess(const std::string& npcId, ProcessExecution& process, const std::string& reason);
+    void suspendProcess(const std::string& npcId, ProcessExecution& process, const std::string& reason,
+                        Json eventData = Json::object());
     void cancelProcess(const std::string& npcId, ProcessExecution& process, const std::string& reason);
     void releaseReservations(ProcessExecution& process);
+    // Plans every suspension needed to acquire the complete reservation set.
+    // The method is read-only; callers apply the plan only after it succeeds.
+    [[nodiscard]] std::optional<std::vector<std::string>> planResourcePreemption(
+        const std::string& requesterId, const std::map<std::string, int>& requirements,
+        int requesterPriority) const;
     void applyNeedRelief(const std::string& npcId, const std::string& actionId);
     [[nodiscard]] const NpcContent* authoredNpc(const std::string& npcId) const;
     [[nodiscard]] std::vector<std::string> overlayIds() const;

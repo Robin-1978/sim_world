@@ -54,6 +54,11 @@ struct BehaviorRecipeContent {
     std::vector<std::string> allowedActors;
     std::map<std::string, int> reservations;
     BehaviorNodeContent root;
+    // Resource arbitration is explicit content policy. A process with a
+    // higher priority may suspend lower-priority reserving processes only
+    // when preemption_policy is "lower_priority".
+    int priority{0};
+    std::string preemptionPolicy{"none"};
 };
 
 struct BehaviorRecipeRunResult {

@@ -163,6 +163,8 @@ struct ProcessExecution {
     std::string reservationMode{"none"};
     std::map<std::string, int> reservedResources;
     std::map<std::string, int> requiredResources;
+    int priority{0};
+    std::string preemptionPolicy{"none"};
     std::uint64_t proposalWorldRevision{0};
     std::uint64_t proposalNpcStateVersion{0};
 };

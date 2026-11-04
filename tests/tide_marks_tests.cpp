@@ -12,6 +12,7 @@
 #include <chrono>
 #include <filesystem>
 #include <iostream>
+#include <map>
 #include <memory>
 #include <set>
 #include <stdexcept>
@@ -120,6 +121,32 @@ public:
 private:
     std::vector<std::string> actions_;
     std::size_t next_{0};
+};
+
+class NpcActionProvider final : public IProvider {
+public:
+    explicit NpcActionProvider(std::map<std::string, std::string> actions)
+        : actions_(std::move(actions)) {}
+
+    ProviderResponse decide(const DecisionContext& context, const std::string&) override {
+        const auto action = actions_.find(context.npcId);
+        if (action == actions_.end()) return ProviderResponse{false, {}, {}, "unsupported_npc"};
+        IntentProposal proposal;
+        proposal.actionId = action->second;
+        proposal.speechAct = "request";
+        proposal.intent = action->second;
+        proposal.rationale = "A deterministic test provider selected the authored arbitration case.";
+        proposal.expectedOutcome = "Runtime validates the full resource acquisition plan.";
+        proposal.confidence = 1.0;
+        proposal.worldRevision = context.worldRevision;
+        proposal.npcStateVersion = context.npcStateVersion;
+        proposal.worldActionRequested = true;
+        return ProviderResponse{true, std::move(proposal), "The test provider selected an action.", {}};
+    }
+    [[nodiscard]] std::string name() const override { return "npc-scripted-test"; }
+
+private:
+    std::map<std::string, std::string> actions_;
 };
 
 void village_has_three_independent_npcs() {
@@ -241,6 +268,80 @@ void reservation_policy_is_authored_per_process() {
            "duration does not implicitly enable resource reservation");
     expect(process && process->reservedResources.empty() && service.state().resources.at("grain").reserved == 0,
            "a none-policy process leaves the shared resource ledger untouched");
+}
+
+void resource_preemption_is_declared_and_atomic() {
+    auto content = ContentPackLoader::load(ContentPackLoader::defaultRoot());
+    BehaviorRecipeContent lowRecipe;
+    lowRecipe.id = "low_grain_work";
+    lowRecipe.planId = lowRecipe.id;
+    lowRecipe.durationMinutes = 120;
+    lowRecipe.interruptible = true;
+    lowRecipe.interruptSalienceThreshold = 1.0;
+    lowRecipe.reservationMode = "input_resources";
+    lowRecipe.priority = 1;
+    lowRecipe.root = BehaviorNodeContent{
+        "sequence", "low_grain_work.sequence", "", Json::object(), 0,
+        {BehaviorNodeContent{"meta_action", "low_grain_work.consume", "consume_resource",
+                             Json{{"resource", "grain"}, {"amount", 100}}, 0, {}}}};
+    content.behaviorRecipes.push_back(lowRecipe);
+    auto lorn = std::find_if(content.npcs.begin(), content.npcs.end(), [](const auto& npc) {
+        return npc.definition.id == "lorn";
+    });
+    expect(lorn != content.npcs.end(), "the arbitration fixture has a second NPC");
+    if (lorn == content.npcs.end()) return;
+    lorn->actions.push_back(ActionCandidate{"low_grain_work", lowRecipe.planId,
+                                             "test", lowRecipe.durationMinutes,
+                                             lowRecipe.interruptible,
+                                             lowRecipe.interruptSalienceThreshold,
+                                             lowRecipe.reservationMode, lowRecipe.id,
+                                             {{"grain", 100}}, lowRecipe.priority,
+                                             lowRecipe.preemptionPolicy});
+    auto service = WorldService::fromContent(
+        content, std::make_unique<NpcActionProvider>(std::map<std::string, std::string>{
+            {"lorn", "low_grain_work"}, {"mira", "offer_ration"}}));
+    expect(service.converse("lorn", "start the low priority work", "preempt-low").accepted,
+           "a lower-priority process can reserve the shared resource");
+    expect(service.state().resources.at("grain").reserved == 100,
+           "the low-priority process owns the full reservation");
+    expect(service.converse("mira", "urgent ration", "preempt-high").accepted,
+           "a configured higher-priority process can acquire a lower-priority reservation");
+    expect(service.state().npcs.at("lorn").activity.status == ActivityStatus::Suspended &&
+               service.state().npcs.at("lorn").activity.process->interruptionReason == "resource_preempted",
+           "preemption suspends the selected lower-priority process");
+    expect(service.state().resources.at("grain").reserved == 5,
+           "preemption releases the victim reservation before acquiring the new one");
+    const auto preempted = std::count_if(service.state().events.begin(), service.state().events.end(),
+                                         [](const auto& event) {
+                                             return event.type == "npc.process_suspended" &&
+                                                    event.data.value("reason", "") == "resource_preempted";
+                                         });
+    expect(preempted == 1, "preemption is represented by one auditable suspension event");
+
+    auto impossibleContent = content;
+    for (auto& npc : impossibleContent.npcs) {
+        if (npc.definition.id != "mira") continue;
+        for (auto& action : npc.actions) {
+            if (action.actionId != "offer_ration") continue;
+            action.reservations["grain"] = 101;
+            action.preemptionPolicy = "lower_priority";
+            action.priority = 10;
+        }
+    }
+    auto impossible = WorldService::fromContent(
+        impossibleContent, std::make_unique<NpcActionProvider>(std::map<std::string, std::string>{
+            {"lorn", "low_grain_work"}, {"mira", "offer_ration"}}));
+    expect(impossible.converse("lorn", "start", "atomic-low").accepted,
+           "the atomicity case starts its victim process");
+    const auto rejected = impossible.converse("mira", "impossible", "atomic-high");
+    expect(!rejected.accepted && rejected.error == "insufficient_resource",
+           "an impossible preemption request is rejected");
+    expect(impossible.state().npcs.at("lorn").activity.status == ActivityStatus::Active &&
+               impossible.state().resources.at("grain").reserved == 100,
+           "a rejected request leaves the victim and reservations unchanged");
+    expect(std::none_of(impossible.state().events.begin(), impossible.state().events.end(),
+                        [](const auto& event) { return event.data.value("reason", "") == "resource_preempted"; }),
+           "an unfulfillable plan emits no partial preemption event");
 }
 
 void autonomous_deliberation_is_triggered_not_per_tick() {
@@ -460,10 +561,16 @@ void meta_actions_are_loaded_from_content() {
            "social and exchange operators are registered execution capabilities");
     const auto repair = std::find_if(content.behaviorRecipes.begin(), content.behaviorRecipes.end(),
                                      [](const auto& recipe) { return recipe.id == "repair_ferry"; });
+    const auto ration = std::find_if(content.behaviorRecipes.begin(), content.behaviorRecipes.end(),
+                                     [](const auto& recipe) { return recipe.id == "offer_ration"; });
     const auto rest = std::find_if(content.behaviorRecipes.begin(), content.behaviorRecipes.end(),
                                    [](const auto& recipe) { return recipe.id == "rest"; });
     expect(repair != content.behaviorRecipes.end() && repair->reservationMode == "input_resources",
            "a resource-consuming process opts into input reservation through content");
+    expect(repair != content.behaviorRecipes.end() && repair->priority == 20 &&
+               ration != content.behaviorRecipes.end() && ration->priority == 10 &&
+               ration->preemptionPolicy == "lower_priority",
+           "arbitration priority and preemption policy load from the behavior pack");
     expect(rest != content.behaviorRecipes.end() && rest->reservationMode == "none",
            "a long process without resource inputs does not reserve merely because it has duration");
 }
@@ -1621,6 +1728,7 @@ int main() {
         async_turn_queue_commits_results_with_current_context);
     run("high_salience_stimulus_interrupts_and_releases_reservations", high_salience_stimulus_interrupts_and_releases_reservations);
     run("reservation_policy_is_authored_per_process", reservation_policy_is_authored_per_process);
+    run("resource_preemption_is_declared_and_atomic", resource_preemption_is_declared_and_atomic);
     run("behavior_tree_supports_sequence_timeout_and_interrupt", behavior_tree_supports_sequence_timeout_and_interrupt);
     run("provider_and_action_validation_are_safe", provider_and_action_validation_are_safe);
     run("meta_actions_are_loaded_from_content", meta_actions_are_loaded_from_content);

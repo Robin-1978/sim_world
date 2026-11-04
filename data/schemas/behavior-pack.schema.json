@@ -1,0 +1,179 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Adaptive world behavior pack",
+  "type": "object",
+  "required": ["kind", "schema_version", "recipes"],
+  "properties": {
+    "kind": {
+      "const": "behavior_pack"
+    },
+    "schema_version": {
+      "const": 2
+    },
+    "meta_actions": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/meta_action"
+      }
+    },
+    "conditions": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/condition"
+      }
+    },
+    "recipes": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/recipe"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "meta_action": {
+      "type": "object",
+      "required": ["id", "category", "operator"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9_.-]+$"
+        },
+        "category": {
+          "type": "string",
+          "minLength": 1
+        },
+        "operator": {
+          "type": "string",
+          "description": "A generic operator registered by the stable Runtime."
+        },
+        "description": {
+          "type": "string"
+        },
+        "args": {
+          "type": "object"
+        }
+      },
+      "additionalProperties": false
+    },
+    "condition": {
+      "type": "object",
+      "required": ["id", "operator"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9_.-]+$"
+        },
+        "operator": {
+          "type": "string",
+          "description": "A predicate operator registered by the stable Runtime."
+        },
+        "args": {
+          "type": "object"
+        }
+      },
+      "additionalProperties": false
+    },
+    "behavior_node": {
+      "type": "object",
+      "required": ["type", "id"],
+      "properties": {
+        "type": {
+          "enum": ["sequence", "selector", "condition", "meta_action", "interruptible", "timeout"]
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "name": {
+          "type": "string"
+        },
+        "args": {
+          "type": "object"
+        },
+        "max_ticks": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "children": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/behavior_node"
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"type": {"enum": ["sequence", "selector"]}}},
+          "then": {
+            "required": ["children"],
+            "properties": {"children": {"minItems": 1}}
+          }
+        },
+        {
+          "if": {"properties": {"type": {"enum": ["condition", "meta_action"]}}},
+          "then": {"required": ["name"]}
+        },
+        {
+          "if": {"properties": {"type": {"enum": ["interruptible", "timeout"]}}},
+          "then": {
+            "required": ["children"],
+            "properties": {"children": {"minItems": 1, "maxItems": 1}}
+          }
+        },
+        {
+          "if": {"properties": {"type": {"const": "timeout"}}},
+          "then": {"properties": {"max_ticks": {"minimum": 1}}}
+        }
+      ],
+      "additionalProperties": false
+    },
+    "recipe": {
+      "type": "object",
+      "required": ["id", "root"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9_.-]+$"
+        },
+        "plan_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "duration_minutes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "interruptible": {
+          "type": "boolean",
+          "default": true
+        },
+        "interrupt_salience_threshold": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 1
+        },
+        "reservation_mode": {
+          "enum": ["none", "input_resources"],
+          "default": "none"
+        },
+        "priority": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 0,
+          "description": "Authored arbitration priority. Larger values win only when preemption_policy permits it."
+        },
+        "preemption_policy": {
+          "enum": ["none", "lower_priority"],
+          "default": "none",
+          "description": "lower_priority may suspend interruptible lower-priority reservation owners."
+        },
+        "root": {
+          "$ref": "#/$defs/behavior_node"
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

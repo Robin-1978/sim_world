@@ -683,6 +683,7 @@ void WorldService::resumeSuspendedProcesses(const std::set<std::string>& dueNpcI
             state_.resources[resource].reserved += amount;
             process.reservedResources[resource] = amount;
         }
+        const std::string previousReason = process.interruptionReason;
         if (process.suspendedAt.minute >= 0) {
             process.completesAt.minute += state_.now.minute - process.suspendedAt.minute;
         }
@@ -694,6 +695,7 @@ void WorldService::resumeSuspendedProcesses(const std::set<std::string>& dueNpcI
         addEvent("npc.process_resumed", npcId, process.actionId,
                  "A suspended process resumed after its interruption cleared",
                  Json{{"process_id", process.id}, {"action_id", process.actionId},
+                      {"previous_reason", previousReason},
                       {"completes_at", process.completesAt.minute}});
     }
 }
@@ -707,7 +709,7 @@ void WorldService::releaseReservations(ProcessExecution& process) {
 }
 
 void WorldService::suspendProcess(const std::string& npcId, ProcessExecution& process,
-                                  const std::string& reason) {
+                                  const std::string& reason, Json eventData) {
     releaseReservations(process);
     process.status = ProcessStatus::Suspended;
     process.behaviorStatus = "suspended";
@@ -718,10 +720,70 @@ void WorldService::suspendProcess(const std::string& npcId, ProcessExecution& pr
         setActivityStatus(found->second.activity, ActivityStatus::Suspended);
         applyNpcSignal(found->second, NpcSignal::CancelProcess);
     }
+    eventData["process_id"] = process.id;
+    eventData["action_id"] = process.actionId;
+    eventData["reason"] = reason;
+    eventData["progress"] = process.progress;
     addEvent("npc.process_suspended", npcId, process.actionId,
-             "A process was suspended by a high-salience stimulus",
-             Json{{"process_id", process.id}, {"action_id", process.actionId},
-                  {"reason", reason}, {"progress", process.progress}});
+             reason == "resource_preempted"
+                 ? "A lower-priority process released reservations for a higher-priority process"
+                 : "A process was suspended by a high-salience stimulus",
+             std::move(eventData));
+}
+
+std::optional<std::vector<std::string>> WorldService::planResourcePreemption(
+    const std::string& requesterId, const std::map<std::string, int>& requirements,
+    int requesterPriority) const {
+    std::map<std::string, int> remaining;
+    for (const auto& [resource, amount] : requirements) {
+        remaining[resource] = std::max(0, amount - availableResourceValue(resource));
+    }
+    const bool alreadyAvailable = std::all_of(remaining.begin(), remaining.end(),
+                                              [](const auto& entry) { return entry.second == 0; });
+    if (alreadyAvailable) return std::vector<std::string>{};
+
+    struct Candidate {
+        const std::string* npcId;
+        int priority;
+    };
+    std::vector<Candidate> candidates;
+    for (const auto& [npcId, npc] : state_.npcs) {
+        if (npcId == requesterId || !npc.activity.process ||
+            npc.activity.process->status != ProcessStatus::Running ||
+            !npc.activity.process->interruptible ||
+            npc.activity.process->priority >= requesterPriority) {
+            continue;
+        }
+        const bool ownsNeededReservation = std::any_of(
+            remaining.begin(), remaining.end(), [&npc](const auto& entry) {
+                const auto reserved = npc.activity.process->reservedResources.find(entry.first);
+                return entry.second > 0 && reserved != npc.activity.process->reservedResources.end() &&
+                       reserved->second > 0;
+            });
+        if (ownsNeededReservation) candidates.push_back(Candidate{&npcId, npc.activity.process->priority});
+    }
+    std::sort(candidates.begin(), candidates.end(), [](const auto& left, const auto& right) {
+        if (left.priority != right.priority) return left.priority < right.priority;
+        return *left.npcId < *right.npcId;
+    });
+
+    std::vector<std::string> victims;
+    for (const auto& candidate : candidates) {
+        const auto& process = state_.npcs.at(*candidate.npcId).activity.process.value();
+        bool contributes = false;
+        for (const auto& [resource, amount] : process.reservedResources) {
+            auto need = remaining.find(resource);
+            if (need == remaining.end() || need->second <= 0 || amount <= 0) continue;
+            contributes = true;
+            need->second = std::max(0, need->second - amount);
+        }
+        if (contributes) victims.push_back(*candidate.npcId);
+        if (std::all_of(remaining.begin(), remaining.end(),
+                        [](const auto& entry) { return entry.second == 0; })) {
+            return victims;
+        }
+    }
+    return std::nullopt;
 }
 
 void WorldService::cancelProcess(const std::string& npcId, ProcessExecution& process,
@@ -1812,16 +1874,36 @@ DialogueTurn WorldService::commitTurn(const TurnRequest& request, ProviderRespon
     std::map<std::string, int> reservations = candidate->reservationMode == "input_resources"
                                                    ? candidate->reservations
                                                    : std::map<std::string, int>{};
+    const std::string processId =
+        "process:" + request.npcId + ":" +
+        (request.turnId.empty() ? std::to_string(state_.events.size() + 1) : request.turnId);
+    if (candidate->preemptionPolicy == "lower_priority") {
+        // Plan all suspensions before mutating state, then apply one
+        // deterministic arbitration decision. This prevents an impossible
+        // request from leaving some victims suspended.
+        const auto victims = planResourcePreemption(request.npcId, reservations, candidate->priority);
+        if (!victims) {
+            transaction.rollback();
+            result.error = "insufficient_resource";
+            return result;
+        }
+        for (const auto& victimId : *victims) {
+            auto& victim = state_.npcs.at(victimId);
+            suspendProcess(victimId, *victim.activity.process, "resource_preempted",
+                           Json{{"preempted_by", request.npcId},
+                                {"preempting_process_id", processId},
+                                {"preempting_priority", candidate->priority}});
+        }
+    }
     for (const auto& [resource, amount] : reservations) {
         if (availableResourceValue(resource) < amount) {
+            transaction.rollback();
             result.error = "insufficient_resource";
             return result;
         }
     }
-    const std::string processId =
-        "process:" + request.npcId + ":" +
-        (request.turnId.empty() ? std::to_string(state_.events.size() + 1) : request.turnId);
     if (candidate->durationMinutes <= 0 && !applyActionEffects(request.npcId, candidate->actionId)) {
+        transaction.rollback();
         result.error = "insufficient_resource";
         return result;
     }
@@ -1850,6 +1932,8 @@ DialogueTurn WorldService::commitTurn(const TurnRequest& request, ProviderRespon
         process.reservationMode = candidate->reservationMode;
         process.reservedResources = reservations;
         process.requiredResources = reservations;
+        process.priority = candidate->priority;
+        process.preemptionPolicy = candidate->preemptionPolicy;
         process.proposalWorldRevision = response.proposal.worldRevision;
         process.proposalNpcStateVersion = response.proposal.npcStateVersion;
         mutableNpc.activity.process = std::move(process);

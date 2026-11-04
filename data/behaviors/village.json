@@ -9,6 +9,7 @@
       "interruptible": false,
       "interrupt_salience_threshold": 1.0,
       "reservation_mode": "input_resources",
+      "priority": 20,
       "root": {
         "type": "sequence",
         "id": "repair_ferry.sequence",
@@ -58,6 +59,8 @@
       "interruptible": true,
       "interrupt_salience_threshold": 0.85,
       "reservation_mode": "input_resources",
+      "priority": 10,
+      "preemption_policy": "lower_priority",
       "root": {
         "type": "sequence",
         "id": "offer_ration.sequence",

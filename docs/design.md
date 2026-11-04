@@ -171,7 +171,7 @@ utility(a) = Σ(drive_i × expected_relief_i)
 
 个体需求通过共享资源和关系汇聚为社会驱力：粮食安全、运输能力、记录完整性、信任、成员流失、公共设施可用性和组织目标。集体指标必须声明参与实体、资源池、目标值、时间窗口、聚合方式、冲突权重和失败后果，不能简单取 NPC 平均值。
 
-P0 只实现个体需求和公共资源，验证“资源变化—行动—他人受影响”的因果链；P1 已增加可配置的组织成员、集体指标、跨主体关系、原子资源交易、受约束的冲突/安全事实和近远场更新；P2 允许 World Intelligence 提出新的社会指标或策略，并通过历史回放沙箱比较效果。跨主体的资源抢占、复杂仲裁与更大规模协商仍是内容扩展项。自主性、胜任感和关系性作为横向调制因素，不压缩成单一需求层级。
+P0 只实现个体需求和公共资源，验证“资源变化—行动—他人受影响”的因果链；P1 已增加可配置的组织成员、集体指标、跨主体关系、原子资源交易、声明式资源预留/抢占、受约束的冲突/安全事实和近远场更新；P2 允许 World Intelligence 提出新的社会指标或策略，并通过历史回放沙箱比较效果。复杂合同仲裁与更大规模协商仍是内容扩展项。自主性、胜任感和关系性作为横向调制因素，不压缩成单一需求层级。
 
 ### 世界模型的基本对象
 
@@ -332,7 +332,7 @@ Command / IntentProposal / EvolutionProposal
 
 提交前失败不改变状态、Revision 或事件；提交后订阅者失败只能进入诊断计数，不能回滚事实。跨实体操作使用同一事务和版本检查；命令使用幂等键。
 
-事务只覆盖一次状态转换，不跨越整个长过程。长过程采用“启动事务 → 资源预留与 `ProcessExecution` → 时间推进/中断检查 → 完成或失败事务”的边界。完成时消费本过程拥有的预留并写入效果；被高显著性外驱打断时进入 `ActivityStatus::Suspended`，同一事务释放预留并记录 `npc.process_suspended`，保留目标、进度和计划需求；刺激失效且资源仍可满足时，当前活动生命周期逻辑按原计划重新预留并恢复，`completesAt` 顺延暂停时长，记录 `npc.process_resumed`。若资源被他人占用或目标已失效，则转为 `Cancelled`/`Failed`，必要时通过声明式补偿步骤处理已经发生的部分结果。这样既保持单次提交原子性，也允许捕鱼、维修、搬运、等待交易和移动持续多个 tick。
+事务只覆盖一次状态转换，不跨越整个长过程。长过程采用“启动事务 → 资源预留与 `ProcessExecution` → 时间推进/中断检查 → 完成或失败事务”的边界。完成时消费本过程拥有的预留并写入效果；被高显著性外驱打断时进入 `ActivityStatus::Suspended`，同一事务释放预留并记录 `npc.process_suspended`，保留目标、进度和计划需求；刺激失效且资源仍可满足时，当前活动生命周期逻辑按原计划重新预留并恢复，`completesAt` 顺延暂停时长，记录 `npc.process_resumed`。资源被更高优先级过程合法抢占时使用同一挂起/恢复生命周期，但暂停原因记录为 `resource_preempted`，事件同时引用抢占者和新过程；仲裁先只读计算完整资源方案，只有全部缺口都能由符合策略的过程释放时才一次提交。若资源无法满足或目标已失效，则请求在写入前拒绝，原过程继续运行，不能留下“暂停了一部分参与者”的中间状态。这样既保持单次提交原子性，也允许捕鱼、维修、搬运、等待交易和移动持续多个 tick。
 
 这里的回滚有四个明确边界：校验失败发生在写入前，直接拒绝且不改变事实；复合 `BehaviorRecipe` 在校验通过后若某个后续元动作失败，嵌套事务只撤销本次短效果提交里已经暂存的前置效果，不撤销 BT、Goal、FSM 或世界时间；长过程失败不倒退世界时间，而是释放预留、取消过程或执行声明式补偿，活动转为 `Failed` 后由 Goal/Drive 在下一次唤醒时重新规划；Evolution Overlay 回滚只恢复未来使用的内容/策略视图，已经发生的 WorldState 和 EventLog 永远保留。它们不能混称为把整个世界倒回上一个 tick。
 
@@ -364,7 +364,7 @@ Runtime 只向内容和模型暴露一组可审计的原子元动作。元动作
 
 资源账本是可复用的 World Simulation Framework 能力，不是村庄专用规则。Runtime 只实现通用的数量、容量、所有权、转移、生产、消耗、预留和释放算子；资源 ID、单位、容量、衰减和替代关系由 Content Pack 声明。资源能力是可选的，未声明资源的世界不会因为 Runtime 存在资源算子而产生资源事实。
 
-长过程是否预留输入由行为配方的 `reservation_mode` 声明，当前值为 `none` 或 `input_resources`。Runtime 不根据持续时间、资源名称或 NPC 身份推断预留策略。`input_resources` 只建立本过程的计划占用，完成时消费并释放，暂停/取消时释放；它不改变资源事实数量。抢占不是当前已实现的能力，因为抢占会同时影响另一个过程的生命周期、重规划、通知和补偿。未来应以独立的声明式分配策略实现，并记录请求、批准、被抢占过程和后续重规划事件。
+长过程是否预留输入由行为配方的 `reservation_mode` 声明，当前值为 `none` 或 `input_resources`。Runtime 不根据持续时间、资源名称或 NPC 身份推断预留策略。`input_resources` 只建立本过程的计划占用，完成时消费并释放，暂停/取消时释放；它不改变资源事实数量。资源仲裁同样完全由内容声明：`priority` 是非负分配优先级，`preemption_policy=none` 表示只接受当前可用资源，`lower_priority` 表示请求可暂停持有所需预留、优先级更低且声明为可中断的其他过程。相同或更高优先级不会被抢占，被选中的过程按优先级和稳定 ID 确定顺序，整组暂停在同一事务中完成。抢占者完成后，受害者只有在刺激条件清除且资源重新可用时才恢复，`completesAt` 顺延实际暂停时长；`npc.process_suspended` 和 `npc.process_resumed` 保存原因、抢占者、过程 ID、资源方案与优先级证据。该机制属于通用资源基础设施，村庄、港区和未来经济实例只配置数值和策略，不增加 C++ 特例。
 
 定时 `Activity` 负责在作者定义的时刻唤醒内容动作；它可以直接声明已注册 operator，也可以用 `operation=meta_action` 引用行为包中的元动作和参数。Activity 的全部效果在嵌套事务中执行，任何一个 operator 失败都会撤销本次活动的暂存效果，并留下 `activity.failed` 审计事件。JSON Behavior DSL 已把已注册效果组合为条件、顺序、选择、超时和中断节点；`production.execute` 已实现输入检查、输出容量检查和全量提交，长过程中断后的声明式补偿仍按具体内容声明。`MetaActionDefinition` 描述单个已注册事实变更，行为配方、过程与元动作由 ID 引用并分别校验。Game Instance 还可以声明 NPC/玩家库存初始值；这些是运行态事实的种子，不会写回 Content Pack。LLM 可以创造性提出新的行为组合、参数和目标，但必须使用已注册元动作；缺少表达力时生成 CapabilityProposal。整条计划先在暂存事务中汇总成本、预留和效果，不能逐个元动作直接写 WorldState。
 
@@ -387,7 +387,7 @@ IntentProposal + BehaviorRecipe
 
 ## 8. JSON 内容、行为和提案契约
 
-Content Pack、Game Instance、Intelligence Profile、Behavior DSL、Evolution/Scenario Proposal、Snapshot、EventLog 和 LLM 结构化输出统一使用 JSON，并带 `kind`、`schema_version`、版本身份和稳定 ID。当前 NPC 需求使用 `data/schemas/npc-content.schema.json`，LLM 意图使用 `data/schemas/intent-proposal.schema.json`；世界拓扑、实体和可选 `scene_asset/camera` 表现配置使用 `data/schemas/village-content.schema.json`。`scene_asset` 相对于 Content Pack 根目录解析，客户端当前支持 `slanted_top_down` 与 `top_down` 两种相机模式。加载器检查重复 ID、缺失引用、连接端点、需求 satisfier 和 schema 版本；内容规则只能调用 Runtime 已注册的能力，不能加载任意脚本。客户端从当前内容包投影空间实体、连接、NPC 标记、资源 HUD 和可选场景资产，不按 `world_id` 或角色 ID 选择渲染代码。
+Content Pack、Game Instance、Intelligence Profile、Behavior DSL、Evolution/Scenario Proposal、Snapshot、EventLog 和 LLM 结构化输出统一使用 JSON，并带 `kind`、`schema_version`、版本身份和稳定 ID。当前 NPC 需求使用 `data/schemas/npc-content.schema.json`，LLM 意图使用 `data/schemas/intent-proposal.schema.json`，行为配方、节点、优先级和抢占策略使用 `data/schemas/behavior-pack.schema.json`；世界拓扑、实体和可选 `scene_asset/camera` 表现配置使用 `data/schemas/village-content.schema.json`。`scene_asset` 相对于 Content Pack 根目录解析，客户端当前支持 `slanted_top_down` 与 `top_down` 两种相机模式。加载器检查重复 ID、缺失引用、连接端点、需求 satisfier 和 schema 版本；内容规则只能调用 Runtime 已注册的能力，不能加载任意脚本。客户端从当前内容包投影空间实体、连接、NPC 标记、资源 HUD 和可选场景资产，不按 `world_id` 或角色 ID 选择渲染代码。
 
 Behavior DSL 只组合注册节点、条件和元动作，例如：
 
@@ -407,6 +407,8 @@ Behavior DSL 只组合注册节点、条件和元动作，例如：
   "id": "unload_crate",
   "allowed_actors": ["role:dockworker"],
   "reservation_mode": "input_resources",
+  "priority": 20,
+  "preemption_policy": "lower_priority",
   "root": {
     "type": "sequence",
     "children": [

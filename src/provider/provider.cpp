@@ -149,7 +149,9 @@ ProviderResponse LlamaCppProvider::decide(const DecisionContext& context, const 
                                   {"label", candidate.label}, {"duration_minutes", candidate.durationMinutes},
                                   {"interruptible", candidate.interruptible},
                                   {"interrupt_salience_threshold", candidate.interruptSalienceThreshold},
-                                  {"reservation_mode", candidate.reservationMode}});
+                                  {"reservation_mode", candidate.reservationMode},
+                                  {"priority", candidate.priority},
+                                  {"preemption_policy", candidate.preemptionPolicy}});
     }
     Json stimuli = Json::array();
     for (const auto& stimulus : context.stimuli) {
