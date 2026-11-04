@@ -40,7 +40,7 @@
 | Revision 与世界时钟 | 已完成本次修正 | `world_revision` 每个已提交根状态转换只增加一次；无事件的分钟推进会令旧异步提案失效；同事务事件共享 Revision；回滚不推进 Revision |
 | Activity 生命周期不变量 | 已完成本次修正 | `proposed` 只能是空槽；非空 Goal/Process 身份和阶段投影必须一致；Snapshot 遇到非法组合直接拒绝 |
 | 提交效果 Replay | 已完成最小闭环 | 显式生成 Replay Package 时保存基线、聚合 JSON Patch、事件范围、Revision 和状态摘要；`replay()` 实际应用 Patch、追加事件并验证最终 Snapshot；仍明确不是 Event Sourcing，逐领域事件 reducer 属于后续 |
-| Persistence Adapter | 原型边界已冻结 | `IWorldPersistence` 与可注入 `JsonFilePersistence` 已接入 Snapshot/Replay；在满足 ADR 触发条件时以 SQLite 单事务提交状态、事件、Revision、幂等记录和 Overlay |
+| Persistence Adapter | 原型适配器已完成，生产 durable commit 未完成 | `IWorldPersistence` 同时支持默认 `JsonFilePersistence` 与构建可选的 `SqlitePersistence`；SQLite 已对 Snapshot/Replay 工件做单事务替换与读回回归，但 WorldState、事件、Revision、幂等记录和 Overlay 的统一 durable commit 仍按 ADR 作为后续阶段 |
 | WorldService 职责拆分 | 未完成 | 先抽 `TransactionManager`、`EventJournal`、`SimulationScheduler`、`IntelligenceCoordinator`，事实写入仍只经统一事务边界；不做微服务 |
 | 事件驱动调度 | 未完成 | 直接跳到下一日程/完成/截止边界；大规模推进不按分钟全量遍历和备份全部 WorldState，同时通过分区等价性回归 |
 | ECS 定位 | 已冻结为投影模型 | `WorldState` 是事实权威，`EntityRegistry` 是当前已知类型的查询投影；自定义 Component 进入权威持久化前，不宣称支持通用动态 ECS |
@@ -163,7 +163,7 @@ Evolution Proposal Schema、提案库、EventLog 来源事实、回放沙箱、�
 | P1 社会与通用 operator | 纵向完成 | 合同、交易、生产、移动、安全、知识/经验和资源仲裁已有最小切片 |
 | P2 World Intelligence 演化治理 | 纵向完成 | Proposal→Validate→Sandbox→Approve→Overlay→Observe 已覆盖；Runtime Core 不在线热改 |
 | P3 可替换世界实例 | 纵向完成 | Port 与 Glass Orchard 已证明内容替换；继续增加内容规模而非 C++ 特例 |
-| 持久化生产化 | 原型阶段未完成 | 当前 JSON Snapshot/JSONL Replay 足够 P0-P3；满足 ADR 触发条件后实现 SQLite adapter |
+| 持久化生产化 | 原型阶段部分完成 | JSON 仍是默认开发/测试格式；可选 SQLite 已能事务化保存 Snapshot/Replay 工件。满足 ADR 触发条件后，把 WorldState、EventLog、Revision、幂等记录和 Overlay 接入同一 durable commit |
 | 商店、价格、利率、税费、政策和复杂仲裁 | 尚未建模 | 先定义对应事实、主体、规则和校准数据，再接入 Scenario/Evolution |
 | 大规模社会校准、多模型并发、分布式 Runtime | 尚未开始 | 不进入当前小村验证门槛 |
 | Runtime Core 自主修改/任意代码热加载 | 明确禁止 | 只能由开发者通过代码、测试、迁移和发布演化 |

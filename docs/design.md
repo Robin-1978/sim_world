@@ -329,7 +329,7 @@ Provider 的 thinking、reasoning budget、max tokens 和 timeout 只从版本�
 
 ## 7. Runtime 核心契约
 
-`WorldService` 是应用入口，`WorldState` 是事实，`EntityRegistry` 是投影，Domain Systems 执行规则。当前 P0 的唯一时间入口是 `WorldService::advanceMinutes`；未来可将同一契约抽出为 `WorldScheduler::advance_to`。`EventLog` 记录提交事实，`EventBus` 只通知已提交事件，View/Renderer 只读。Snapshot 与 JSONL Replay 通过可注入的 `IWorldPersistence` 写入；当前 `JsonFilePersistence` 先写临时文件、刷新并完成后再替换目标路径，避免进程中断留下半份存档。这保证文件替换的失败可见，但不把普通文件系统伪装成跨数据库事务。当前原型的 `data/` 只保存静态输入，运行存档写到外部 run 目录；持久化取舍和 SQLite 引入条件记录在 [ADR 0001](adr/0001-persistence-storage.md)。若未来采用独立数据库，WorldState、EventLog、Revision 和幂等记录必须迁移到同一 durable commit boundary，投影和 EventBus 仍在提交后执行。
+`WorldService` 是应用入口，`WorldState` 是事实，`EntityRegistry` 是投影，Domain Systems 执行规则。当前 P0 的唯一时间入口是 `WorldService::advanceMinutes`；未来可将同一契约抽出为 `WorldScheduler::advance_to`。`EventLog` 记录提交事实，`EventBus` 只通知已提交事件，View/Renderer 只读。Snapshot 与 JSONL Replay 通过可注入的 `IWorldPersistence` 写入；`JsonFilePersistence` 先写临时文件、刷新并完成后再替换目标路径，`SqlitePersistence`（构建发现 sqlite3 时可选）则把同名快照或 Replay 工件替换放在单个 SQLite 事务中。两者都只保存已提交表示，不产生第二份可写 WorldState；当前 SQLite 适配器也不宣称已经把 WorldState、EventLog、Revision 和幂等记录统一到 durable commit boundary。当前原型的 `data/` 只保存静态输入，运行存档写到外部 run 目录；持久化取舍和升级条件记录在 [ADR 0001](adr/0001-persistence-storage.md)。未来的生产化数据库仍应在提交后更新投影并发布 EventBus。
 
 Runtime Core 只保证实体、组件存储、事务、Revision、事件、调度、持久化、回放和权限；Needs、Drive、Perception、Goal、Behavior、Resource 和 Relationship 是可组合的 World Simulation Framework 能力。P0 可以把这组能力编译在同一进程中，但不能把村庄角色或某一套心理模型写进 Core。这样同一 Runtime 才能加载不同内容实例，且 LLM 只能通过已注册能力提出变化。
 

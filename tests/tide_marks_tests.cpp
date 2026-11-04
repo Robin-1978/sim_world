@@ -1241,6 +1241,29 @@ void persistence_adapter_receives_committed_representations() {
            "WorldService sends Replay lines through the same injectable persistence boundary");
 }
 
+#ifdef TIDE_MARKS_HAS_SQLITE
+void sqlite_persistence_roundtrips_versioned_artifacts() {
+    const auto path = (std::filesystem::temp_directory_path() / "tide_marks-persistence-test.sqlite").string();
+    std::filesystem::remove(path);
+    SqlitePersistence persistence(path);
+    const Json snapshot{{"save_schema_version", 18}, {"world_revision", 4}, {"content_version", "test-v1"}};
+    const std::vector<Json> firstReplay{
+        Json{{"kind", "replay_header"}, {"schema_version", 2}},
+        Json{{"kind", "transaction"}, {"world_revision", 4}}};
+    persistence.saveSnapshot("run/test/snapshot", snapshot);
+    persistence.saveReplay("run/test/replay", firstReplay);
+    expect(persistence.loadSnapshot("run/test/snapshot") == snapshot,
+           "SQLite persistence round-trips a versioned snapshot payload");
+    expect(persistence.loadReplay("run/test/replay") == firstReplay,
+           "SQLite persistence round-trips ordered replay lines");
+    const std::vector<Json> replacement{Json{{"kind", "replay_header"}, {"schema_version", 2}}};
+    persistence.saveReplay("run/test/replay", replacement);
+    expect(persistence.loadReplay("run/test/replay") == replacement,
+           "SQLite replay replacement is atomic for one run path");
+    std::filesystem::remove(path);
+}
+#endif
+
 void event_history_has_causal_identity() {
     auto service = WorldService::load(ContentPackLoader::defaultRoot(), std::make_unique<MockProvider>());
     service.converse("mira", "please offer a ration", "causal-ration");
@@ -2488,6 +2511,10 @@ int main() {
     run("snapshot_and_replay_are_deterministic", snapshot_and_replay_are_deterministic);
     run("persistence_adapter_receives_committed_representations",
         persistence_adapter_receives_committed_representations);
+#ifdef TIDE_MARKS_HAS_SQLITE
+    run("sqlite_persistence_roundtrips_versioned_artifacts",
+        sqlite_persistence_roundtrips_versioned_artifacts);
+#endif
     run("event_history_has_causal_identity", event_history_has_causal_identity);
     run("physics_events_are_deterministic_and_drained", physics_events_are_deterministic_and_drained);
     run("event_bus_is_ordered_and_filterable", event_bus_is_ordered_and_filterable);

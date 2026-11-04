@@ -4,6 +4,12 @@ project(tide_marks LANGUAGES CXX)
 
 find_package(Threads REQUIRED)
 
+option(TIDE_MARKS_ENABLE_SQLITE "Build the optional SQLite persistence adapter when sqlite3 is available" ON)
+if(TIDE_MARKS_ENABLE_SQLITE)
+    find_path(TIDE_MARKS_SQLITE_INCLUDE_DIR sqlite3.h)
+    find_library(TIDE_MARKS_SQLITE_LIBRARY NAMES sqlite3)
+endif()
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -88,6 +94,11 @@ target_include_directories(tide_marks_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/sr
 target_compile_definitions(tide_marks_core PRIVATE
     TIDE_MARKS_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/data")
 target_link_libraries(tide_marks_core PUBLIC nlohmann_json::nlohmann_json Threads::Threads)
+if(TIDE_MARKS_SQLITE_INCLUDE_DIR AND TIDE_MARKS_SQLITE_LIBRARY)
+    target_compile_definitions(tide_marks_core PUBLIC TIDE_MARKS_HAS_SQLITE=1)
+    target_include_directories(tide_marks_core PUBLIC ${TIDE_MARKS_SQLITE_INCLUDE_DIR})
+    target_link_libraries(tide_marks_core PUBLIC ${TIDE_MARKS_SQLITE_LIBRARY})
+endif()
 if(TIDE_MARKS_WARNINGS)
     if(MSVC)
         target_compile_options(tide_marks_core PRIVATE /W4 /permissive-)
