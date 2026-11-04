@@ -1,0 +1,25 @@
+name: build-and-test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  core:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake --preset default -DTIDE_MARKS_ENABLE_SQLITE=OFF
+
+      - name: Build
+        run: cmake --build --preset default -j2
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Check whitespace
+        run: git diff --check
