@@ -217,6 +217,13 @@ WorldService WorldService::fromContent(const WorldContentPack& content,
         group.relationships = authored.initialRelationships;
         service.state_.socialGroups.emplace(authored.id, std::move(group));
     }
+    if (instance != nullptr) {
+        for (const auto& [actor, resources] : instance->inventoryInitial) {
+            const auto inventoryId = actor == kPlayerId ? kPlayerId : npcEntityId(actor);
+            auto& inventory = service.state_.inventories[inventoryId];
+            for (const auto& [resource, amount] : resources) inventory[resource] = amount;
+        }
+    }
     service.rebuildEntityRegistry();
     Json ids = Json::array();
     for (const auto& authored : content.npcs) ids.push_back(authored.definition.id);
@@ -555,8 +562,24 @@ void WorldService::processActivity(const ActivityContent& activity) {
         if (availableResourceValue(resource) < amount) return;
     }
 
+    TransactionScope activityTransaction(*this);
     Json changes = Json::object();
     for (const auto& effect : activity.effects) {
+        if (effect.operation == "meta_action") {
+            BehaviorNodeContent node;
+            node.type = "meta_action";
+            node.id = activity.id + ":" + effect.metaActionId;
+            node.name = effect.metaActionId;
+            node.args = effect.args;
+            if (!applyMetaAction(activity.actor, effect.metaActionId, node, nullptr)) {
+                activityTransaction.rollback();
+                addEvent("activity.failed", activity.actor, activity.target,
+                         "A scheduled activity was rejected by a registered meta action",
+                         Json{{"activity_id", activity.id}, {"meta_action", effect.metaActionId}});
+                return;
+            }
+            continue;
+        }
         if (effect.operation == "need.relieve") {
             if (activity.actor != kWorldActor) applyNeedRelief(activity.actor, effect.effectAction);
             continue;
@@ -2337,12 +2360,12 @@ WorldService WorldService::fromContentSnapshot(const WorldContentPack& content, 
     const auto& snapshot = json.contains("state") ? json.at("state") : json;
     if (!snapshot.is_object() || !snapshot.contains("save_schema_version") ||
         !snapshot.at("save_schema_version").is_number_integer() ||
-        snapshot.at("save_schema_version").get<int>() != 13) {
-        throw std::runtime_error("unsupported snapshot schema; expected save_schema_version=13");
+        snapshot.at("save_schema_version").get<int>() != 14) {
+        throw std::runtime_error("unsupported snapshot schema; expected save_schema_version=14");
     }
     if (!snapshot.contains("simulation_version") || !snapshot.at("simulation_version").is_string() ||
-        snapshot.at("simulation_version") != "adaptive-runtime-p1.13") {
-        throw std::runtime_error("unsupported snapshot simulation version; expected adaptive-runtime-p1.13");
+        snapshot.at("simulation_version") != "adaptive-runtime-p1.14") {
+        throw std::runtime_error("unsupported snapshot simulation version; expected adaptive-runtime-p1.14");
     }
     service.state_ = deserializeWorldState(snapshot);
     if (!service.state_.activeOverlays.empty()) {

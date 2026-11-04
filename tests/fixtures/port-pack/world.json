@@ -1,0 +1,379 @@
+{
+  "kind": "world",
+  "content_version": "fixture-port-1.0",
+  "id": "port_world",
+  "display_name": "Harbor Exchange",
+  "initial_time": {
+    "day": 4,
+    "hour": 9
+  },
+  "drive_adaptation": {
+    "enabled": true,
+    "expectation_learning_rate": 0.25,
+    "max_expectation_step": 0.05,
+    "cooldown_minutes": 60
+  },
+  "stimulus_policy": {
+    "max_active_per_npc": 8,
+    "novelty_decay": 0.5,
+    "habituation_step": 0.1,
+    "min_sensitivity": 0.5,
+    "max_sensitivity": 1.0,
+    "repeat_window_minutes": 240
+  },
+  "npc_deliberation": {
+    "enabled": true,
+    "min_stimulus_salience": 0.65,
+    "min_drive_pressure": 0.75,
+    "min_interrupt_salience": 0.85,
+    "cooldown_minutes": 240
+  },
+  "simulation_policy": {
+    "near_tick_minutes": 1,
+    "far_tick_minutes": 15
+  },
+  "promise_policy": {
+    "renegotiation_extension_minutes": 1440,
+    "broken": {
+      "promiser": {
+        "trust": -0.08
+      },
+      "promisee": {
+        "respect": -0.08
+      }
+    },
+    "refused": {
+      "actor": {
+        "trust": -0.04
+      }
+    },
+    "accepted": {
+      "actor": {
+        "trust": 0.03
+      }
+    }
+  },
+  "stimulus_rules": [
+    {
+      "id": "inspection",
+      "event_prefix": "fixture.inspection",
+      "category": "work_event",
+      "visibility": "world",
+      "relevance": 0.8,
+      "intensity": 0.6,
+      "urgency": 0.4,
+      "valence": 0.2,
+      "source_confidence": 1.0,
+      "ttl_minutes": 120
+    }
+  ],
+  "resources": {
+    "energy": {
+      "kind": "fuel",
+      "unit": "unit",
+      "owner": "world",
+      "initial": 7,
+      "minimum": 0,
+      "maximum": 20
+    },
+    "coolant": {
+      "kind": "material",
+      "unit": "unit",
+      "owner": "world",
+      "initial": 3,
+      "minimum": 0,
+      "maximum": 10
+    }
+  },
+  "activities": [
+    {
+      "id": "inspect_lift",
+      "trigger": "hour",
+      "hour": 10,
+      "actor": "sable",
+      "target": "workshop",
+      "event_type": "fixture.inspection",
+      "detail": "Sable inspects the service lift",
+      "effects": [
+        {
+          "operation": "need.relieve",
+          "action": "inspect"
+        }
+      ]
+    },
+    {
+      "id": "harbor_exchange",
+      "trigger": "hour",
+      "hour": 10,
+      "actor": "sable",
+      "target": "dock_cooperative",
+      "event_type": "harbor.exchange",
+      "detail": "Sable exchanges energy for coolant with Rhea and the cooperative records the settlement",
+      "effects": [
+        {
+          "operation": "meta_action",
+          "meta_action": "trade_goods",
+          "args": {
+            "seller": "self",
+            "buyer": "rhea",
+            "seller_resource": "energy",
+            "seller_amount": 1,
+            "buyer_resource": "coolant",
+            "buyer_amount": 1
+          }
+        },
+        {
+          "operation": "meta_action",
+          "meta_action": "raise_morale",
+          "args": {}
+        },
+        {
+          "operation": "meta_action",
+          "meta_action": "build_trust",
+          "args": {}
+        }
+      ]
+    },
+    {
+      "id": "rhea_trade_need",
+      "trigger": "hour",
+      "hour": 11,
+      "actor": "rhea",
+      "target": "dock_cooperative",
+      "event_type": "harbor.reciprocity",
+      "detail": "Rhea records the successful exchange",
+      "effects": [
+        {
+          "operation": "need.relieve",
+          "action": "trade_goods"
+        }
+      ]
+    }
+  ],
+  "entity_archetypes": [
+    {
+      "id": "fixture_object",
+      "kind": "object",
+      "metadata": {
+        "persistent": true
+      }
+    }
+  ],
+  "entities": [
+    {
+      "id": "workshop",
+      "kind": "zone",
+      "display_name": "Workshop",
+      "bounds": {
+        "min_x": 0,
+        "max_x": 2,
+        "min_z": 0,
+        "max_z": 2
+      },
+      "tags": [
+        "work"
+      ]
+    },
+    {
+      "id": "yard",
+      "kind": "zone",
+      "display_name": "Yard",
+      "bounds": {
+        "min_x": 3,
+        "max_x": 5,
+        "min_z": 0,
+        "max_z": 2
+      },
+      "tags": [
+        "public"
+      ]
+    },
+    {
+      "id": "market",
+      "kind": "zone",
+      "display_name": "Harbor Market",
+      "bounds": {
+        "min_x": 6,
+        "max_x": 9,
+        "min_z": 0,
+        "max_z": 3
+      },
+      "tags": [
+        "market",
+        "public"
+      ]
+    }
+  ],
+  "links": [
+    {
+      "id": "service_lift",
+      "kind": "lift",
+      "endpoints": [
+        "workshop",
+        "yard"
+      ],
+      "traversable": true,
+      "tags": [
+        "mechanism"
+      ]
+    }
+  ],
+  "social_groups": [
+    {
+      "id": "dock_cooperative",
+      "kind": "organization",
+      "name": "Dock Cooperative",
+      "metrics": {
+        "morale": 0.5,
+        "throughput": 0.4
+      },
+      "initial_members": {
+        "sable": "mechanic",
+        "rhea": "trader"
+      },
+      "initial_relationships": {}
+    }
+  ],
+  "conversation_policy": {
+    "default_world_action_allowed": false,
+    "speech_acts": [
+      {
+        "id": "greeting",
+        "world_action_allowed": false,
+        "patterns": [
+          "hello",
+          "hi ",
+          "hey",
+          "good morning",
+          "good evening",
+          "nice to meet",
+          "你好",
+          "您好",
+          "嗨",
+          "早上好",
+          "晚上好"
+        ]
+      },
+      {
+        "id": "farewell",
+        "world_action_allowed": false,
+        "patterns": [
+          "bye",
+          "goodbye",
+          "see you",
+          "再见",
+          "回头见"
+        ]
+      },
+      {
+        "id": "promise",
+        "world_action_allowed": true,
+        "patterns": [
+          "promise",
+          "承诺",
+          "答应",
+          "保证"
+        ]
+      },
+      {
+        "id": "negotiation",
+        "world_action_allowed": true,
+        "patterns": [
+          "negotiate",
+          "deal",
+          "trade",
+          "交换",
+          "谈谈",
+          "重谈"
+        ]
+      },
+      {
+        "id": "request",
+        "world_action_allowed": true,
+        "patterns": [
+          "can you",
+          "could you",
+          "would you",
+          "will you",
+          "please",
+          "帮我",
+          "请",
+          "能不能",
+          "可以",
+          "给我",
+          "spare",
+          "offer",
+          "give me",
+          "repair",
+          "fix",
+          "修理",
+          "维修"
+        ]
+      },
+      {
+        "id": "inquiry",
+        "world_action_allowed": false,
+        "patterns": [
+          "what ",
+          "what?",
+          "why ",
+          "why?",
+          "where ",
+          "where?",
+          "when ",
+          "who ",
+          "how ",
+          "doing",
+          "日志",
+          "什么",
+          "为什么",
+          "哪里",
+          "谁",
+          "怎么",
+          "吗",
+          "？",
+          "?"
+        ]
+      },
+      {
+        "id": "command",
+        "world_action_allowed": true,
+        "patterns": [
+          "stop",
+          "go ",
+          "move",
+          "tell me",
+          "告诉我",
+          "停止",
+          "走开"
+        ]
+      }
+    ]
+  },
+  "conversation_channel": "player_dialogue",
+  "autonomous_channel": "npc_autonomous_intent",
+  "decision_channels": [
+    {
+      "id": "player_dialogue",
+      "conversation": true,
+      "classify_speech_act": true,
+      "default_world_action_allowed": false,
+      "default_speech_act": "statement",
+      "event_type": "dialogue.turn",
+      "memory_kind": "conversation",
+      "event_target": "player",
+      "provider_policy": "player_dialogue"
+    },
+    {
+      "id": "npc_autonomous_intent",
+      "conversation": false,
+      "classify_speech_act": false,
+      "default_world_action_allowed": true,
+      "default_speech_act": "autonomous",
+      "event_type": "npc.intent",
+      "memory_kind": "intent",
+      "event_target": "self",
+      "provider_policy": "autonomous_reappraisal"
+    }
+  ]
+}

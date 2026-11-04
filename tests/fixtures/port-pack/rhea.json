@@ -1,0 +1,42 @@
+{
+  "id": "rhea",
+  "name": "Rhea",
+  "role": "harbor trader",
+  "home": "market",
+  "workplace": "market",
+  "public_goal": "Keep essential goods moving",
+  "hidden_goal": "Build a trusted exchange network",
+  "boundary": "Will not trade away the cooperative reserve",
+  "simulation_tier": "far",
+  "initial": {
+    "location": "market",
+    "strategy": "trade",
+    "peer_trust": {
+      "sable": 0.35
+    }
+  },
+  "needs": [
+    {
+      "id": "exchange_security",
+      "domain": "social",
+      "dimension": "reciprocity",
+      "initial_deficit": 0.15,
+      "decay_per_hour": 0.01,
+      "critical_threshold": 0.8,
+      "weight": 1.0,
+      "priority": 0.1,
+      "satisfiers": {
+        "trade_goods": {
+          "relief": 0.15,
+          "meta_actions": [
+            "trade_goods",
+            "relieve_need"
+          ]
+        }
+      }
+    }
+  ],
+  "schedule": {
+    "00:00-00:00": "market"
+  }
+}

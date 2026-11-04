@@ -1,0 +1,145 @@
+{
+  "kind": "behavior_pack",
+  "schema_version": 2,
+  "meta_actions": [
+    {
+      "id": "relieve_need",
+      "category": "need",
+      "operator": "need.relieve",
+      "description": "Apply authored need relief."
+    },
+    {
+      "id": "consume_resource",
+      "category": "resource",
+      "operator": "resource.consume",
+      "description": "Consume a configured resource."
+    },
+    {
+      "id": "trade_goods",
+      "category": "exchange",
+      "operator": "trade.execute"
+    },
+    {
+      "id": "raise_morale",
+      "category": "social",
+      "operator": "group.metric_adjust",
+      "args": {
+        "group": "dock_cooperative",
+        "metric": "morale",
+        "delta": 0.1,
+        "reason": "A fair harbor exchange improved cooperative morale"
+      }
+    },
+    {
+      "id": "build_trust",
+      "category": "social",
+      "operator": "relationship.adjust",
+      "args": {
+        "target": "rhea",
+        "trust": 0.1,
+        "respect": 0.05
+      }
+    }
+  ],
+  "conditions": [
+    {
+      "id": "resource_available",
+      "operator": "resource.available"
+    },
+    {
+      "id": "always",
+      "operator": "always"
+    }
+  ],
+  "recipes": [
+    {
+      "id": "inspect",
+      "plan_id": "inspect_lift",
+      "duration_minutes": 0,
+      "interruptible": true,
+      "interrupt_salience_threshold": 1.0,
+      "root": {
+        "type": "sequence",
+        "id": "inspect.sequence",
+        "children": [
+          {
+            "type": "condition",
+            "id": "inspect.always",
+            "name": "always"
+          },
+          {
+            "type": "meta_action",
+            "id": "inspect.relieve",
+            "name": "relieve_need",
+            "args": {
+              "action": "inspect"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "cool_service_lift",
+      "plan_id": "cool_service_lift",
+      "duration_minutes": 10,
+      "reservation_mode": "input_resources",
+      "root": {
+        "type": "sequence",
+        "id": "cool_service_lift.sequence",
+        "children": [
+          {
+            "type": "condition",
+            "id": "cool_service_lift.available",
+            "name": "resource_available",
+            "args": {
+              "resource": "energy",
+              "minimum": 2
+            }
+          },
+          {
+            "type": "meta_action",
+            "id": "cool_service_lift.consume",
+            "name": "consume_resource",
+            "args": {
+              "resource": "energy",
+              "amount": 2
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "trade_goods",
+      "plan_id": "harbor_exchange",
+      "duration_minutes": 0,
+      "interruptible": true,
+      "root": {
+        "type": "sequence",
+        "id": "trade_goods.sequence",
+        "children": [
+          {
+            "type": "meta_action",
+            "id": "trade_goods.trade",
+            "name": "trade_goods",
+            "args": {
+              "seller": "self",
+              "buyer": "sable",
+              "seller_resource": "coolant",
+              "seller_amount": 1,
+              "buyer_resource": "energy",
+              "buyer_amount": 1
+            }
+          },
+          {
+            "type": "meta_action",
+            "id": "trade_goods.relieve",
+            "name": "relieve_need",
+            "args": {
+              "action": "trade_goods"
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

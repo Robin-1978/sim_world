@@ -2,25 +2,70 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Adaptive world NPC content",
   "type": "object",
-  "required": ["id", "name", "role", "home", "workplace", "public_goal", "hidden_goal", "boundary", "needs"],
+  "required": [
+    "id",
+    "name",
+    "role",
+    "home",
+    "workplace",
+    "public_goal",
+    "hidden_goal",
+    "boundary",
+    "needs"
+  ],
   "properties": {
-    "id": {"type": "string", "pattern": "^[a-z0-9_-]+$"},
-    "name": {"type": "string"},
-    "role": {"type": "string"},
-    "home": {"type": "string"},
-    "workplace": {"type": "string"},
-    "public_goal": {"type": "string"},
-    "hidden_goal": {"type": "string"},
-    "boundary": {"type": "string"},
-    "voice": {"type": "string"},
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9_-]+$"
+    },
+    "name": {
+      "type": "string"
+    },
+    "role": {
+      "type": "string"
+    },
+    "home": {
+      "type": "string"
+    },
+    "workplace": {
+      "type": "string"
+    },
+    "public_goal": {
+      "type": "string"
+    },
+    "hidden_goal": {
+      "type": "string"
+    },
+    "boundary": {
+      "type": "string"
+    },
+    "voice": {
+      "type": "string"
+    },
     "initial": {
       "type": "object",
       "properties": {
-        "location": {"type": "string"},
-        "schedule_label": {"type": "string"},
-        "goal_stage": {"type": "integer", "minimum": 0},
-        "strategy": {"type": "string"},
-        "peer_trust": {"type": "object", "additionalProperties": {"type": "number", "minimum": 0, "maximum": 1}}
+        "location": {
+          "type": "string"
+        },
+        "schedule_label": {
+          "type": "string"
+        },
+        "goal_stage": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "strategy": {
+          "type": "string"
+        },
+        "peer_trust": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          }
+        }
       },
       "additionalProperties": false
     },
@@ -28,25 +73,77 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["id", "domain", "initial_deficit", "decay_per_hour", "critical_threshold", "weight", "priority", "satisfiers"],
+        "required": [
+          "id",
+          "domain",
+          "initial_deficit",
+          "decay_per_hour",
+          "critical_threshold",
+          "weight",
+          "priority",
+          "satisfiers"
+        ],
         "properties": {
-          "id": {"type": "string", "pattern": "^[a-z0-9_-]+$"},
-          "domain": {"enum": ["physiological", "psychological", "social", "cognitive"]},
-          "dimension": {"type": "string"},
-          "initial_deficit": {"type": "number", "minimum": 0, "maximum": 1},
-          "decay_per_hour": {"type": "number", "minimum": 0, "maximum": 1},
-          "critical_threshold": {"type": "number", "minimum": 0, "maximum": 1},
-          "weight": {"type": "number", "minimum": 0},
-          "priority": {"type": "number", "minimum": 0},
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z0-9_-]+$"
+          },
+          "domain": {
+            "enum": [
+              "physiological",
+              "psychological",
+              "social",
+              "cognitive"
+            ]
+          },
+          "dimension": {
+            "type": "string"
+          },
+          "initial_deficit": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "decay_per_hour": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "critical_threshold": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "weight": {
+            "type": "number",
+            "minimum": 0
+          },
+          "priority": {
+            "type": "number",
+            "minimum": 0
+          },
           "satisfiers": {
             "type": "object",
             "minProperties": 1,
             "additionalProperties": {
               "type": "object",
-              "required": ["relief", "meta_actions"],
+              "required": [
+                "relief",
+                "meta_actions"
+              ],
               "properties": {
-                "relief": {"type": "number", "minimum": 0, "maximum": 1},
-                "meta_actions": {"type": "array", "minItems": 1, "items": {"type": "string"}}
+                "relief": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                },
+                "meta_actions": {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": {
+                    "type": "string"
+                  }
+                }
               },
               "additionalProperties": false
             }
@@ -55,7 +152,18 @@
         "additionalProperties": false
       }
     },
-    "schedule": {"type": "object", "additionalProperties": {"type": "string"}}
+    "schedule": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "simulation_tier": {
+      "enum": [
+        "near",
+        "far"
+      ]
+    }
   },
   "additionalProperties": false
 }

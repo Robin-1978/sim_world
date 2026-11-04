@@ -162,6 +162,8 @@ struct EffectContent {
     std::string linkId;
     bool traversable{true};
     bool locked{false};
+    std::string metaActionId;
+    Json args = Json::object();
 };
 
 struct ActivityContent {
@@ -224,6 +226,7 @@ struct GameInstanceContent {
     std::string worldId;
     std::optional<GameTime> startTime;
     std::map<std::string, int> resourceInitial;
+    std::map<std::string, std::map<std::string, int>> inventoryInitial;
     std::map<std::string, NpcInstanceContent> npcs;
 };
 

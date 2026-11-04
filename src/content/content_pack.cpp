@@ -477,6 +477,15 @@ ActivityContent parseActivity(const Json& value, const std::string& path) {
     for (const auto& effectValue : value.at("effects")) {
         EffectContent effect;
         effect.operation = requiredString(effectValue, "operation", path);
+        if (effect.operation == "meta_action") {
+            effect.metaActionId = requiredString(effectValue, "meta_action", path);
+            effect.args = effectValue.value("args", Json::object());
+            if (!effect.args.is_object()) {
+                throw std::runtime_error("activity meta_action args must be an object in " + path);
+            }
+            result.effects.push_back(std::move(effect));
+            continue;
+        }
         if (!MetaActionRegistry::isExecutableOperator(effect.operation)) {
             throw std::runtime_error("unknown or unimplemented activity operator in " + path + ": " +
                                      effect.operation);
@@ -887,6 +896,15 @@ WorldContentPack ContentPackLoader::load(const std::string& rootPath) {
             throw std::runtime_error("activity actor is not an authored NPC: " + activity.actor);
         }
         for (const auto& effect : activity.effects) {
+            if (effect.operation == "meta_action") {
+                if (activity.actor == "world" || activity.actor.empty()) {
+                    throw std::runtime_error("meta_action activity effects require an NPC actor: " + activity.id);
+                }
+                if (!pack.metaActions.contains(effect.metaActionId)) {
+                    throw std::runtime_error("activity references an unknown meta action: " + effect.metaActionId);
+                }
+                continue;
+            }
             if (effect.operation != "need.relieve" && effect.operation != "link.set_state" &&
                 !pack.resources.contains(effect.resource)) {
                 throw std::runtime_error("activity effect references an unknown resource: " + effect.resource);
@@ -993,6 +1011,28 @@ WorldContentPack ContentPackLoader::load(const std::string& rootPath) {
                 throw std::runtime_error("instance resource initial is out of range: " + it.key());
             }
             instance.resourceInitial[it.key()] = amount;
+        }
+        const auto inventories = instanceJson.value("inventories", Json::object());
+        if (!inventories.is_object()) {
+            throw std::runtime_error("game instance inventories must be an object: " + instancePath);
+        }
+        for (auto actor = inventories.begin(); actor != inventories.end(); ++actor) {
+            if (actor.key() != "player" && !npcIds.contains(actor.key())) {
+                throw std::runtime_error("instance inventory references an unknown actor: " + actor.key());
+            }
+            if (!actor.value().is_object()) {
+                throw std::runtime_error("instance inventory entry must be an object: " + actor.key());
+            }
+            for (auto resource = actor.value().begin(); resource != actor.value().end(); ++resource) {
+                if (!pack.resources.contains(resource.key())) {
+                    throw std::runtime_error("instance inventory references an unknown resource: " + resource.key());
+                }
+                if (!resource.value().is_number_integer() || resource.value().get<int>() < 0) {
+                    throw std::runtime_error("instance inventory amount must be a non-negative integer: " +
+                                             actor.key() + "/" + resource.key());
+                }
+                instance.inventoryInitial[actor.key()][resource.key()] = resource.value().get<int>();
+            }
         }
         const auto instanceNpcs = instanceJson.value("npcs", Json::object());
         for (auto it = instanceNpcs.begin(); it != instanceNpcs.end(); ++it) {

@@ -1,0 +1,36 @@
+{
+  "kind": "game_instance",
+  "schema_version": 1,
+  "id": "fixture.port.instance",
+  "display_name": "Harbor Exchange",
+  "content_pack": "fixture.port",
+  "content_version": "fixture-port-1.0",
+  "world_id": "port_world",
+  "initial_time": {
+    "day": 8,
+    "hour": 9,
+    "minute": 0
+  },
+  "npcs": {
+    "sable": {
+      "location": "workshop",
+      "schedule_label": "workshop",
+      "goal_stage": 0,
+      "strategy": "inspect"
+    },
+    "rhea": {
+      "location": "market",
+      "schedule_label": "market",
+      "goal_stage": 0,
+      "strategy": "trade"
+    }
+  },
+  "inventories": {
+    "sable": {
+      "energy": 3
+    },
+    "rhea": {
+      "coolant": 2
+    }
+  }
+}

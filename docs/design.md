@@ -360,7 +360,7 @@ Runtime 只向内容和模型暴露一组可审计的原子元动作。元动作
 
 长过程是否预留输入由行为配方的 `reservation_mode` 声明，当前值为 `none` 或 `input_resources`。Runtime 不根据持续时间、资源名称或 NPC 身份推断预留策略。`input_resources` 只建立本过程的计划占用，完成时消费并释放，暂停/取消时释放；它不改变资源事实数量。抢占不是当前已实现的能力，因为抢占会同时影响另一个过程的生命周期、重规划、通知和补偿。未来应以独立的声明式分配策略实现，并记录请求、批准、被抢占过程和后续重规划事件。
 
-定时 `Activity` 负责在作者定义的时刻唤醒内容动作；当前 P0 的 JSON Behavior DSL 已把资源和需求效果组合为条件、顺序、选择、超时和中断节点。`ProductionProcess` 的完整输入/输出和补偿语义仍属于 P1；`MetaActionDefinition` 描述单个已注册事实变更。三者由 ID 引用并分别校验。LLM 可以创造性提出新的行为组合、参数和目标，但必须使用已注册元动作；缺少表达力时生成 CapabilityProposal。整条计划先在暂存事务中汇总成本、预留和效果，不能逐个元动作直接写 WorldState。
+定时 `Activity` 负责在作者定义的时刻唤醒内容动作；它可以直接声明已注册 operator，也可以用 `operation=meta_action` 引用行为包中的元动作和参数。Activity 的全部效果在嵌套事务中执行，任何一个 operator 失败都会撤销本次活动的暂存效果，并留下 `activity.failed` 审计事件。当前 P0 的 JSON Behavior DSL 已把资源和需求效果组合为条件、顺序、选择、超时和中断节点。`ProductionProcess` 的完整输入/输出和补偿语义仍属于 P1；`MetaActionDefinition` 描述单个已注册事实变更。三者由 ID 引用并分别校验。Game Instance 还可以声明 NPC/玩家库存初始值；这些是运行态事实的种子，不会写回 Content Pack。LLM 可以创造性提出新的行为组合、参数和目标，但必须使用已注册元动作；缺少表达力时生成 CapabilityProposal。整条计划先在暂存事务中汇总成本、预留和效果，不能逐个元动作直接写 WorldState。
 
 ```text
 IntentProposal + BehaviorRecipe
@@ -377,7 +377,7 @@ IntentProposal + BehaviorRecipe
 
 物理时间、游戏时间和事件时间分开。近场物理固定步长，NPC 事件唤醒或低频更新，远端跳到下一个有意义的日程、会面、资源结算或承诺截止。P0 由 `WorldService::advanceMinutes` 顺序推进分钟并在边界执行结算；未来的 `WorldScheduler::advance_to` 必须保持同一契约，需求结算、目标唤醒和资源冲突不能各自维护时钟。
 
-近场和远端共享 `MovementIntent`/`MovementResult`，包含起点、终点、路线、预计到达时间、资源消耗和失败原因；模拟等级只改变执行精度，不改变业务规则。Navigation 与 Physics 分离；物理观察必须经过 WorldService 才能成为业务事实。
+近场和远端共享 `MovementIntent`/`MovementResult`，包含起点、终点、路线、预计到达时间、资源消耗和失败原因；模拟等级只改变执行精度，不改变业务规则。内容包的 `simulation_policy.near_tick_minutes` 和 `far_tick_minutes` 决定 NPC 唤醒节奏，NPC 的需求衰减使用该 NPC 上次驱动结算时间到当前时间的实际跨度，因此远端跳过多个小时不会丢失需求变化。`SimulationMetrics` 记录近/远场唤醒、跳过检查和离线推进分钟数；快照序列化大小与事件数量由性能基准测试测量。Navigation 与 Physics 分离；物理观察必须经过 WorldService 才能成为业务事实。
 
 ## 8. JSON 内容、行为和提案契约
 
@@ -470,7 +470,7 @@ Behavior DSL 只组合注册节点、条件和元动作，例如：
 
 ## 9. 存档、回放和调试
 
-Snapshot 包含 `save_schema_version`、`simulation_version`、`content_version/hash`、`world_id`、`instance_id`、`world_revision`、`event_sequence`、游戏时间、实体生命周期、需求状态、社会关系、组织成员与指标、进行中的 `ProcessExecution`、幂等键和需要的 RNG 状态。运行态 NPC 只保存 `definition_id`，不复制内容包里的角色定义；角色名、角色、公开/隐藏目标等静态数据在加载时从当前内容包解析。`instance_id` 与 `content_version` 共同锁定这次运行所使用的 Game Instance 和 Content Pack，任何一个不匹配都直接拒绝恢复。`event_sequence` 是快照截断点，后续 EventLog 从其后追加。加载时校验 `definition_id` 可解析且 `content_version`、`instance_id` 与当前内容一致，任一不满足直接拒绝并报出差异，不回退到旧字段或静默重置。当前未发布，不保留旧存档兼容路径；schema 改变时同步更新存档读写、测试和文档。当前快照 schema 为 13，模拟版本为 `adaptive-runtime-p1.13`；实体库存与公共资源池分开保存，资源转移只能通过注册 operator 改变两者。激活中的 overlay 以有序记录保存 proposal ID、基线内容版本、激活版本和类型化操作；恢复时从基线 Content Pack 重放这些已批准操作，回滚也由同一版本栈重建。已经提交的世界事实和 EventLog 不随 overlay 回退。
+Snapshot 包含 `save_schema_version`、`simulation_version`、`content_version/hash`、`world_id`、`instance_id`、`world_revision`、`event_sequence`、游戏时间、实体生命周期、需求状态、社会关系、组织成员与指标、进行中的 `ProcessExecution`、NPC 的 `lastSimulationTick/lastDriveTick`、幂等键和需要的 RNG 状态。运行态 NPC 只保存 `definition_id`，不复制内容包里的角色定义；角色名、角色、公开/隐藏目标等静态数据在加载时从当前内容包解析。`instance_id` 与 `content_version` 共同锁定这次运行所使用的 Game Instance 和 Content Pack，任何一个不匹配都直接拒绝恢复。`event_sequence` 是快照截断点，后续 EventLog 从其后追加。加载时校验 `definition_id` 可解析且 `content_version`、`instance_id` 与当前内容一致，任一不满足直接拒绝并报出差异，不回退到旧字段或静默重置。当前未发布，不保留旧存档兼容路径；schema 改变时同步更新存档读写、测试和文档。当前快照 schema 为 14，模拟版本为 `adaptive-runtime-p1.14`；实体库存与公共资源池分开保存，资源转移只能通过注册 operator 改变两者。激活中的 overlay 以有序记录保存 proposal ID、基线内容版本、激活版本和类型化操作；恢复时从基线 Content Pack 重放这些已批准操作，回滚也由同一版本栈重建。已经提交的世界事实和 EventLog 不随 overlay 回退。
 
 P0 承诺检查点恢复：读取已提交 Snapshot 和记录的结构化响应，不调用 LLM。未来确定性模拟回放还要重跑命令、Provider 响应、上下文版本、RNG 和规则版本；不能把检查点恢复宣传成完整确定性重算。Bullet 只承诺固定环境下尽量复现，规则层和远端 LifeEvent 才是跨平台确定性目标。
 
@@ -494,7 +494,7 @@ P0 必须支持：任意最小内容包启动；NPC 无玩家继续运行；需�
 
 ### P1：潮门港内容和集体驱力
 
-增加港区、阵营、失踪任务、交易、资源预留、家庭/组织指标、近远场 LOD、完整 UI、物理机关和内容迁移。P1 才把村庄的资源冲突扩展为更大的社会网络。
+已完成一个可替换的潮门港纵向切片：独立 Content Pack 声明市场、两名 NPC、组织成员和集体指标；Game Instance 声明两方库存；定时 Activity 通过注册的 `trade.execute`、`group.metric_adjust` 和 `relationship.adjust` 形成“交换→组织士气→跨 NPC 信任”的事件链，并能从 Snapshot 恢复。近远场节奏和 `advance_to` 基准也已覆盖。家庭、失踪任务、完整 UI、物理机关和内容迁移仍是后续港区扩展，不进入 Runtime Core。
 
 ### P2：World Intelligence 演化和沙箱
 

@@ -428,7 +428,8 @@
                     "production.execute",
                     "need.relieve",
                     "link.set_state",
-                    "relationship.adjust"
+                    "relationship.adjust",
+                    "meta_action"
                   ]
                 },
                 "resource": {
@@ -454,6 +455,12 @@
                   "items": {
                     "type": "string"
                   }
+                },
+                "meta_action": {
+                  "type": "string"
+                },
+                "args": {
+                  "type": "object"
                 }
               },
               "additionalProperties": false
@@ -650,42 +657,81 @@
                 }
               }
             },
-    "conversation_channel": {
-      "type": "string",
-      "minLength": 1
-    },
-    "autonomous_channel": {
-      "type": "string",
-      "minLength": 1
-    },
-    "decision_channels": {
-      "type": "array",
-      "minItems": 1,
-      "items": {
-        "type": "object",
-        "required": [
-          "id",
-          "conversation",
-          "classify_speech_act",
-          "default_world_action_allowed",
-          "provider_policy"
-        ],
-        "properties": {
-          "id": {"type": "string", "minLength": 1},
-          "conversation": {"type": "boolean"},
-          "classify_speech_act": {"type": "boolean"},
-          "default_world_action_allowed": {"type": "boolean"},
-          "default_speech_act": {"type": "string"},
-          "event_type": {"type": "string", "minLength": 1},
-          "memory_kind": {"type": "string", "minLength": 1},
-          "event_target": {"type": "string", "minLength": 1},
-          "provider_policy": {"type": "string", "minLength": 1}
-        },
-        "additionalProperties": false
-      }
-    },
+            "conversation_channel": {
+              "type": "string",
+              "minLength": 1
+            },
+            "autonomous_channel": {
+              "type": "string",
+              "minLength": 1
+            },
+            "decision_channels": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "required": [
+                  "id",
+                  "conversation",
+                  "classify_speech_act",
+                  "default_world_action_allowed",
+                  "provider_policy"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "conversation": {
+                    "type": "boolean"
+                  },
+                  "classify_speech_act": {
+                    "type": "boolean"
+                  },
+                  "default_world_action_allowed": {
+                    "type": "boolean"
+                  },
+                  "default_speech_act": {
+                    "type": "string"
+                  },
+                  "event_type": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "memory_kind": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "event_target": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "provider_policy": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
             "additionalProperties": false
           }
+        }
+      },
+      "additionalProperties": false
+    },
+    "simulation_policy": {
+      "type": "object",
+      "properties": {
+        "near_tick_minutes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1440
+        },
+        "far_tick_minutes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1440
         }
       },
       "additionalProperties": false

@@ -1,0 +1,43 @@
+{
+  "kind": "dialogue_beats",
+  "schema_version": 1,
+  "beats": [
+    {
+      "id": "inspect_lift",
+      "npc": "sable",
+      "allowed_actions": [
+        "inspect",
+        "cool_service_lift"
+      ],
+      "behaviors": {
+        "inspect": {
+          "keywords": [
+            "inspect"
+          ]
+        },
+        "cool_service_lift": {
+          "keywords": [
+            "cool"
+          ]
+        }
+      }
+    },
+    {
+      "id": "rhea_exchange",
+      "npc": "rhea",
+      "allowed_actions": [
+        "trade_goods"
+      ],
+      "behaviors": {
+        "trade_goods": {
+          "keywords": [
+            "trade",
+            "exchange",
+            "market",
+            "交易"
+          ]
+        }
+      }
+    }
+  ]
+}

@@ -454,7 +454,7 @@ void snapshot_and_replay_are_deterministic() {
     const auto path = std::filesystem::temp_directory_path() / "tide_marks_test_replay.jsonl";
     service.writeReplay(path.string());
     const auto snapshot = service.snapshotJson();
-    expect(snapshot.at("save_schema_version").get<int>() == 13, "snapshot declares its schema version");
+    expect(snapshot.at("save_schema_version").get<int>() == 14, "snapshot declares its schema version");
     expect(snapshot.at("instance_id") == "tide_marks.village.instance",
            "snapshot records the concrete game instance identity");
     expect(snapshot.at("event_sequence").get<std::size_t>() == service.state().events.size(),
@@ -882,6 +882,56 @@ void social_groups_trade_and_relationships_are_shared_facts() {
            "social relations and group state survive snapshot restore");
 }
 
+void port_slice_is_a_replaceable_social_instance() {
+    const auto fixtureRoot = std::filesystem::path(TIDE_MARKS_TEST_DATA_DIR) / "port-pack";
+    auto service = WorldService::load(fixtureRoot.string());
+    expect(service.content().id == "fixture.port" && service.state().npcs.size() == 2,
+           "the harbor slice loads as a separate content pack with two NPCs");
+    expect(service.state().inventories.at("npc:sable").at("energy") == 3 &&
+               service.state().inventories.at("npc:rhea").at("coolant") == 2,
+           "game instance inventories seed actor-owned resources");
+    service.advanceMinutes(60);
+    expect(service.state().inventories.at("npc:sable").at("energy") == 2 &&
+               service.state().inventories.at("npc:sable").at("coolant") == 1 &&
+               service.state().inventories.at("npc:rhea").at("energy") == 1 &&
+               service.state().inventories.at("npc:rhea").at("coolant") == 1,
+           "a scheduled activity settles an authored exchange through the generic operator");
+    expect(service.state().socialGroups.at("dock_cooperative").metrics.at("morale") > 0.59 &&
+               service.state().npcs.at("sable").relationships.at("rhea").trust > 0.44,
+           "the exchange updates organization and cross-NPC relationship facts");
+    expect(std::any_of(service.state().events.begin(), service.state().events.end(), [](const auto& event) {
+               return event.type == "trade.settled";
+           }),
+           "the harbor exchange is replayable through a settled trade event");
+    const auto snapshot = service.snapshotJson();
+    const auto restored = WorldService::fromSnapshot(snapshot, fixtureRoot.string());
+    expect(restored.state().inventories.at("npc:sable").at("energy") ==
+               service.state().inventories.at("npc:sable").at("energy") &&
+               restored.state().inventories.at("npc:rhea").at("coolant") ==
+                   service.state().inventories.at("npc:rhea").at("coolant") &&
+               restored.state().socialGroups.at("dock_cooperative").metrics.at("morale") ==
+                   service.state().socialGroups.at("dock_cooperative").metrics.at("morale"),
+           "the replaceable harbor instance restores its social facts");
+}
+
+void offline_scheduler_baseline_is_measurable() {
+    auto village = WorldService::load();
+    auto harbor = WorldService::load(
+        (std::filesystem::path(TIDE_MARKS_TEST_DATA_DIR) / "port-pack").string());
+    const auto villageStart = village.state().now.minute;
+    const auto harborStart = harbor.state().now.minute;
+    village.advanceTo(GameTime{villageStart + 2 * kMinutesPerDay});
+    harbor.advanceTo(GameTime{harborStart + 2 * kMinutesPerDay});
+    const auto villageSnapshotBytes = village.snapshotJson().dump().size();
+    const auto harborSnapshotBytes = harbor.snapshotJson().dump().size();
+    expect(village.simulationMetrics().simulatedMinutes == 2 * kMinutesPerDay &&
+               harbor.simulationMetrics().simulatedMinutes == 2 * kMinutesPerDay,
+           "multiple world instances advance through the same advance_to contract");
+    expect(village.simulationMetrics().nearNpcTicks > village.simulationMetrics().farNpcTicks &&
+               harbor.simulationMetrics().farNpcTicks > 0 && villageSnapshotBytes > 0 && harborSnapshotBytes > 0,
+           "the baseline exposes near/far work and snapshot size for offline profiling");
+}
+
 }  // namespace
 
 void npc_activity_slot_is_single_owner() {
@@ -1080,6 +1130,8 @@ int main() {
     run("successful_actions_automatically_create_experience", successful_actions_automatically_create_experience);
     run("runtime_loads_a_world_without_village_identifiers", runtime_loads_a_world_without_village_identifiers);
     run("social_groups_trade_and_relationships_are_shared_facts", social_groups_trade_and_relationships_are_shared_facts);
+    run("port_slice_is_a_replaceable_social_instance", port_slice_is_a_replaceable_social_instance);
+    run("offline_scheduler_baseline_is_measurable", offline_scheduler_baseline_is_measurable);
     run("npc_activity_slot_is_single_owner", npc_activity_slot_is_single_owner);
     run("evolution_proposals_are_governed", evolution_proposals_are_governed);
     run("evolution_sandbox_isolated_and_versioned", evolution_sandbox_isolated_and_versioned);
