@@ -4,6 +4,8 @@
 #include "core/entity_registry.hpp"
 #include "core/types.hpp"
 #include "content/content_pack.hpp"
+#include "evolution/anomaly.hpp"
+#include "evolution/scenario.hpp"
 #include "world/components.hpp"
 #include "npc/action_validator.hpp"
 #include "npc/behavior_tree.hpp"

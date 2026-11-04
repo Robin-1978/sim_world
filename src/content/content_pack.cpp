@@ -2,6 +2,7 @@
 #include "world/meta_actions.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <fstream>
 #include <cstdlib>
 #include <sstream>
@@ -864,6 +865,41 @@ WorldContentPack ContentPackLoader::load(const std::string& rootPath) {
         rule.eventType = requiredString(item, "event_type", worldPath);
         pack.strategyRules.push_back(std::move(rule));
     }
+    const auto anomalyRules = world.value("anomaly_rules", Json::array());
+    if (!anomalyRules.is_array()) throw std::runtime_error("anomaly_rules must be an array: " + worldPath);
+    std::set<std::string> anomalyRuleIds;
+    for (const auto& item : anomalyRules) {
+        AnomalyRuleContent rule;
+        rule.id = requiredString(item, "id", worldPath);
+        if (!anomalyRuleIds.insert(rule.id).second) {
+            throw std::runtime_error("duplicate anomaly rule: " + rule.id);
+        }
+        rule.operation = requiredString(item, "operation", worldPath);
+        static const std::set<std::string> operations{
+            "resource.below", "resource.above", "need.above", "group_metric.below",
+            "group_metric.above", "promise.overdue"};
+        if (!operations.contains(rule.operation)) {
+            throw std::runtime_error("unsupported anomaly operation: " + rule.operation);
+        }
+        rule.subject = item.value("subject", "");
+        rule.metric = item.value("metric", "");
+        if (rule.operation != "promise.overdue" && rule.subject.empty()) {
+            throw std::runtime_error("anomaly rule needs a subject: " + rule.id);
+        }
+        if (!item.contains("threshold") || !item.at("threshold").is_number()) {
+            throw std::runtime_error("anomaly rule needs a numeric threshold: " + rule.id);
+        }
+        rule.threshold = item.at("threshold").get<double>();
+        if (!std::isfinite(rule.threshold)) {
+            throw std::runtime_error("anomaly rule threshold must be finite: " + rule.id);
+        }
+        rule.severity = item.value("severity", "warning");
+        if (rule.severity != "info" && rule.severity != "warning" && rule.severity != "critical") {
+            throw std::runtime_error("unsupported anomaly severity: " + rule.severity);
+        }
+        rule.description = item.value("description", rule.id);
+        pack.anomalyRules.push_back(std::move(rule));
+    }
     const auto dialoguePath = rootPath + "/" + requiredString(manifest, "dialogue", manifestPath);
     const auto beats = readJson(dialoguePath);
     for (const auto& recipe : pack.behaviorRecipes) {
@@ -948,6 +984,29 @@ WorldContentPack ContentPackLoader::load(const std::string& rootPath) {
     for (const auto& rule : pack.strategyRules) {
         if (!npcIds.contains(rule.npcId) || !npcIds.contains(rule.peerId)) {
             throw std::runtime_error("strategy rule references an unknown NPC: " + rule.id);
+        }
+    }
+    for (const auto& rule : pack.anomalyRules) {
+        if (rule.operation.starts_with("resource.") && !pack.resources.contains(rule.subject)) {
+            throw std::runtime_error("anomaly rule references an unknown resource: " + rule.id);
+        }
+        if (rule.operation.starts_with("need.")) {
+            if (!npcIds.contains(rule.subject)) {
+                throw std::runtime_error("anomaly rule references an unknown NPC: " + rule.id);
+            }
+            const auto npc = std::find_if(pack.npcs.begin(), pack.npcs.end(), [&rule](const auto& item) {
+                return item.definition.id == rule.subject;
+            });
+            const bool knownNeed = npc != pack.npcs.end() && std::any_of(
+                npc->needs.begin(), npc->needs.end(), [&rule](const auto& need) { return need.id == rule.metric; });
+            if (!knownNeed) throw std::runtime_error("anomaly rule references an unknown need: " + rule.id);
+        }
+        if (rule.operation.starts_with("group_metric.")) {
+            const auto group = std::find_if(pack.socialGroups.begin(), pack.socialGroups.end(),
+                                            [&rule](const auto& item) { return item.id == rule.subject; });
+            if (group == pack.socialGroups.end() || !group->metrics.contains(rule.metric)) {
+                throw std::runtime_error("anomaly rule references an unknown group metric: " + rule.id);
+            }
         }
     }
     for (const auto& group : pack.socialGroups) {

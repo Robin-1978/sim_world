@@ -375,5 +375,25 @@
       "event_target": "self",
       "provider_policy": "autonomous_reappraisal"
     }
+  ],
+  "anomaly_rules": [
+    {
+      "id": "cooperative_morale_low",
+      "operation": "group_metric.below",
+      "subject": "dock_cooperative",
+      "metric": "morale",
+      "threshold": 0.55,
+      "severity": "warning",
+      "description": "Cooperative morale is below the safe operating floor."
+    },
+    {
+      "id": "exchange_unmet",
+      "operation": "need.above",
+      "subject": "rhea",
+      "metric": "exchange_security",
+      "threshold": 0.8,
+      "severity": "critical",
+      "description": "Rhea cannot sustain reciprocal exchange."
+    }
   ]
 }

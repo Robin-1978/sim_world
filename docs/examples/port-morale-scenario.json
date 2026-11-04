@@ -1,0 +1,18 @@
+{
+  "kind": "scenario_proposal",
+  "schema_version": 1,
+  "id": "scenario.morale.pressure",
+  "source": "manual",
+  "base_content_version": "fixture-port-1.0",
+  "base_world_revision": 1,
+  "duration_minutes": 120,
+  "interventions": [
+    {
+      "operation": "group_metric.delta",
+      "subject": "dock_cooperative",
+      "metric": "morale",
+      "delta": -0.3,
+      "reason": "test a sustained morale shock"
+    }
+  ]
+}

@@ -64,7 +64,9 @@ add_library(tide_marks_core
     src/core/entity_registry.cpp
     src/core/types.cpp
     src/content/content_pack.cpp
+    src/evolution/anomaly.cpp
     src/evolution/evolution.cpp
+    src/evolution/scenario.cpp
     src/npc/action_validator.cpp
     src/npc/behavior_tree.cpp
     src/npc/behavior_recipe.cpp

@@ -190,6 +190,16 @@ struct StrategyRuleContent {
     std::string eventType;
 };
 
+struct AnomalyRuleContent {
+    std::string id;
+    std::string operation;
+    std::string subject;
+    std::string metric;
+    double threshold{0.0};
+    std::string severity{"warning"};
+    std::string description;
+};
+
 struct RelationshipDelta {
     double trust{0.0};
     double respect{0.0};
@@ -251,6 +261,7 @@ struct WorldContentPack {
     std::vector<SocialGroupContent> socialGroups;
     std::vector<ActivityContent> activities;
     std::vector<StrategyRuleContent> strategyRules;
+    std::vector<AnomalyRuleContent> anomalyRules;
     std::vector<SpatialContent> spatialEntities;
     std::vector<LinkContent> links;
     std::vector<EntityArchetypeContent> entityArchetypes;

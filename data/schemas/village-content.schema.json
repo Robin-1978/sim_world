@@ -735,6 +735,55 @@
         }
       },
       "additionalProperties": false
+    },
+    "anomaly_rules": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "operation", "threshold"],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "operation": {
+            "enum": [
+              "resource.below",
+              "resource.above",
+              "need.above",
+              "group_metric.below",
+              "group_metric.above",
+              "promise.overdue"
+            ]
+          },
+          "subject": {
+            "type": "string"
+          },
+          "metric": {
+            "type": "string"
+          },
+          "threshold": {
+            "type": "number"
+          },
+          "severity": {
+            "enum": [
+              "info",
+              "warning",
+              "critical"
+            ]
+          },
+          "description": {
+            "type": "string"
+          }
+        },
+        "allOf": [
+          {
+            "if": {"properties": {"operation": {"const": "promise.overdue"}}},
+            "then": {},
+            "else": {"required": ["subject"]}
+          }
+        ],
+        "additionalProperties": false
+      }
     }
   },
   "additionalProperties": true,

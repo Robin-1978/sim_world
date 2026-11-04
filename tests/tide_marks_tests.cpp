@@ -932,6 +932,51 @@ void offline_scheduler_baseline_is_measurable() {
            "the baseline exposes near/far work and snapshot size for offline profiling");
 }
 
+void world_intelligence_detects_anomalies_and_runs_counterfactuals() {
+    const auto fixtureRoot = std::filesystem::path(TIDE_MARKS_TEST_DATA_DIR) / "port-pack";
+    auto service = WorldService::load(fixtureRoot.string());
+    const auto initial = AnomalyDetector::scan(service.content(), service.state());
+    expect(initial.size() == 1 && initial.front().ruleId == "cooperative_morale_low" &&
+               initial.front().severity == "warning",
+           "deterministic anomaly rules report the depleted cooperative morale");
+    service.advanceMinutes(60);
+    expect(AnomalyDetector::scan(service.content(), service.state()).empty(),
+           "a committed exchange clears the modeled anomaly without LLM arbitration");
+    const ScenarioProposal proposal{
+        "scenario.morale.pressure", "llm", service.content().contentVersion, service.state().revision, 120,
+        {{ "group_metric.delta", "dock_cooperative", "morale", -0.3,
+           "Test a sustained morale shock without changing the source world" }}};
+    expect(ScenarioManager::validate(proposal, service).valid,
+           "a scenario may perturb only authored social facts");
+    const auto beforeVersion = service.state().contentVersion;
+    const auto beforeRevision = service.state().revision;
+    const auto experiment = ScenarioManager::run(proposal, service);
+    expect(experiment.passed && experiment.baselineMetrics.at("social_groups").is_object() &&
+               experiment.scenarioMetrics.at("social_groups").is_object() &&
+               experiment.delta.at("social_groups").at("dock_cooperative").at("morale").get<double>() < -0.29 &&
+               experiment.baselineMetrics.contains("inventories") &&
+               experiment.baselineMetrics.contains("locations") &&
+               experiment.baselineEvents.is_array() && experiment.events.is_array(),
+           "the counterfactual reports the modeled morale delta against a baseline run");
+    expect(service.state().revision == beforeRevision && service.state().contentVersion == beforeVersion,
+           "the source world remains unchanged by an exploratory scenario");
+    const ScenarioProposal invalid{"scenario.invalid", "llm", service.content().contentVersion,
+                                   service.state().revision, 10,
+                                   {{ "group_metric.delta", "missing_group", "morale", 1.0, "bad" }}};
+    expect(!ScenarioManager::validate(invalid, service).valid,
+           "scenario experiments reject facts that are not modeled by the world");
+    const auto stale = ScenarioProposal{"scenario.stale", "llm", service.content().contentVersion,
+                                       service.state().revision - 1, 10,
+                                       {{"group_metric.delta", "dock_cooperative", "morale", 0.1, "stale"}}};
+    const auto staleValidation = ScenarioManager::validate(stale, service);
+    expect(!staleValidation.valid && staleValidation.code == "revision_conflict",
+           "counterfactuals reject stale world revisions instead of silently branching from the current world");
+    expect(anomalyFindingToJson(initial.front()).at("rule_id") == "cooperative_morale_low" &&
+               scenarioExperimentResultToJson(experiment).at("proposal_id") == proposal.id &&
+               ScenarioManager::fromJson(ScenarioManager::toJson(proposal)).id == proposal.id,
+           "anomaly and scenario results have stable JSON audit representations");
+}
+
 }  // namespace
 
 void npc_activity_slot_is_single_owner() {
@@ -1132,6 +1177,8 @@ int main() {
     run("social_groups_trade_and_relationships_are_shared_facts", social_groups_trade_and_relationships_are_shared_facts);
     run("port_slice_is_a_replaceable_social_instance", port_slice_is_a_replaceable_social_instance);
     run("offline_scheduler_baseline_is_measurable", offline_scheduler_baseline_is_measurable);
+    run("world_intelligence_detects_anomalies_and_runs_counterfactuals",
+        world_intelligence_detects_anomalies_and_runs_counterfactuals);
     run("npc_activity_slot_is_single_owner", npc_activity_slot_is_single_owner);
     run("evolution_proposals_are_governed", evolution_proposals_are_governed);
     run("evolution_sandbox_isolated_and_versioned", evolution_sandbox_isolated_and_versioned);

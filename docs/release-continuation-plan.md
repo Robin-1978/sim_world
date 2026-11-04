@@ -5,9 +5,9 @@
 
 ## 当前目标
 
-维护已经完成的三 NPC 小村庄平台验证，并沿同一契约推进可替换世界 Runtime：需求/内驱随游戏时间变化，外部事件和结构约束进入决策上下文，规则或 LLM 产生意图，C++ 校验并提交事实，结果进入 EventLog、Snapshot、Replay 和文本调试界面。当前门槛是 P1 的异步决策、operator 扩展和社会模拟，不提前做商店、利率或政策实验。
+维护已经完成的三 NPC 小村庄平台与可替换港区实例，并在同一契约上补齐 World Intelligence 的可审计闭环：需求/内驱随游戏时间变化，外部事件和结构约束进入决策上下文，规则或 LLM 产生意图，C++ 校验并提交事实，结果进入 EventLog、Snapshot、Replay 和文本调试界面；异常规则做确定性检测，Scenario Proposal 从同一 Snapshot 对照运行且不污染源世界。下一阶段只推进 P3 的新世界实例与长期余波，不把尚未建模的商店、利率或政策伪装成可计算结果。
 
-当前 P0 验收已完成。下一步不是继续堆叠小村庄特例，而是沿稳定契约推进 P1：异步决策队列、已注册 operator 的经济/移动/承诺扩展和更大社会网络；P2 再实现带沙箱的 World Intelligence 演化。这些能力不回写 P0 的 Runtime Core 契约。
+当前 P0、P1 与 P2 检查点均已完成。P1 增加了异步决策队列、已注册 operator、港区社会切片和近远场调度基准；P2 增加了内容声明异常检测、反事实场景实验、结果 JSON 审计与 CLI 复现入口。这些能力均保持 P0 的 Runtime Core 契约。
 
 ## 当前检查点
 
@@ -27,7 +27,7 @@
 | 通用资源与实例活动 | 通用资源数量、可选输入预留、实体库存、资源转移、生产、原子交易、承诺和定时 Activity 已实现；Activity 可组合已注册 operator 并在嵌套事务中失败补偿，跨主体抢占仍属于后续工作 | `ResourceContent`, `ResourceState(amount,reserved)`, `WorldState.inventories`, `GameInstanceContent.inventoryInitial`, `reservation_mode`, `tradeResources`, `ActivityContent`；承诺关系增量与重谈时长已由 `promise_policy` 驱动 |
 | 社会关系与组织 | 已实现 NPC/玩家/组织四轴关系、声明式社会组成员与指标、交易和快照恢复；独立潮门港纵向切片已通过可替换 Content Pack 验证，集体驱力和港区扩展内容仍继续扩展 | `NpcState.relationships`, `WorldState.socialGroups`, `SocialGroupContent`, `relationship.adjust`, `trade.execute`, `tests/fixtures/port-pack` |
 | 元动作语义目录 | 已冻结；故事动作 ID 由内容包绑定到通用 operator，行为配方在运行时编译为 BT | `src/world/meta_actions.*`, `src/npc/behavior_recipe.*`, `data/behaviors/village.json` |
-| World Intelligence 演化提案 | 提案持久化、验证、沙箱、版本化 overlay 激活/恢复/栈式回滚已完成；异常检测和场景实验仍在 P2 | `src/evolution/evolution.*`, `src/world/world_service.*`, `data/schemas/evolution-proposal.schema.json`; 校验白名单、禁止 Core mutation、独立审批、快照重放已覆盖 |
+| World Intelligence 演化提案 | 提案持久化、验证、沙箱、版本化 overlay 激活/恢复/栈式回滚、内容声明异常检测和反事实场景实验已完成 | `src/evolution/evolution.*`, `src/evolution/anomaly.*`, `src/evolution/scenario.*`, `src/world/world_service.*`, `data/schemas/evolution-proposal.schema.json`, `data/schemas/scenario-proposal.schema.json`; 校验白名单、禁止 Core mutation、独立审批、快照重放和结果 JSON 审计已覆盖 |
 | 3D 表现和 Blender 场景 | 已有 P0 原型 | 不参与当前平台模型验收 |
 
 ## 已完成验证
@@ -65,7 +65,7 @@
 1. ~~将 `StructuralConstraint` 从字符串改为可引用的事实投影，覆盖访问、权限、所有权、容量、配方、合同和信息范围。~~ 已完成当前 P0 的资源、拓扑、能力白名单投影；更丰富的制度字段留给 P1。
 2. 已声明的常规结构变化走现有事务；新的规则/能力/配方/类型走 `EvolutionProposal`。
 3. ~~P0 的声明式结构提案必须由独立的开发/设计审批策略批准；LLM 可以提出，不得批准自己的提案。~~ 已完成 `EvolutionManager::approve`。
-4. Schema/不变量校验和审批记录已完成；密封回放沙箱、指标与版本化 overlay 激活属于 P2，当前只允许通过治理接口产生 Approved 状态。
+4. Schema/不变量校验和审批记录、密封回放沙箱、指标与版本化 overlay 激活均已完成；LLM 仍只能产生提案，独立审批后才可激活。
 
 ### P0-K：意图和行动契约（已完成 P0 基线）
 
@@ -108,9 +108,9 @@ P0-K 的提案校验、模型关闭回退、过期提案、重复提案、过程
 
 验收标准是同一 Runtime 加载港区内容后，交易和社会变化能由事件链解释，暂停/恢复/回放不调用 LLM，远端实体不会逐帧模拟。
 
-### P2：World Intelligence 演化和沙箱
+### P2：World Intelligence 演化和沙箱（当前检查点已完成）
 
-Evolution Proposal Schema、提案库、来源事实、回放沙箱、指标评估、审批策略、版本化 overlay、激活、快照恢复和栈式回滚已完成基础闭环。剩余工作是异常检测、Scenario Proposal，以及在已有经济/制度事实模型上的小店、利率和政策实验；不能由 LLM 直接生成数值结果。
+Evolution Proposal Schema、提案库、来源事实、回放沙箱、指标评估、审批策略、版本化 overlay、激活、快照恢复和栈式回滚已完成。内容包可声明 `resource.below/above`、`need.above`、`group_metric.below/above` 和 `promise.overdue` 异常规则；`AnomalyDetector` 输出带规则、观测值、阈值和最近事实事件证据的 JSON。`ScenarioProposal` 只允许对已建模的资源、组织指标和 NPC 需求做有边界的 delta，要求精确的内容版本和世界 Revision，从同一 Snapshot 分别运行 baseline/scenario，并输出指标、数值差、两侧事件和结果 Snapshot。CLI 的 `--anomalies` 与 `--experiment` 可复现实验，源世界不被修改。小店、利率和政策仍不是已实现机制；没有对应事实模型时会被拒绝，不能由 LLM 直接生成数值结果。
 
 ### P3：可替换世界实例
 
@@ -126,7 +126,7 @@ Evolution Proposal Schema、提案库、来源事实、回放沙箱、指标评�
 | P1-4 | 调度与性能基线 | 已完成：`advance_to` 边界、多个实例离线推进、近/远场唤醒、跳过检查和快照大小有回归基准 |
 | P2-1 | Evolution Sandbox | 已完成：从快照运行候选变化，输出指标、事件差异和来源，不污染原始 Pack |
 | P2-2 | Overlay 激活与回滚 | 已完成：内容/策略版本可审计、可观察，快照恢复后仍可按栈回退 |
-| P2-3 | 场景实验 | 小店、利率、政策只作用于已建模事实，并返回可解释结果 |
+| P2-3 | 场景实验 | 已完成当前通用边界：资源、组织指标、NPC 需求的声明式反事实实验；小店、利率、政策等具体机制待其事实模型落地后再接入 |
 | P3 | 新世界实例 | 第二个非村庄内容包完整运行，证明 Runtime 可替换 |
 
 ## 自动化验证命令
@@ -137,6 +137,8 @@ ctest --test-dir build --output-on-failure
 ./build/tide_marks_headless --scenario village --days 2 --provider mock --dump-events
 ./build/tide_marks_text --script docs/examples/village-session.txt --provider mock
 ./build/tide_marks_headless --scenario village --days 0 --profile data/intelligence-profile.json --provider profile
+./build/tide_marks_headless --anomalies --days 0
+./build/tide_marks_headless --content-root tests/fixtures/port-pack --experiment docs/examples/port-morale-scenario.json
 ```
 
 每次工作包完成后记录：内容版本、规则/模拟版本、Provider/模型（如有）、随机种子、命令、WorldEvent、Snapshot 截断点、Replay 摘要和失败原因。不得把 API Key 写入日志或回放工件。

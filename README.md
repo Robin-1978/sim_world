@@ -71,3 +71,21 @@ Player dialogue is configured with thinking off. Autonomous reappraisal, which w
 The provider only selects authored actions. If the server times out or returns invalid JSON, the game uses deterministic fallback dialogue.
 
 The design and continuation checkpoint are in [`docs/design.md`](docs/design.md) and [`docs/release-continuation-plan.md`](docs/release-continuation-plan.md).
+
+## World Intelligence checks and counterfactuals
+
+Anomaly rules are declared by a content pack and can be inspected without invoking an LLM:
+
+```bash
+./build/tide_marks_headless --content-root tests/fixtures/port-pack --anomalies --days 0
+```
+
+Scenario proposals are isolated runs from the current snapshot. They never mutate the source world and require an exact `base_world_revision` and `base_content_version`:
+
+```bash
+./build/tide_marks_headless \
+  --content-root tests/fixtures/port-pack \
+  --experiment docs/examples/port-morale-scenario.json
+```
+
+The command prints the applied levers, baseline/scenario metrics, numeric deltas, generated events, and the resulting snapshot as JSON. A proposal can only change facts for which the loaded content pack already declares a bounded intervention; missing economics or policy mechanisms are rejected instead of being invented by the model.

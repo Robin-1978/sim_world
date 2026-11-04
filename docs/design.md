@@ -262,7 +262,7 @@ Observe -> Understand / Evaluate -> Intent or Evolution Proposal
 
 Level 2 的“世界底座演化”只改变可声明、可验证的 Simulation Framework/Content Overlay：新的实体原型、组件组合、行为配方、社会策略、知识归纳或规则参数都先以 Proposal 进入快照沙箱，比较事件差异和指标，再由独立开发/设计审批激活。Entity、事务、事件、权限、回放和回滚这些 Runtime Core 不属于 LLM 可演化对象；需要新的 C++ 能力时只能形成 capability request，待开发者发布注册 operator。
 
-后续可用同一机制做场景实验：例如“在周边小区开一个小店”“提高利率”“发布一个政策”。LLM 把自然语言转成 `ScenarioProposal`，Validator 检查实体、参数和已注册机制，Sandbox 从快照克隆并运行确定性模拟，Runtime 输出收入、价格、库存、就业、迁移、关系和事件序列；LLM 只把这些已计算结果整理为假设、因果链、敏感参数和不确定性说明。缺少经济或社会机制时必须报告“无法评估”，不能用语言补造数值。这个能力属于后续平台验证，不进入小村庄 P0 的交付范围。
+同一机制可以承载场景实验：例如“在周边小区开一个小店”“提高利率”“发布一个政策”。LLM 把自然语言转成 `ScenarioProposal`，Validator 检查实体、参数和已注册机制，Sandbox 从同一快照克隆并运行 baseline/scenario，Runtime 输出资源、库存、组织指标、需求、位置、关系、承诺、异常和两侧事件序列；LLM 只把这些已计算结果整理为假设、因果链、敏感参数和不确定性说明。缺少经济或社会机制时必须报告“无法评估”，不能用语言补造数值。当前 P2 已实现资源、组织指标和 NPC 需求三类有界 intervention，以及面向不必填用的 CLI；小店、利率和政策只有在对应事实模型落地后才能增加专用 intervention。
 
 Provider 使用一个共享模型槽位和串行队列；本地 llama.cpp 优先，服务失败时规则台词继续运行。云 Provider 可用于调试或高质量表达，但不改变事实接口。API Key 不写入内容包、存档、日志、Prompt、崩溃报告或版本库。
 
@@ -498,7 +498,7 @@ P0 必须支持：任意最小内容包启动；NPC 无玩家继续运行；需�
 
 ### P2：World Intelligence 演化和沙箱
 
-实现 Proposal Schema、提案库、异常检测、回放沙箱、策略/内容 overlay、指标评估、审批策略、版本化激活、回滚和审计。先支持声明式能力和已有组件组合，不热加载任意代码。场景实验在这一阶段验证，不作为 P0 游戏功能门槛。
+已完成 Proposal Schema、提案库、异常检测、回放沙箱、策略/内容 overlay、指标评估、审批策略、版本化激活、回滚和审计。异常规则和 Scenario intervention 都是内容可声明、Runtime 可验证的通用边界；先支持声明式能力和已有组件组合，不热加载任意代码。场景实验不进入 P0 游戏门槛，缺少事实模型时明确拒绝。
 
 ### P3：群岛和可替换世界实例
 
