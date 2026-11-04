@@ -42,7 +42,7 @@
 | Activity 生命周期不变量 | 已完成本次修正 | `proposed` 只能是空槽；非空 Goal/Process 身份和阶段投影必须一致；Snapshot 遇到非法组合直接拒绝 |
 | 提交效果 Replay | 已完成最小闭环 | 显式生成 Replay Package 时保存基线、聚合 JSON Patch、事件范围、Revision 和状态摘要；`replay()` 实际应用 Patch、追加事件并验证最终 Snapshot；仍明确不是 Event Sourcing，逐领域事件 reducer 属于后续 |
 | Persistence Adapter | 显式 durable checkpoint 已完成，自动提交未完成 | `IWorldPersistence` 同时支持默认 `JsonFilePersistence` 与构建可选的 `SqlitePersistence`；`WorldService::saveDurableCommit` 以单个检查点保存 Snapshot、Replay、Revision、事件、幂等和 Overlay 投影并有读回回归，但每个内存事务自动 durable commit 仍按 ADR 作为后续阶段 |
-| WorldService 职责拆分 | 进行中：事务、事件、调度、异步协调器和只读决策投影已抽出 | `TransactionManager`、`EventJournal`、`SimulationScheduler`、`IntelligenceCoordinator`、`DecisionContextProjector` 已独立且不拥有领域事实；下一步抽资源/社会系统协调，不做微服务 |
+| WorldService 职责拆分 | 进行中：事务、事件、调度、异步协调器、只读决策投影和通用资源系统已抽出 | `TransactionManager`、`EventJournal`、`SimulationScheduler`、`IntelligenceCoordinator`、`DecisionContextProjector`、`ResourceSystem` 已独立且不拥有事实提交边界；下一步抽社会系统协调，不做微服务 |
 | 事件驱动调度 | 已完成原型闭环 | `advanceMinutes` 选择下一个小时/日程、NPC 唤醒、过程完成、刺激到期或合同截止边界；安静分钟合并推进但保留逐分钟 Revision 语义，远场回归验证边界数显著低于模拟分钟数 |
 | ECS 定位 | 已冻结为投影模型 | `WorldState` 是事实权威，`EntityRegistry` 是当前已知类型的查询投影；自定义 Component 进入权威持久化前，不宣称支持通用动态 ECS |
 | 行动效用分项 | 已完成最小闭环 | `utility_profile` 可声明资源成本、风险、关系影响、未来价值和结构惩罚；范围校验、确定性合成和审计分项已接入；复杂社会效用模型仍由内容扩展 |

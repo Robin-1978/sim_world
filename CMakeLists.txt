@@ -88,6 +88,7 @@ add_library(tide_marks_core
     src/provider/intelligence_coordinator.cpp
     src/provider/turn_queue.cpp
     src/world/meta_actions.cpp
+    src/world/resource_system.cpp
     src/world/event_journal.cpp
         src/world/persistence.cpp
     src/world/simulation_scheduler.cpp

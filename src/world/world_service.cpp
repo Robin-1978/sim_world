@@ -1,4 +1,5 @@
 #include "world/world_service.hpp"
+#include "world/resource_system.hpp"
 #include "world/world_state_json.hpp"
 #include "npc/drive_system.hpp"
 #include "npc/state_machine.hpp"
@@ -1371,62 +1372,20 @@ CommandResult WorldService::transferResource(const std::string& source, const st
     if (!turnId.empty() && state_.processedTurnIds.contains(turnId)) {
         return reject("duplicate_turn", "The transfer was already applied.");
     }
-    if (amount <= 0 || !content_.resources.contains(resource)) {
-        return reject("invalid_resource_transfer", "A transfer needs a known resource and a positive amount.");
-    }
-    const auto resolve = [this](const std::string& value) -> std::string {
-        if (value == "world" || value == kWorldActor) return kWorldActor;
-        if (value == kPlayerId && state_.entities.contains(kPlayerId)) return kPlayerId;
-        if (state_.entities.contains(value)) return value;
-        if (state_.npcs.contains(value)) return npcEntityId(value);
-        return {};
-    };
-    const auto sourceId = resolve(source);
-    const auto targetId = resolve(target);
-    if (sourceId.empty() || targetId.empty()) return reject("unknown_transfer_party", "Both transfer parties must be active entities or the world pool.");
-    if (sourceId == targetId) return reject("invalid_resource_transfer", "A resource cannot be transferred to itself.");
+    const auto sourceId = ResourceSystem::resolveParty(state_, source);
+    const auto targetId = ResourceSystem::resolveParty(state_, target);
     if (actor != kWorldActor && actor != kPlayerId && actor != sourceId && actor != targetId &&
         actor != source && actor != target) {
         return reject("unauthorized", "The actor is not a party to this transfer.");
     }
-    const auto activeEntity = [this](const std::string& id) {
-        if (id == kWorldActor) return true;
-        const auto found = state_.entities.find(id);
-        return found != state_.entities.end() && found->second.lifecycle == EntityLifecycle::Active;
-    };
-    if (!activeEntity(sourceId) || !activeEntity(targetId)) return reject("inactive_transfer_party", "A transfer party is not active.");
-    const auto balance = [this, &resource](const std::string& id) {
-        if (id == kWorldActor) return availableResourceValue(resource);
-        const auto inventory = state_.inventories.find(id);
-        if (inventory == state_.inventories.end()) return 0;
-        const auto quantity = inventory->second.find(resource);
-        return quantity == inventory->second.end() ? 0 : quantity->second;
-    };
-    if (balance(sourceId) < amount) return reject("insufficient_resource", "The source does not have enough unreserved resource.");
-    if (targetId == kWorldActor) {
-        const auto& definition = content_.resources.at(resource);
-        if (resourceValue(resource) + amount > definition.maximum) {
-            return reject("resource_capacity", "The destination resource pool has no capacity.");
-        }
-    }
-    const int sourceBefore = balance(sourceId);
-    const int targetBefore = balance(targetId);
-    if (sourceId == kWorldActor) {
-        state_.resources[resource].amount -= amount;
-    } else {
-        state_.inventories[sourceId][resource] -= amount;
-    }
-    if (targetId == kWorldActor) {
-        state_.resources[resource].amount += amount;
-    } else {
-        state_.inventories[targetId][resource] += amount;
-    }
+    const auto result = ResourceSystem::transfer(state_, content_, source, target, resource, amount);
+    if (!result.accepted) return reject(result.code, result.message);
     if (!turnId.empty()) state_.processedTurnIds.insert(turnId);
     const auto event = addEvent(
         "resource.transferred", actor, targetId, "A registered resource transfer changed ownership quantities",
         Json{{"resource", resource}, {"amount", amount}, {"source", sourceId}, {"target", targetId},
-             {"source_before", sourceBefore}, {"source_after", balance(sourceId)},
-             {"target_before", targetBefore}, {"target_after", balance(targetId)}});
+             {"source_before", result.sourceBefore}, {"source_after", result.sourceAfter},
+             {"target_before", result.targetBefore}, {"target_after", result.targetAfter}});
     return CommandResult{true, "ok", resource, event};
 }
 
@@ -2371,13 +2330,11 @@ std::size_t WorldService::pendingAsyncTurns() const {
 }
 
 int WorldService::resourceValue(const std::string& resource) const {
-    const auto found = state_.resources.find(resource);
-    return found == state_.resources.end() ? 0 : found->second.amount;
+    return ResourceSystem::amount(state_, resource);
 }
 
 int WorldService::availableResourceValue(const std::string& resource) const {
-    const auto found = state_.resources.find(resource);
-    return found == state_.resources.end() ? 0 : found->second.amount - found->second.reserved;
+    return ResourceSystem::available(state_, resource);
 }
 
 void WorldService::setResource(const std::string& resource, int value) {
@@ -2464,25 +2421,20 @@ bool WorldService::applyMetaAction(const std::string& npcId, const std::string& 
     if (operation == "resource.consume") {
         const auto resource = args.value("resource", "");
         const int amount = args.value("amount", 0);
-        if (amount <= 0 || !content_.resources.contains(resource)) return false;
         const bool reserved = reservedResources != nullptr && reservedResources->contains(resource);
         if (reserved && reservedResources->at(resource) < amount) return false;
-        if (!reserved && availableResourceValue(resource) < amount) return false;
-        auto& state = state_.resources[resource];
-        const int before = state.amount;
-        state.amount = std::max(0, state.amount - amount);
-        if (reserved) state.reserved = std::max(0, state.reserved - amount);
+        const int before = resourceValue(resource);
+        if (!ResourceSystem::consume(state_, content_, resource, amount, reserved)) return false;
         addEvent("action.resource", npcId, resource, "A behavior recipe consumed a resource",
                  Json{{"action_id", actionId}, {"resource", resource}, {"before", before},
-                      {"after", state.amount}, {"amount", amount}});
+                      {"after", resourceValue(resource)}, {"amount", amount}});
         return true;
     }
     if (operation == "resource.produce") {
         const auto resource = args.value("resource", "");
         const int amount = args.value("amount", 0);
-        if (amount <= 0 || !content_.resources.contains(resource)) return false;
         const int before = resourceValue(resource);
-        setResource(resource, before + amount);
+        if (!ResourceSystem::produce(state_, content_, resource, amount)) return false;
         addEvent("action.resource", npcId, resource, "A behavior recipe produced a resource",
                  Json{{"action_id", actionId}, {"resource", resource}, {"before", before},
                       {"after", resourceValue(resource)}, {"amount", amount}});
@@ -2491,8 +2443,7 @@ bool WorldService::applyMetaAction(const std::string& npcId, const std::string& 
     if (operation == "resource.reserve") {
         const auto resource = args.value("resource", "");
         const int amount = args.value("amount", 0);
-        if (amount <= 0 || availableResourceValue(resource) < amount) return false;
-        state_.resources[resource].reserved += amount;
+        if (!ResourceSystem::reserve(state_, content_, resource, amount)) return false;
         addEvent("action.reservation", npcId, resource, "A behavior recipe reserved a resource",
                  Json{{"action_id", actionId}, {"resource", resource}, {"amount", amount}});
         return true;
@@ -2500,9 +2451,7 @@ bool WorldService::applyMetaAction(const std::string& npcId, const std::string& 
     if (operation == "resource.release") {
         const auto resource = args.value("resource", "");
         const int amount = args.value("amount", 0);
-        auto found = state_.resources.find(resource);
-        if (amount <= 0 || found == state_.resources.end()) return false;
-        found->second.reserved = std::max(0, found->second.reserved - amount);
+        if (!ResourceSystem::release(state_, content_, resource, amount)) return false;
         addEvent("action.reservation", npcId, resource, "A behavior recipe released a resource reservation",
                  Json{{"action_id", actionId}, {"resource", resource}, {"amount", amount}});
         return true;
