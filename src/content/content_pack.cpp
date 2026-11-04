@@ -265,8 +265,7 @@ std::vector<ActionCandidate> parseActions(const Json& beats, const std::string& 
             if (!definition.is_object()) throw std::runtime_error("dialogue behavior must be an object: " + id);
             ActionCandidate candidate{id, recipe->planId, beat.value("id", "content"), recipe->durationMinutes,
                                       recipe->interruptible, recipe->interruptSalienceThreshold,
-                                      recipe->reservationMode,
-                                      stringArray(definition, "keywords", "dialogue content"), recipe->id, {}};
+                                      recipe->reservationMode, recipe->id, {}};
             collectBehaviorReservations(recipe->root, pack, candidate.reservations);
             result.push_back(std::move(candidate));
         }
@@ -670,7 +669,7 @@ WorldContentPack ContentPackLoader::load(const std::string& rootPath) {
             throw std::runtime_error("speech act world_action_allowed must be boolean: " + id);
         }
         rule.worldActionAllowed = item.at("world_action_allowed").get<bool>();
-        rule.patterns = stringArray(item, "patterns", worldPath);
+        rule.description = requiredString(item, "description", worldPath);
         pack.conversationPolicy.rules.push_back(std::move(rule));
     }
     if (!world.contains("decision_channels") || !world.at("decision_channels").is_array()) {

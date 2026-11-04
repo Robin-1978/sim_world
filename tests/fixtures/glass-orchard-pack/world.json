@@ -1,6 +1,6 @@
 {
   "kind": "world",
-  "content_version": "glass-orchard-1.0.0",
+  "content_version": "glass-orchard-1.2.0",
   "id": "glass_orchard_world",
   "display_name": "The Glass Orchard",
   "initial_time": {"day": 21, "hour": 9},
@@ -184,11 +184,17 @@
   "conversation_policy": {
     "default_world_action_allowed": false,
     "speech_acts": [
-      {"id": "greeting", "world_action_allowed": false, "patterns": ["hello", "hi ", "你好", "您好"]},
-      {"id": "farewell", "world_action_allowed": false, "patterns": ["bye", "goodbye", "再见"]},
-      {"id": "request", "world_action_allowed": true, "patterns": ["please", "can you", "请", "帮我"]},
-      {"id": "inquiry", "world_action_allowed": false, "patterns": ["what ", "why ", "什么", "为什么", "?"]}
-    ]
+      {"id": "greeting", "description": "A social opening; it does not request a world change.", "world_action_allowed": false},
+      {"id": "farewell", "description": "A social closing; it does not request a world change.", "world_action_allowed": false},
+      {"id": "information_request", "description": "The speaker asks the NPC to state, explain, or describe existing facts or current activity; it does not request a world change.", "world_action_allowed": false},
+      {"id": "request", "description": "The speaker asks the NPC to perform, begin, or change an in-world action.", "world_action_allowed": true},
+      {"id": "inquiry", "description": "The speaker asks an open question about facts, reasons, places, time, or context without necessarily requesting action.", "world_action_allowed": false}
+    ,
+      {
+        "id": "statement",
+        "description": "An ordinary statement or conversational observation that does not request a world change.",
+        "world_action_allowed": false
+      }]
   },
   "conversation_channel": "visitor_dialogue",
   "autonomous_channel": "warden_reflection",

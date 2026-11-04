@@ -16,6 +16,11 @@
       "reasoning_budget_tokens": 0,
       "max_tokens": 512
     },
+    "utterance_understanding": {
+      "thinking": true,
+      "reasoning_budget_tokens": 128,
+      "max_tokens": 512
+    },
     "autonomous_reappraisal": {
       "thinking": true,
       "reasoning_budget_tokens": 128,

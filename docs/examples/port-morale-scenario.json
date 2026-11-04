@@ -3,7 +3,7 @@
   "schema_version": 1,
   "id": "scenario.morale.pressure",
   "source": "manual",
-  "base_content_version": "fixture-port-1.0",
+  "base_content_version": "fixture-port-1.2",
   "base_world_revision": 1,
   "duration_minutes": 120,
   "interventions": [

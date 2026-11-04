@@ -194,7 +194,7 @@ int main(int argc, char** argv) {
     std::string scriptPath;
     std::string contentRoot = ContentPackLoader::defaultRoot();
     std::string profilePath = defaultIntelligenceProfilePath();
-    std::string providerOverride = "mock";
+    std::string providerOverride = "profile";
     for (int index = 1; index < argc; ++index) {
         const std::string argument = argv[index];
         if (argument == "--script" && index + 1 < argc) scriptPath = argv[++index];

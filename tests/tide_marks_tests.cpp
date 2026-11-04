@@ -60,6 +60,68 @@ private:
     std::chrono::milliseconds delay_;
 };
 
+class SpeechActProvider final : public IProvider {
+public:
+    SpeechActProvider(std::string speechAct, std::string actionId)
+        : speechAct_(std::move(speechAct)), actionId_(std::move(actionId)) {}
+
+    ProviderResponse decide(const DecisionContext& context, const std::string&) override {
+        IntentProposal proposal;
+        proposal.actionId = actionId_;
+        proposal.speechAct = speechAct_;
+        proposal.intent = speechAct_;
+        proposal.rationale = "The provider interpreted the utterance.";
+        proposal.expectedOutcome = "Runtime validates the selected speech act and action.";
+        proposal.confidence = 1.0;
+        proposal.worldRevision = context.worldRevision;
+        proposal.npcStateVersion = context.npcStateVersion;
+        proposal.worldActionRequested = !proposal.actionId.empty();
+        return ProviderResponse{true, std::move(proposal), "The model chose how to answer.", {}};
+    }
+    [[nodiscard]] std::string name() const override { return "semantic-test"; }
+
+private:
+    std::string speechAct_;
+    std::string actionId_;
+};
+
+class FailingProvider final : public IProvider {
+public:
+    ProviderResponse decide(const DecisionContext& context, const std::string&) override {
+        observedContext = context;
+        return ProviderResponse{false, {}, {}, "provider_unavailable"};
+    }
+    [[nodiscard]] std::string name() const override { return "failing"; }
+
+    DecisionContext observedContext;
+};
+
+class ScriptedActionProvider final : public IProvider {
+public:
+    explicit ScriptedActionProvider(std::vector<std::string> actions)
+        : actions_(std::move(actions)) {}
+
+    ProviderResponse decide(const DecisionContext& context, const std::string&) override {
+        if (next_ >= actions_.size()) return ProviderResponse{false, {}, {}, "script_exhausted"};
+        IntentProposal proposal;
+        proposal.actionId = actions_.at(next_++);
+        proposal.speechAct = "request";
+        proposal.intent = proposal.actionId;
+        proposal.rationale = "A deterministic test provider selected the authored proposal.";
+        proposal.expectedOutcome = "Runtime validates the authored action.";
+        proposal.confidence = 1.0;
+        proposal.worldRevision = context.worldRevision;
+        proposal.npcStateVersion = context.npcStateVersion;
+        proposal.worldActionRequested = true;
+        return ProviderResponse{true, std::move(proposal), "The test provider selected an action.", {}};
+    }
+    [[nodiscard]] std::string name() const override { return "scripted-test"; }
+
+private:
+    std::vector<std::string> actions_;
+    std::size_t next_{0};
+};
+
 void village_has_three_independent_npcs() {
     const auto service = WorldService::load();
     expect(service.content().instance && service.content().instance->id == "tide_marks.village.instance",
@@ -169,7 +231,9 @@ void accepted_intent_runs_without_reasking_llm() {
 }
 
 void reservation_policy_is_authored_per_process() {
-    auto service = WorldService::load();
+    auto service = WorldService::load(
+        ContentPackLoader::defaultRoot(),
+        std::make_unique<SpeechActProvider>("request", "rest"));
     const auto turn = service.converse("mira", "please sleep", "reservation-none");
     expect(turn.accepted, "a long process without resource inputs can start");
     const auto& process = service.state().npcs.at("mira").activity.process;
@@ -309,6 +373,10 @@ void provider_and_action_validation_are_safe() {
            "decision context separates drives, stimuli, and structural constraints");
     const auto turn = service.converse("mira", "Can you spare a ration?", "dialogue-1");
     expect(turn.accepted, "mock provider returns a valid candidate action");
+    const auto activeContext = service.decisionContext("mira");
+    expect(activeContext.currentActivity.at("action_id") == "offer_ration" &&
+               activeContext.currentActivity.contains("process_id"),
+           "decision context exposes the same active activity the player can ask about");
     service.advanceMinutes(30);
     expect(service.state().resources.at("grain").amount == 95,
            "validated ration action changes grain atomically");
@@ -318,6 +386,58 @@ void provider_and_action_validation_are_safe() {
     expect(!unknown.accepted && unknown.code == "unknown_command", "unknown command is rejected");
     const auto stale = service.submit(Command{"stale", "advance", "mira", {}, {}, "1", 1, 1});
     expect(!stale.accepted && stale.code == "state_conflict", "stale world revisions are rejected atomically");
+
+    const std::vector<std::string> contentRoots{
+        ContentPackLoader::defaultRoot(),
+        TIDE_MARKS_TEST_DATA_DIR "/minimal-pack",
+        TIDE_MARKS_TEST_DATA_DIR "/port-pack",
+        TIDE_MARKS_TEST_DATA_DIR "/glass-orchard-pack"};
+    for (const auto& root : contentRoots) {
+        const auto content = ContentPackLoader::load(root);
+        const auto rule = std::find_if(
+            content.conversationPolicy.rules.begin(), content.conversationPolicy.rules.end(),
+            [](const auto& item) { return item.act == SpeechAct::InformationRequest; });
+        expect(rule != content.conversationPolicy.rules.end() &&
+                   !rule->description.empty() && !rule->worldActionAllowed,
+               "all content packs define semantic information requests as conversation-only");
+    }
+
+    auto semantic = WorldService::load(
+        ContentPackLoader::defaultRoot(),
+        std::make_unique<SpeechActProvider>("information_request", ""));
+    const int semanticGrainBefore = semantic.state().resources.at("grain").amount;
+    const auto semanticInfo = semantic.converse(
+        "mira", "Please offer a ration.", "semantic-information");
+    expect(semanticInfo.accepted && semanticInfo.event.has_value() &&
+               semanticInfo.actionId.empty() && semanticInfo.event->data.at("action_id") == "" &&
+               semanticInfo.event->data.at("speech_act") == "information_request" &&
+               semantic.state().resources.at("grain").amount == semanticGrainBefore,
+           "the model-selected information_request stays conversational without text matching");
+
+    auto overreach = WorldService::load(
+        ContentPackLoader::defaultRoot(),
+        std::make_unique<SpeechActProvider>("inquiry", "offer_ration"));
+    const auto rejectedAction = overreach.converse(
+        "mira", "Please offer a ration.", "semantic-overreach");
+    expect(!rejectedAction.accepted && rejectedAction.error == "speech_act_disallows_world_action",
+           "Runtime rejects a world action when the model-selected speech act does not permit it");
+
+    auto failingProvider = std::make_unique<FailingProvider>();
+    auto* failingRaw = failingProvider.get();
+    auto unavailable = WorldService::load(ContentPackLoader::defaultRoot(), std::move(failingProvider));
+    const int grainBeforeFailure = unavailable.state().resources.at("grain").amount;
+    const auto eventsBeforeFailure = unavailable.state().events.size();
+    const auto failedTurn = unavailable.converse(
+        "mira", "Please offer a ration.", "provider-down");
+    expect(!failedTurn.accepted && failedTurn.error == "provider_unavailable" &&
+               unavailable.state().resources.at("grain").amount == grainBeforeFailure &&
+               unavailable.state().events.size() == eventsBeforeFailure,
+           "a failed conversation provider does not infer intent or commit facts");
+    expect(failingRaw->observedContext.speechActClassificationRequired &&
+               failingRaw->observedContext.speechAct.empty() &&
+               !failingRaw->observedContext.speechActs.empty() &&
+               !failingRaw->observedContext.speechActs.front().description.empty(),
+           "Runtime passes the semantic vocabulary to the provider without preclassifying player text");
 }
 
 void meta_actions_are_loaded_from_content() {
@@ -474,7 +594,9 @@ void promises_cover_accept_renegotiate_refuse_and_break() {
 }
 
 void snapshot_and_replay_are_deterministic() {
-    auto service = WorldService::load();
+    auto service = WorldService::load(
+        ContentPackLoader::defaultRoot(),
+        std::make_unique<SpeechActProvider>("information_request", ""));
     service.converse("eve", "Tell me about the record", "replay-dialogue");
     service.advanceMinutes(2 * kMinutesPerDay);
     const auto path = std::filesystem::temp_directory_path() / "tide_marks_test_replay.jsonl";
@@ -852,7 +974,7 @@ void successful_actions_automatically_create_experience() {
 void extended_meta_actions_execute_from_content_recipes() {
     auto content = ContentPackLoader::load(ContentPackLoader::defaultRoot());
     const auto addAction = [&content](const std::string& actionId, const std::string& operation,
-                                      Json args, const std::string& keyword) {
+                                      Json args) {
         content.metaActions[actionId] = MetaActionDefinition{actionId, "test", actionId, operation, {}};
         BehaviorRecipeContent recipe;
         recipe.id = actionId;
@@ -863,39 +985,35 @@ void extended_meta_actions_execute_from_content_recipes() {
         for (auto& npc : content.npcs) {
             if (npc.definition.id != "mira") continue;
             npc.actions.push_back(ActionCandidate{actionId, actionId, actionId, 0, true, 1.0, "none",
-                                                  {keyword}, actionId, {}});
+                                                  actionId, {}});
         }
     };
     addAction("test_transfer", "resource.transfer",
-              Json{{"source", "world"}, {"target", "self"}, {"resource", "grain"}, {"amount", 2}},
-              "test transfer");
-    addAction("test_move", "movement.traverse", Json{{"destination", "village_square"}}, "test move");
-    addAction("test_attack", "conflict.attack", Json{{"target", "lorn"}, {"damage", 0.2}}, "test attack");
+              Json{{"source", "world"}, {"target", "self"}, {"resource", "grain"}, {"amount", 2}});
+    addAction("test_move", "movement.traverse", Json{{"destination", "village_square"}});
+    addAction("test_attack", "conflict.attack", Json{{"target", "lorn"}, {"damage", 0.2}});
     addAction("test_promise", "promise.create",
-              Json{{"from", "self"}, {"to", "player"}, {"description", "test promise"}, {"due_days", 1}},
-              "test promise");
+              Json{{"from", "self"}, {"to", "player"}, {"description", "test promise"}, {"due_days", 1}});
     addAction("test_promise_accept", "promise.transition",
-              Json{{"promise_id", "promise-1"}, {"status", "accepted"}, {"detail", "accepted by recipe"}},
-              "test accept promise");
+              Json{{"promise_id", "promise-1"}, {"status", "accepted"}, {"detail", "accepted by recipe"}});
     addAction("test_knowledge", "knowledge.assert",
               Json{{"subject", "harbor"}, {"predicate", "status"}, {"value", "inspected"},
-                   {"source_sequence", 1}, {"scope", "witness"}, {"confidence", 0.8}},
-              "test knowledge");
+                   {"source_sequence", 1}, {"scope", "witness"}, {"confidence", 0.8}});
     addAction("test_experience", "experience.record",
               Json{{"domain", "trade"}, {"trigger", "inspection"}, {"outcome", "verified"},
-                   {"source_sequence", 1}, {"confidence", 0.8}, {"personal", true}},
-              "test experience");
+                   {"source_sequence", 1}, {"confidence", 0.8}, {"personal", true}});
     addAction("test_production", "production.execute",
-              Json{{"inputs", Json{{"grain", 5}}}, {"outputs", Json{{"boat_integrity", 3}}}},
-              "test production");
+              Json{{"inputs", Json{{"grain", 5}}}, {"outputs", Json{{"boat_integrity", 3}}}});
     addAction("test_production_insufficient", "production.execute",
-              Json{{"inputs", Json{{"grain", 1000}}}, {"outputs", Json{{"boat_integrity", 1}}}},
-              "demand exceeds supply");
+              Json{{"inputs", Json{{"grain", 1000}}}, {"outputs", Json{{"boat_integrity", 1}}}});
     addAction("test_production_capacity", "production.execute",
-              Json{{"inputs", Json{{"grain", 1}}}, {"outputs", Json{{"boat_integrity", 1000}}}},
-              "bin overflow");
+              Json{{"inputs", Json{{"grain", 1}}}, {"outputs", Json{{"boat_integrity", 1000}}}});
 
-    auto service = WorldService::fromContent(content);
+    auto provider = std::make_unique<ScriptedActionProvider>(std::vector<std::string>{
+        "test_transfer", "test_move", "test_attack", "test_promise", "test_promise_accept",
+        "test_knowledge", "test_experience", "test_production", "test_production_insufficient",
+        "test_production_capacity"});
+    auto service = WorldService::fromContent(content, std::move(provider));
     expect(service.converse("mira", "please test transfer", "meta-transfer").accepted &&
                service.state().inventories.at("npc:mira").at("grain") == 2,
            "a content recipe can invoke the resource-transfer operator");
@@ -956,7 +1074,8 @@ void extended_meta_actions_execute_from_content_recipes() {
 
 void runtime_loads_a_world_without_village_identifiers() {
     const std::filesystem::path fixtureRoot = std::filesystem::path(TIDE_MARKS_TEST_DATA_DIR) / "minimal-pack";
-    auto service = WorldService::load(fixtureRoot.string());
+    auto service = WorldService::load(
+        fixtureRoot.string(), std::make_unique<SpeechActProvider>("request", "cool_service_lift"));
     expect(service.state().worldId == "fixture_world", "world identity comes from the content pack");
     expect(service.state().instanceId == "fixture.minimal.instance", "replacement instance identity is preserved");
     expect(service.state().now == GameTime::fromDayHour(4, 9), "world clock comes from the content pack");
@@ -1467,12 +1586,17 @@ void intelligence_profile_configures_decision_budgets() {
     expect(profile.providerType == "llama_cpp", "profile selects the local llama.cpp provider");
     expect(!profile.llama.decisionPolicies.at("player_dialogue").enableThinking &&
                profile.llama.decisionPolicies.at("player_dialogue").maxTokens == 512,
-           "player dialogue uses the fast non-thinking policy");
+           "player dialogue uses the fast answer policy after utterance understanding");
+    expect(profile.llama.decisionPolicies.at("utterance_understanding").enableThinking &&
+               profile.llama.decisionPolicies.at("utterance_understanding").reasoningBudgetTokens == 128 &&
+               profile.llama.decisionPolicies.at("utterance_understanding").maxTokens == 512,
+           "utterance understanding has its own bounded reasoning policy");
     expect(profile.llama.decisionPolicies.at("autonomous_reappraisal").enableThinking &&
                profile.llama.decisionPolicies.at("autonomous_reappraisal").reasoningBudgetTokens == 128 &&
                profile.llama.decisionPolicies.at("autonomous_reappraisal").maxTokens == 1024,
            "autonomous reappraisal uses its bounded thinking policy");
     expect(profile.llama.decisionPolicies.contains("player_dialogue") &&
+               profile.llama.decisionPolicies.contains("utterance_understanding") &&
                profile.llama.decisionPolicies.contains("autonomous_reappraisal"),
            "named decision policies are loaded independently of channel ids");
     const auto provider = makeProviderFromProfile(profile, "mock");

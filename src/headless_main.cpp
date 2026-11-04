@@ -24,7 +24,7 @@ int main(int argc, char** argv) {
     std::string replayPath;
     std::string contentRoot = ContentPackLoader::defaultRoot();
     std::string experimentPath;
-    std::string providerName = "mock";
+    std::string providerName = "profile";
     std::string profilePath = defaultIntelligenceProfilePath();
     bool dumpEvents = false;
     bool dumpAnomalies = false;

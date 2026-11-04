@@ -4,7 +4,7 @@
   "id": "fixture.glass_orchard.instance",
   "display_name": "The Glass Orchard",
   "content_pack": "fixture.glass_orchard",
-  "content_version": "glass-orchard-1.0.0",
+  "content_version": "glass-orchard-1.2.0",
   "world_id": "glass_orchard_world",
   "initial_time": {
     "day": 21,

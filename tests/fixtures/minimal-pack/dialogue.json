@@ -7,8 +7,8 @@
       "npc": "sable",
       "allowed_actions": ["inspect", "cool_service_lift"],
       "behaviors": {
-        "inspect": {"keywords": ["inspect"]},
-        "cool_service_lift": {"keywords": ["cool"]}
+        "inspect": {},
+        "cool_service_lift": {}
       }
     }
   ]

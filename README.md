@@ -62,11 +62,15 @@ If GitHub is unreachable, set `HTTPS_PROXY` to a proxy configured for your envir
 
 The raylib view draws authored spatial entities and links from the selected content pack. If that pack declares a scene asset and `TIDE_MARKS_USE_GLB=1` is set, the client previews the asset instead of the procedural geometry. The map bounds, regions, links, NPC markers, and resource HUD are all derived from the loaded world.
 
-To use the running local model in the 3D client, select the checked-in intelligence profile:
+The client, text UI, and headless runner use the checked-in intelligence profile by default:
 
 ```bash
-./build/tide_marks_client --profile data/intelligence-profile.json --provider profile
+./build/tide_marks_client
+./build/tide_marks_text
+./build/tide_marks_headless --days 0
 ```
+
+Pass `--provider mock` only for deterministic offline tests. Conversation with the mock provider is an explicit test mode and does not represent the production LLM path.
 
 The scene inspector derives NPC markers and resource HUD values from the selected content pack. Another instance therefore does not inherit village actors or named resource fields:
 
@@ -89,9 +93,9 @@ cmake --build build -j2
 ./build/tide_marks_headless --profile data/intelligence-profile.json --provider profile --days 0
 ```
 
-Player dialogue is configured with thinking off. Autonomous reappraisal, which weighs drives and external stimuli without a user turn, uses a short reasoning budget. Use `--provider mock` for deterministic offline runs.
+Player dialogue uses two model stages: semantic utterance understanding with a bounded thinking budget, then a fast answer/action decision. Autonomous reappraisal, which weighs drives and external stimuli without a user turn, uses a short reasoning budget.
 
-The provider only selects authored actions. If the server times out or returns invalid JSON, the game uses deterministic fallback dialogue.
+The LLM interprets player text and selects authored actions. Runtime validates every proposal and owns all facts. If the LLM is unavailable or returns invalid JSON, a player conversation fails closed without an event or world change; Runtime never guesses intent from keywords.
 
 The design and continuation checkpoint are in [`docs/design.md`](docs/design.md) and [`docs/release-continuation-plan.md`](docs/release-continuation-plan.md).
 

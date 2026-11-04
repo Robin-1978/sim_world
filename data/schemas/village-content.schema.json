@@ -641,14 +641,15 @@
             "type": "object",
             "required": [
               "id",
-              "world_action_allowed",
-              "patterns"
+              "description",
+              "world_action_allowed"
             ],
             "properties": {
               "id": {
                 "enum": [
                   "greeting",
                   "inquiry",
+                  "information_request",
                   "request",
                   "command",
                   "negotiation",
@@ -660,70 +661,9 @@
               "world_action_allowed": {
                 "type": "boolean"
               },
-              "patterns": {
-                "type": "array",
-                "minItems": 1,
-                "items": {
-                  "type": "string",
-                  "minLength": 1
-                }
-              }
-            },
-            "conversation_channel": {
-              "type": "string",
-              "minLength": 1
-            },
-            "autonomous_channel": {
-              "type": "string",
-              "minLength": 1
-            },
-            "decision_channels": {
-              "type": "array",
-              "minItems": 1,
-              "items": {
-                "type": "object",
-                "required": [
-                  "id",
-                  "conversation",
-                  "classify_speech_act",
-                  "default_world_action_allowed",
-                  "provider_policy"
-                ],
-                "properties": {
-                  "id": {
-                    "type": "string",
-                    "minLength": 1
-                  },
-                  "conversation": {
-                    "type": "boolean"
-                  },
-                  "classify_speech_act": {
-                    "type": "boolean"
-                  },
-                  "default_world_action_allowed": {
-                    "type": "boolean"
-                  },
-                  "default_speech_act": {
-                    "type": "string"
-                  },
-                  "event_type": {
-                    "type": "string",
-                    "minLength": 1
-                  },
-                  "memory_kind": {
-                    "type": "string",
-                    "minLength": 1
-                  },
-                  "event_target": {
-                    "type": "string",
-                    "minLength": 1
-                  },
-                  "provider_policy": {
-                    "type": "string",
-                    "minLength": 1
-                  }
-                },
-                "additionalProperties": false
+              "description": {
+                "type": "string",
+                "minLength": 1
               }
             },
             "additionalProperties": false
@@ -731,6 +671,63 @@
         }
       },
       "additionalProperties": false
+    },
+    "conversation_channel": {
+      "type": "string",
+      "minLength": 1
+    },
+    "autonomous_channel": {
+      "type": "string",
+      "minLength": 1
+    },
+    "decision_channels": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "conversation",
+          "classify_speech_act",
+          "default_world_action_allowed",
+          "provider_policy"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "conversation": {
+            "type": "boolean"
+          },
+          "classify_speech_act": {
+            "type": "boolean"
+          },
+          "default_world_action_allowed": {
+            "type": "boolean"
+          },
+          "default_speech_act": {
+            "type": "string"
+          },
+          "event_type": {
+            "type": "string",
+            "minLength": 1
+          },
+          "memory_kind": {
+            "type": "string",
+            "minLength": 1
+          },
+          "event_target": {
+            "type": "string",
+            "minLength": 1
+          },
+          "provider_policy": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "additionalProperties": false
+      }
     },
     "simulation_policy": {
       "type": "object",

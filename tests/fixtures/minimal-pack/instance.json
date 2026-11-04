@@ -4,7 +4,7 @@
   "id": "fixture.minimal.instance",
   "display_name": "Minimal Workshop",
   "content_pack": "fixture.minimal",
-  "content_version": "fixture-1.0.0",
+  "content_version": "fixture-1.2.0",
   "world_id": "fixture_world",
   "initial_time": {"day": 4, "hour": 9, "minute": 0},
   "npcs": {

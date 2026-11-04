@@ -205,7 +205,7 @@ std::string resolveSceneAsset(const std::string& contentRoot, const std::string&
 
 int main(int argc, char** argv) {
     std::string profilePath = tide_marks::defaultIntelligenceProfilePath();
-    std::string providerOverride = "mock";
+    std::string providerOverride = "profile";
     std::string contentRoot = tide_marks::ContentPackLoader::defaultRoot();
     for (int index = 1; index < argc; ++index) {
         const std::string argument = argv[index];

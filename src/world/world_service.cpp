@@ -396,6 +396,22 @@ DecisionContext WorldService::decisionContext(const std::string& npcId) const {
                              ",fear:" + std::to_string(relation.fear) +
                              ",owed:" + std::to_string(relation.owed);
     }
+    if (npc.activity.goal) {
+        context.currentActivity = Json{{"status", toString(npc.activity.status)},
+                                       {"goal_id", npc.activity.goal->id},
+                                       {"intent", npc.activity.goal->intent},
+                                       {"action_id", npc.activity.goal->target},
+                                       {"reason", npc.activity.goal->reason},
+                                       {"deadline", npc.activity.goal->deadline.toString()}};
+    }
+    if (npc.activity.process) {
+        context.currentActivity["process_id"] = npc.activity.process->id;
+        context.currentActivity["recipe_id"] = npc.activity.process->recipeId;
+        context.currentActivity["plan_id"] = npc.activity.process->planId;
+        context.currentActivity["progress"] = npc.activity.process->progress;
+        context.currentActivity["behavior_status"] = npc.activity.process->behaviorStatus;
+        context.currentActivity["completes_at"] = npc.activity.process->completesAt.toString();
+    }
     for (const auto& [groupId, group] : state_.socialGroups) {
         const auto membership = group.members.find(npcId);
         if (membership == group.members.end()) continue;
@@ -1605,11 +1621,20 @@ TurnRequest WorldService::makeTurnRequest(const std::string& npcId, const std::s
     request.context.channel = channelId;
     request.context.providerPolicy = channel->second.providerPolicy;
     request.context.trigger = trigger;
+    request.context.promptVersion =
+        "tide-marks-intent-v2:" + content_.contentVersion + ":" + content_.id;
     request.promptVersion = request.context.promptVersion;
     if (channel->second.conversation && channel->second.classifySpeechAct) {
-        const auto speechAct = classifySpeechAct(input, content_.conversationPolicy);
-        request.context.speechAct = toString(speechAct);
-        request.context.worldActionAllowed = permitsWorldAction(speechAct, content_.conversationPolicy);
+        // Semantic interpretation belongs exclusively to the provider. Runtime
+        // supplies the content-authored speech-act vocabulary and validates the
+        // returned identifier; it never inspects player text for keywords.
+        request.context.speechAct.clear();
+        request.context.worldActionAllowed = false;
+        request.context.speechActClassificationRequired = true;
+        for (const auto& rule : content_.conversationPolicy.rules) {
+            request.context.speechActs.push_back(
+                SpeechActPermissionView{toString(rule.act), rule.description, rule.worldActionAllowed});
+        }
     } else {
         request.context.speechAct = channel->second.defaultSpeechAct;
         request.context.worldActionAllowed = channel->second.defaultWorldActionAllowed;
@@ -1667,16 +1692,37 @@ DialogueTurn WorldService::commitTurn(const TurnRequest& request, ProviderRespon
     }
     const auto& context = request.context;
     if (!response.ok) {
-        // Rule fallback keeps the world playable when the local server is down.
+        if (channel->second.conversation) {
+            // Conversation semantics must come from the configured intelligence
+            // provider. Guessing intent from tokens would produce a second,
+            // ungoverned semantic authority inside Runtime.
+            result.error = response.error.empty() ? "provider_unavailable" : response.error;
+            return result;
+        }
         const std::string providerError = response.error;
         response = MockProvider{}.decide(context, request.playerInput);
-        result.provider += "+fallback";
+        result.provider += "+deterministic_fallback";
         result.error = "provider_fallback:" + providerError;
     }
-    // A model may return a syntactically valid JSON object while omitting the
-    // required action for a channel that permits world changes. Treat that as
-    // a proposal failure, not as a conversation-only turn.
-    if (response.ok && context.worldActionAllowed && response.proposal.actionId.empty()) {
+    const std::string effectiveSpeechAct = channel->second.conversation
+                                               ? (response.proposal.speechAct.empty()
+                                                      ? request.context.speechAct
+                                                      : response.proposal.speechAct)
+                                               : request.context.speechAct;
+    const auto parsedSpeechAct = speechActFromString(effectiveSpeechAct);
+    if (channel->second.conversation && context.speechActClassificationRequired &&
+        parsedSpeechAct == SpeechAct::Unknown) {
+        result.error = "invalid_speech_act";
+        return result;
+    }
+    const bool worldActionAllowed =
+        channel->second.conversation && context.speechActClassificationRequired
+            ? permitsWorldAction(parsedSpeechAct, content_.conversationPolicy)
+            : channel->second.defaultWorldActionAllowed;
+    // Autonomous channels must produce an action. Conversation channels may
+    // validly refuse or answer without one, so their empty action_id is kept.
+    if (response.ok && !channel->second.conversation && worldActionAllowed &&
+        response.proposal.actionId.empty()) {
         response = MockProvider{}.decide(context, request.playerInput);
         result.provider += "+proposal_fallback";
         result.error = "provider_fallback:world_action_required";
@@ -1705,7 +1751,7 @@ DialogueTurn WorldService::commitTurn(const TurnRequest& request, ProviderRespon
         }
     }
     if (response.proposal.actionId.empty()) {
-        if (context.worldActionAllowed || response.proposal.worldActionRequested) {
+        if (worldActionAllowed && response.proposal.worldActionRequested) {
             result.error = "world_action_required";
             return result;
         }
@@ -1719,7 +1765,8 @@ DialogueTurn WorldService::commitTurn(const TurnRequest& request, ProviderRespon
         const auto event = addEvent(
             channel->second.eventType, request.npcId, target, response.dialogue,
             Json{{"turn_id", request.turnId}, {"action_id", ""}, {"trigger", request.trigger},
-                 {"speech_act", context.speechAct}, {"world_action_requested", false},
+                 {"speech_act", effectiveSpeechAct}, {"world_action_requested", false},
+                 {"utterance_understanding", response.proposal.utteranceUnderstanding},
                  {"process_status", "conversation_only"}, {"provider", result.provider},
                  {"context_world_revision", response.proposal.worldRevision},
                  {"context_npc_state_version", response.proposal.npcStateVersion}});
@@ -1731,7 +1778,7 @@ DialogueTurn WorldService::commitTurn(const TurnRequest& request, ProviderRespon
         syncNpcEntityState();
         return result;
     }
-    if (!context.worldActionAllowed) {
+    if (!worldActionAllowed) {
         result.error = "speech_act_disallows_world_action";
         return result;
     }
@@ -1818,6 +1865,8 @@ DialogueTurn WorldService::commitTurn(const TurnRequest& request, ProviderRespon
         channel->second.eventType, request.npcId, target, response.dialogue,
         Json{{"turn_id", request.turnId}, {"process_id", processId},
              {"action_id", response.proposal.actionId}, {"trigger", request.trigger},
+             {"speech_act", effectiveSpeechAct},
+             {"utterance_understanding", response.proposal.utteranceUnderstanding},
              {"duration_minutes", candidate->durationMinutes},
              {"process_status", candidate->durationMinutes > 0 ? "running" : "completed"},
              {"intent", response.proposal.intent}, {"motivation", response.proposal.rationale},

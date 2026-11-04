@@ -8,6 +8,7 @@ namespace tide_marks {
 enum class SpeechAct {
     Greeting,
     Inquiry,
+    InformationRequest,
     Request,
     Command,
     Negotiation,
@@ -20,7 +21,7 @@ enum class SpeechAct {
 struct SpeechActRule {
     SpeechAct act{SpeechAct::Unknown};
     bool worldActionAllowed{false};
-    std::vector<std::string> patterns;
+    std::string description;
 };
 
 struct ConversationPolicy {
@@ -29,10 +30,7 @@ struct ConversationPolicy {
 };
 
 [[nodiscard]] SpeechAct speechActFromString(const std::string& value);
-[[nodiscard]] SpeechAct classifySpeechAct(const std::string& input,
-                                          const ConversationPolicy& policy);
 [[nodiscard]] std::string toString(SpeechAct act);
 [[nodiscard]] bool permitsWorldAction(SpeechAct act, const ConversationPolicy& policy);
-[[nodiscard]] bool isConversationOnly(SpeechAct act, const ConversationPolicy& policy);
 
 }  // namespace tide_marks

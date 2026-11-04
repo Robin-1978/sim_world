@@ -10,16 +10,8 @@
         "cool_service_lift"
       ],
       "behaviors": {
-        "inspect": {
-          "keywords": [
-            "inspect"
-          ]
-        },
-        "cool_service_lift": {
-          "keywords": [
-            "cool"
-          ]
-        }
+        "inspect": {},
+        "cool_service_lift": {}
       }
     },
     {
@@ -29,14 +21,7 @@
         "trade_goods"
       ],
       "behaviors": {
-        "trade_goods": {
-          "keywords": [
-            "trade",
-            "exchange",
-            "market",
-            "交易"
-          ]
-        }
+        "trade_goods": {}
       }
     }
   ]

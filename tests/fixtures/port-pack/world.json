@@ -1,6 +1,6 @@
 {
   "kind": "world",
-  "content_version": "fixture-port-1.0",
+  "content_version": "fixture-port-1.2",
   "id": "port_world",
   "display_name": "Harbor Exchange",
   "initial_time": {
@@ -238,117 +238,42 @@
     "default_world_action_allowed": false,
     "speech_acts": [
       {
-        "id": "greeting",
-        "world_action_allowed": false,
-        "patterns": [
-          "hello",
-          "hi ",
-          "hey",
-          "good morning",
-          "good evening",
-          "nice to meet",
-          "你好",
-          "您好",
-          "嗨",
-          "早上好",
-          "晚上好"
-        ]
+        "id": "greeting", "description": "A social opening; it does not request a world change.",
+        "world_action_allowed": false
       },
       {
-        "id": "farewell",
-        "world_action_allowed": false,
-        "patterns": [
-          "bye",
-          "goodbye",
-          "see you",
-          "再见",
-          "回头见"
-        ]
+        "id": "farewell", "description": "A social closing; it does not request a world change.",
+        "world_action_allowed": false
       },
       {
-        "id": "promise",
-        "world_action_allowed": true,
-        "patterns": [
-          "promise",
-          "承诺",
-          "答应",
-          "保证"
-        ]
+        "id": "promise", "description": "The speaker commits to a future action and may create or modify a promise.",
+        "world_action_allowed": true
       },
       {
-        "id": "negotiation",
-        "world_action_allowed": true,
-        "patterns": [
-          "negotiate",
-          "deal",
-          "trade",
-          "交换",
-          "谈谈",
-          "重谈"
-        ]
+        "id": "negotiation", "description": "The speaker proposes or revises terms, resources, or an agreement.",
+        "world_action_allowed": true
       },
       {
-        "id": "request",
-        "world_action_allowed": true,
-        "patterns": [
-          "can you",
-          "could you",
-          "would you",
-          "will you",
-          "please",
-          "帮我",
-          "请",
-          "能不能",
-          "可以",
-          "给我",
-          "spare",
-          "offer",
-          "give me",
-          "repair",
-          "fix",
-          "修理",
-          "维修"
-        ]
+        "id": "information_request", "description": "The speaker asks the NPC to state, explain, or describe existing facts or current activity; it does not request a world change.",
+        "world_action_allowed": false
       },
       {
-        "id": "inquiry",
-        "world_action_allowed": false,
-        "patterns": [
-          "what ",
-          "what?",
-          "why ",
-          "why?",
-          "where ",
-          "where?",
-          "when ",
-          "who ",
-          "how ",
-          "doing",
-          "日志",
-          "什么",
-          "为什么",
-          "哪里",
-          "谁",
-          "怎么",
-          "吗",
-          "？",
-          "?"
-        ]
+        "id": "request", "description": "The speaker asks the NPC to perform, begin, or change an in-world action.",
+        "world_action_allowed": true
       },
       {
-        "id": "command",
-        "world_action_allowed": true,
-        "patterns": [
-          "stop",
-          "go ",
-          "move",
-          "tell me",
-          "告诉我",
-          "停止",
-          "走开"
-        ]
-      }
-    ]
+        "id": "inquiry", "description": "The speaker asks an open question about facts, reasons, places, time, or context without necessarily requesting action.",
+        "world_action_allowed": false
+      },
+      {
+        "id": "command", "description": "The speaker directs the NPC to perform, continue, or stop an in-world action.",
+        "world_action_allowed": true
+      },
+      {
+        "id": "statement",
+        "description": "An ordinary statement or conversational observation that does not request a world change.",
+        "world_action_allowed": false
+      }]
   },
   "conversation_channel": "player_dialogue",
   "autonomous_channel": "npc_autonomous_intent",

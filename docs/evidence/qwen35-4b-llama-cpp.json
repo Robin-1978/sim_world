@@ -1,5 +1,5 @@
 {
-  "date": "2026-11-03",
+  "date": "2026-11-04",
   "endpoint": "http://127.0.0.1:8192",
   "health": "ok",
   "server": "llama.cpp",
@@ -12,10 +12,34 @@
   "max_tokens": 512,
   "thinking": false,
   "structured_output": "JSON Schema",
+  "utterance_understanding": {
+    "thinking": true,
+    "reasoning_budget_tokens": 128,
+    "max_tokens": 512,
+    "understanding_completion_tokens": 242,
+    "decision_completion_tokens": 230,
+    "observed_wall_seconds": 9.9,
+    "result": "Please tell me what you are doing. was classified as information_request; the decision stage produced an empty action_id and no resource change."
+  },
   "turns": [
-    {"label": "turn1", "ttft_s": 0.664, "total_s": 1.253, "predicted_tokens": 31},
-    {"label": "turn2", "ttft_s": 0.282, "total_s": 0.648, "predicted_tokens": 20},
-    {"label": "turn3", "ttft_s": 0.297, "total_s": 0.608, "predicted_tokens": 18}
+    {
+      "label": "turn1",
+      "ttft_s": 0.664,
+      "total_s": 1.253,
+      "predicted_tokens": 31
+    },
+    {
+      "label": "turn2",
+      "ttft_s": 0.282,
+      "total_s": 0.648,
+      "predicted_tokens": 20
+    },
+    {
+      "label": "turn3",
+      "ttft_s": 0.297,
+      "total_s": 0.608,
+      "predicted_tokens": 18
+    }
   ],
   "result": "P0 village IntentProposal returned valid JSON, cited_stimulus_ids was empty when no stimuli were supplied, and Runtime accepted the authored action",
   "thinking_budget_probe": {
@@ -28,50 +52,114 @@
   },
   "mode_benchmark": {
     "method": "same model, prompt schema and village context; three prompts per mode; one llama.cpp slot",
-    "prompts": ["ration", "secret", "fairness"],
+    "prompts": [
+      "ration",
+      "secret",
+      "fairness"
+    ],
     "modes": [
       {
         "mode": "thinking_off",
         "max_tokens": 512,
-        "wall_seconds": [3.367, 7.008, 3.872],
-        "completion_tokens": [164, 173, 176],
-        "actions": ["offer_ration", "offer_ration", "explain_ration"],
+        "wall_seconds": [
+          3.367,
+          7.008,
+          3.872
+        ],
+        "completion_tokens": [
+          164,
+          173,
+          176
+        ],
+        "actions": [
+          "offer_ration",
+          "offer_ration",
+          "explain_ration"
+        ],
         "assessment": "fastest; one socially ambiguous prompt selected a weaker action"
       },
       {
         "mode": "thinking_128",
         "reasoning_budget_tokens": 128,
         "max_tokens": 1024,
-        "wall_seconds": [6.311, 6.849, 7.638],
-        "completion_tokens": [308, 344, 380],
-        "actions": ["offer_ration", "protect_secret", "explain_ration"],
+        "wall_seconds": [
+          6.311,
+          6.849,
+          7.638
+        ],
+        "completion_tokens": [
+          308,
+          344,
+          380
+        ],
+        "actions": [
+          "offer_ration",
+          "protect_secret",
+          "explain_ration"
+        ],
         "assessment": "best cost-quality balance in this P0 decision set"
       },
       {
         "mode": "thinking_256",
         "reasoning_budget_tokens": 256,
         "max_tokens": 1024,
-        "wall_seconds": [8.657, 8.689, 11.331],
-        "completion_tokens": [438, 445, 585],
-        "actions": ["offer_ration", "explain_ration", "explain_ration"],
+        "wall_seconds": [
+          8.657,
+          8.689,
+          11.331
+        ],
+        "completion_tokens": [
+          438,
+          445,
+          585
+        ],
+        "actions": [
+          "offer_ration",
+          "explain_ration",
+          "explain_ration"
+        ],
         "assessment": "slower without a stable quality improvement"
       },
       {
         "mode": "thinking_512",
         "reasoning_budget_tokens": 512,
         "max_tokens": 1024,
-        "wall_seconds": [13.322, 19.1, 14.846],
-        "completion_tokens": [712, 1020, 775],
-        "actions": ["offer_ration", "protect_secret", "explain_ration"],
+        "wall_seconds": [
+          13.322,
+          19.1,
+          14.846
+        ],
+        "completion_tokens": [
+          712,
+          1020,
+          775
+        ],
+        "actions": [
+          "offer_ration",
+          "protect_secret",
+          "explain_ration"
+        ],
         "assessment": "mostly correct but verbose and expensive"
       },
       {
         "mode": "thinking_1024",
         "reasoning_budget_tokens": 1024,
         "max_tokens": 1536,
-        "wall_seconds": [23.645, 22.969, 22.839],
-        "completion_tokens": [1272, 1267, 1238],
-        "actions": ["offer_ration", "protect_secret", "explain_ration"],
+        "wall_seconds": [
+          23.645,
+          22.969,
+          22.839
+        ],
+        "completion_tokens": [
+          1272,
+          1267,
+          1238
+        ],
+        "actions": [
+          "offer_ration",
+          "protect_secret",
+          "explain_ration"
+        ],
         "assessment": "no material P0 quality gain; reserve for evolution analysis"
       }
     ],
@@ -83,7 +171,11 @@
     },
     "autonomous_verification": {
       "profile": "data/intelligence-profile.json",
-      "player_dialogue": {"thinking": false, "max_tokens": 512, "runtime_result": "accepted"},
+      "player_dialogue": {
+        "thinking": false,
+        "max_tokens": 512,
+        "runtime_result": "accepted"
+      },
       "autonomous_reappraisal": {
         "thinking": true,
         "reasoning_budget_tokens": 128,
@@ -93,5 +185,31 @@
         "runtime_result": "accepted; resource effects and process completion were committed"
       }
     }
+  },
+  "semantic_authority": {
+    "utterance_understanding": "LLM only; Runtime supplies descriptions and permission metadata, never token patterns",
+    "runtime_text_matching": false,
+    "conversation_provider_failure": "fail_closed_without_event_or_world_change",
+    "verified_inputs": [
+      {
+        "input": "hello, nice to meet you",
+        "speech_act": "greeting",
+        "action_id": "",
+        "world_change": false
+      },
+      {
+        "input": "Please tell me what you are doing.",
+        "speech_act": "information_request",
+        "action_id": "",
+        "world_change": false
+      },
+      {
+        "input": "今天有什么日志？你在干什么？",
+        "speech_act": "information_request",
+        "action_id": "",
+        "world_change": false
+      }
+    ],
+    "observed_result": "The model answered all three inputs according to their meaning; no action keyword list or please-special-case was used."
   }
 }

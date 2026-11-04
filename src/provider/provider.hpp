@@ -15,9 +15,6 @@ struct ActionCandidate {
     bool interruptible{true};
     double interruptSalienceThreshold{1.0};
     std::string reservationMode{"none"};
-    // Optional content-authored words used only by the offline MockProvider's
-    // natural-language spotter. Runtime validation never depends on them.
-    std::vector<std::string> keywords;
     std::string recipeId;
     std::map<std::string, int> reservations;
 };
@@ -29,6 +26,12 @@ struct StructuralConstraintView {
     std::string source;
     std::string reason;
     bool hard{true};
+};
+
+struct SpeechActPermissionView {
+    std::string id;
+    std::string description;
+    bool worldActionAllowed{false};
 };
 
 struct DriveView {
@@ -53,6 +56,7 @@ struct DecisionContext {
     std::string trigger;
     std::string speechAct;
     bool worldActionAllowed{true};
+    bool speechActClassificationRequired{false};
     // Versions are carried with an asynchronous request. They describe the
     // content and prompt contract used to produce the proposal, not mutable
     // world facts.
@@ -67,6 +71,8 @@ struct DecisionContext {
     std::string internalDrives;
     std::string externalStimuli;
     std::string structuralConstraints;
+    Json currentActivity = Json{{"status", "idle"}};
+    std::vector<SpeechActPermissionView> speechActs;
     std::vector<ExternalStimulus> stimuli;
     std::vector<StructuralConstraintView> constraints;
     std::vector<DriveView> drives;
@@ -87,6 +93,7 @@ struct IntentProposal {
     std::vector<std::string> tradeoffs;
     std::map<std::string, double> expectedRelief;
     std::string speechAct;
+    Json utteranceUnderstanding = Json::object();
     bool worldActionRequested{false};
 };
 

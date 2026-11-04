@@ -1,15 +1,15 @@
 {
-  "content_version": "village-p0.2",
+  "content_version": "village-p0.4",
   "beats": [
     {
       "id": "mira_ration",
       "npc": "mira",
       "allowed_actions": ["offer_ration", "protect_secret", "explain_ration", "rest"],
       "behaviors": {
-        "offer_ration": {"duration_minutes": 30, "interruptible": true, "interrupt_salience_threshold": 0.85, "keywords": ["ration", "grain", "food"]},
-        "protect_secret": {"duration_minutes": 45, "interruptible": true, "interrupt_salience_threshold": 0.9, "keywords": ["secret", "family record"]},
-        "explain_ration": {"duration_minutes": 20, "interruptible": true, "interrupt_salience_threshold": 0.7, "keywords": ["explain", "fair"]},
-        "rest": {"duration_minutes": 480, "interruptible": true, "interrupt_salience_threshold": 0.95, "keywords": ["rest", "sleep"]}
+        "offer_ration": {"duration_minutes": 30, "interruptible": true, "interrupt_salience_threshold": 0.85},
+        "protect_secret": {"duration_minutes": 45, "interruptible": true, "interrupt_salience_threshold": 0.9},
+        "explain_ration": {"duration_minutes": 20, "interruptible": true, "interrupt_salience_threshold": 0.7},
+        "rest": {"duration_minutes": 480, "interruptible": true, "interrupt_salience_threshold": 0.95}
       }
     },
     {
@@ -17,10 +17,10 @@
       "npc": "lorn",
       "allowed_actions": ["repair_ferry", "offer_crossing", "ask_debt", "rest"],
       "behaviors": {
-        "repair_ferry": {"duration_minutes": 120, "interruptible": false, "interrupt_salience_threshold": 1.0, "keywords": ["ferry", "repair", "boat"]},
-        "offer_crossing": {"duration_minutes": 45, "interruptible": true, "interrupt_salience_threshold": 0.8, "keywords": ["crossing", "ferry", "ride"]},
-        "ask_debt": {"duration_minutes": 15, "interruptible": true, "interrupt_salience_threshold": 0.7, "keywords": ["debt", "pay", "fee"]},
-        "rest": {"duration_minutes": 480, "interruptible": true, "interrupt_salience_threshold": 0.95, "keywords": ["rest", "sleep"]}
+        "repair_ferry": {"duration_minutes": 120, "interruptible": false, "interrupt_salience_threshold": 1.0},
+        "offer_crossing": {"duration_minutes": 45, "interruptible": true, "interrupt_salience_threshold": 0.8},
+        "ask_debt": {"duration_minutes": 15, "interruptible": true, "interrupt_salience_threshold": 0.7},
+        "rest": {"duration_minutes": 480, "interruptible": true, "interrupt_salience_threshold": 0.95}
       }
     },
     {
@@ -28,10 +28,10 @@
       "npc": "eve",
       "allowed_actions": ["share_record", "withhold_record", "reveal_clue", "rest"],
       "behaviors": {
-        "share_record": {"duration_minutes": 60, "interruptible": true, "interrupt_salience_threshold": 0.8, "keywords": ["record", "archive", "share"]},
-        "withhold_record": {"duration_minutes": 30, "interruptible": true, "interrupt_salience_threshold": 0.7, "keywords": ["withhold", "fragile"]},
-        "reveal_clue": {"duration_minutes": 20, "interruptible": true, "interrupt_salience_threshold": 0.85, "keywords": ["clue", "hidden", "family"]},
-        "rest": {"duration_minutes": 480, "interruptible": true, "interrupt_salience_threshold": 0.95, "keywords": ["rest", "sleep"]}
+        "share_record": {"duration_minutes": 60, "interruptible": true, "interrupt_salience_threshold": 0.8},
+        "withhold_record": {"duration_minutes": 30, "interruptible": true, "interrupt_salience_threshold": 0.7},
+        "reveal_clue": {"duration_minutes": 20, "interruptible": true, "interrupt_salience_threshold": 0.85},
+        "rest": {"duration_minutes": 480, "interruptible": true, "interrupt_salience_threshold": 0.95}
       }
     }
   ]

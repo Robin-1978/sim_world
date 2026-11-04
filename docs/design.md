@@ -242,7 +242,7 @@ NPC 不每帧调用 LLM。日常移动、进食、休息、工作、资源结算
 
 ## 6. 对话、记忆和 LLM 演化
 
-对话输入先由世界内容包中的 `conversation_policy` 映射到询问、谈判、安抚、威胁、撒谎、承诺、交换、调查或结束等作者定义话语行为。关键词、匹配顺序和该话语行为是否允许提交世界行动都属于 JSON 配置；Runtime 只执行通用分类器和权限校验，不在 C++ 中写死中文或英文短语。问候、询问、告别和普通陈述可以配置为仅对话；请求、命令、谈判和承诺可以配置为允许产生行动提案。结构化响应包含 `action_id`、`intent`、`motivation`、`dialogue`、`beat_id`、`cited_stimulus_ids`、`tradeoffs`、`expected_relief`、候选记忆和上下文版本。LLM 用 `cited_stimulus_ids` 指出它实际依据的外驱，用 `tradeoffs` 解释内驱之间或内驱与社会后果之间的权衡，用 `expected_relief` 表达对结果的预测；这些字段用于审计、学习和回放校验，不能直接写入事实。`motivation` 只用于解释和诊断，不参与规则判定；`action_id` 必须属于当前 DecisionContext。仅对话响应使用空 `action_id`，不会进入行为树或修改世界事实。
+对话输入先进入 LLM 的 `utterance_understanding` 阶段，由模型根据内容包为每类话语行为提供的 `description` 和 `world_action_allowed` 识别通信意图；Runtime 不扫描玩家文本，也不保存关键词表，更不能从候选动作反推玩家意图。随后 `player_dialogue` 阶段读取结构化理解、当前活动、记忆和授权事实，生成回答以及可选的 `action_id`。Provider 失败时，对话 Turn 直接失败且不写事件、不启动过程；Runtime 不会用关键词或固定台词伪造一次语义理解。Runtime 永远根据模型返回的话语行为 ID 和内容包权限重新校验是否允许行动，不接受模型自行授予权限。问候、询问、结束和普通陈述可以配置为仅对话；请求、命令、谈判和承诺可以配置为允许产生行动提案。结构化理解包含 `speech_act`、`communication_goal`、`action_requested`、引用实体和歧义；结构化决策包含 `action_id`、`intent`、`motivation`、`dialogue`、`cited_stimulus_ids`、`tradeoffs`、`expected_relief`、候选记忆和上下文版本。`cited_stimulus_ids` 指出模型实际依据的外驱，`tradeoffs` 解释权衡，`expected_relief` 表达预测；这些字段用于审计、学习和回放校验，不能直接写入事实。`motivation` 只用于解释和诊断；`action_id` 必须属于当前 DecisionContext。仅对话响应使用空 `action_id`，不会进入行为树或修改世界事实。
 
 对话和自驱不是 Runtime 中的两个写死分支，而是世界内容包中的 `decision_channels`。每个 channel 配置是否是会话、是否进行话语行为分类、默认行动权限、事件类型、记忆类型、事件目标和对应的 Intelligence Profile 策略；`conversation_channel` 与 `autonomous_channel` 只是当前实例选择的两个入口。Runtime 按 channel 属性执行同一条提案校验和事务路径，因此新的观察者、定时器、群体审议或外部传感器入口只需增加 JSON channel，不需要增加 `if (trigger == ...)` 的业务耦合。
 
@@ -264,13 +264,13 @@ Level 2 的“世界底座演化”只改变可声明、可验证的 Simulation 
 
 同一机制可以承载场景实验：例如“在周边小区开一个小店”“提高利率”“发布一个政策”。LLM 把自然语言转成 `ScenarioProposal`，Validator 检查实体、参数和已注册机制，Sandbox 从同一快照克隆并运行 baseline/scenario，Runtime 输出资源、库存、组织指标、需求、位置、关系、承诺、异常和两侧事件序列；LLM 只把这些已计算结果整理为假设、因果链、敏感参数和不确定性说明。缺少经济或社会机制时必须报告“无法评估”，不能用语言补造数值。当前 P2 已实现资源、组织指标和 NPC 需求三类有界 intervention，以及面向不必填用的 CLI；小店、利率和政策只有在对应事实模型落地后才能增加专用 intervention。
 
-Provider 使用一个共享模型槽位和串行队列；本地 llama.cpp 优先，服务失败时规则台词继续运行。云 Provider 可用于调试或高质量表达，但不改变事实接口。API Key 不写入内容包、存档、日志、Prompt、崩溃报告或版本库。
+Provider 使用一个共享模型槽位和串行队列；本地 llama.cpp 是交互入口的默认语义 Provider，服务失败时玩家对话明确失败且不提交事实。自驱通道可以使用无语言理解的确定性候选回退维持世界时间推进，但它不会解释玩家文本。云 Provider 可用于调试或高质量表达，但不改变事实接口。API Key 不写入内容包、存档、日志、Prompt、崩溃报告或版本库。
 
-P0 的结构化 `IntentProposal` 是短输出任务，玩家对白默认关闭 thinking，并使用有限的 `max_tokens`；这样模型不会把整段输出预算耗在不可用于事实提交的推理文本上。自驱审议没有玩家给出的明确目标，需要依据内驱、外驱和结构约束进行短权衡，因此默认开启约 128 token 的 thinking。Provider 通过顶层 `reasoning_budget_tokens` 限制思考段预算；该预算不等于最终 JSON 的总输出预算。无论是否开启 thinking，Runtime 只解析最终 JSON，`reasoning_content` 永远不进入对白、记忆或世界事实。
+P0 的结构化 `IntentProposal` 是短输出任务；玩家对白拆成独立的 `utterance_understanding` 和 `player_dialogue` 两次结构化调用。前者需要理解自然语言和歧义，默认使用约 128 token 的 thinking；后者只根据已解析的通信意图和当前事实生成简短回答，默认关闭 thinking。自驱审议没有玩家给出的明确目标，需要依据内驱、外驱和结构约束进行短权衡，因此默认开启约 128 token 的 thinking。Provider 通过顶层 `reasoning_budget_tokens` 限制思考段预算；该预算不等于最终 JSON 的总输出预算。无论是否开启 thinking，Runtime 只解析最终 JSON，`reasoning_content` 永远不进入对白、记忆或世界事实。
 
 小模型的 Provider 策略按决策价值分档，而不是固定追求最大思考预算：普通对白和低风险动作关闭 thinking；候选之间存在社会冲突、秘密或承诺权衡时使用约 128 token 的 reasoning budget；低置信度或校验失败才升级到 256。512 以上只用于演化提案、沙箱解释和离线分析，不进入每个 NPC Turn。预算升级必须记录原因、耗时、最终候选和校验结果，便于以后用真实回放重新校准。
 
-Provider 与决策预算由可版本化的 Intelligence Profile 选择，不绑定具体模型。正式配置是 `data/intelligence-profile.json`，CLI 通过 `--profile PATH --provider profile` 显式使用它；`--provider mock` 保留确定性离线验证。Schema 位于 `data/schemas/intelligence-profile.schema.json`。
+Provider 与决策预算由可版本化的 Intelligence Profile 选择，不绑定具体模型。正式配置是 `data/intelligence-profile.json`；交互式 client、text UI 和 headless 默认使用 `profile`，测试与可重复离线批处理通过 `--provider mock` 显式选择。Schema 位于 `data/schemas/intelligence-profile.schema.json`。
 
 Profile 的 `decision_policy` 是按 channel 使用的命名策略表。Provider 接收 Runtime 解析后的 `provider_policy`，只负责执行对应预算和输出格式，不再根据 `player_dialogue` 或 `autonomous_reappraisal` 这样的业务触发字符串猜测决策类型。
 
@@ -288,6 +288,11 @@ Profile 的 `decision_policy` 是按 channel 使用的命名策略表。Provider
   "decision_policy": {
     "player_dialogue": {
       "thinking": false,
+      "max_tokens": 512
+    },
+    "utterance_understanding": {
+      "thinking": true,
+      "reasoning_budget_tokens": 128,
       "max_tokens": 512
     },
     "autonomous_reappraisal": {
@@ -491,7 +496,7 @@ P0 承诺检查点恢复：读取已提交 Snapshot 和记录的结构化响应�
 
 P0 必须支持：任意最小内容包启动；NPC 无玩家继续运行；需求随时间衰减并产生 `need.*` 事件；已提交行动产生满足；Goal/FSM/BT 分层；非法动作不改变事实；实体生命周期可审计；模型关闭时世界仍可玩；Snapshot 恢复和回放不调用 LLM；文本界面能显示驱动力和拒绝原因。
 
-首个验收场景要求玩家与三个重要 NPC 各交谈多轮后仍保持角色底稿、知识边界和已确认事实；接受、拒绝和违背同一承诺会产生不同任务、关系和后续表达；玩家推进两天时至少两个 NPC 在无玩家参与下改变位置、资源或目标阶段；未知实体、过期承诺、版本冲突、非法动作和重复 turn 不改变事实。模型服务关闭时，规则台词、世界推进、任务和存档仍可用。
+首个验收场景要求玩家与三个重要 NPC 各交谈多轮后仍保持角色底稿、知识边界和已确认事实；接受、拒绝和违背同一承诺会产生不同任务、关系和后续表达；玩家推进两天时至少两个 NPC 在无玩家参与下改变位置、资源或目标阶段；未知实体、过期承诺、版本冲突、非法动作和重复 turn 不改变事实。模型服务关闭时，世界时间推进、任务和存档仍可用；玩家对话返回可重试错误且不猜测语义、不提交行动。
 
 ### P1：潮门港内容和集体驱力
 

@@ -4,7 +4,7 @@
   "id": "fixture.port.instance",
   "display_name": "Harbor Exchange",
   "content_pack": "fixture.port",
-  "content_version": "fixture-port-1.0",
+  "content_version": "fixture-port-1.2",
   "world_id": "port_world",
   "initial_time": {
     "day": 8,
