@@ -49,6 +49,42 @@ Json experienceEvidence(const NpcState& npc) {
     }
     return result;
 }
+
+Json memoryEvidence(const NpcState& npc) {
+    Json result = Json::array();
+    const auto begin = npc.memories.size() > kMaxEvolutionEvidenceEntries
+                           ? npc.memories.size() - kMaxEvolutionEvidenceEntries
+                           : 0;
+    for (std::size_t index = begin; index < npc.memories.size(); ++index) {
+        const auto& memory = npc.memories[index];
+        result.push_back(Json{{"kind", memory.kind}, {"text", memory.text},
+                              {"at", memory.at.minute}, {"confidence", memory.confidence}});
+    }
+    return result;
+}
+
+Json relationshipEvidence(const NpcState& npc) {
+    Json result = Json::object();
+    for (const auto& [target, axes] : npc.relationships) {
+        result[target] = Json{{"trust", axes.trust}, {"respect", axes.respect},
+                              {"fear", axes.fear}, {"owed", axes.owed}};
+    }
+    return result;
+}
+
+Json stimulusEvidence(const NpcState& npc) {
+    Json result = Json::array();
+    for (const auto& stimulus : npc.stimuli) {
+        if (!stimulus.active) continue;
+        result.push_back(Json{{"id", stimulus.id}, {"source_event", stimulus.sourceEvent},
+                              {"source_sequence", stimulus.sourceSequence}, {"category", stimulus.category},
+                              {"actor", stimulus.actor}, {"target", stimulus.target},
+                              {"expires_at", stimulus.expiresAt.minute}, {"valence", stimulus.valence},
+                              {"salience", stimulus.effectiveSalience},
+                              {"visibility", stimulus.visibilityScope}});
+    }
+    return result;
+}
 }  // namespace
 
 ProviderResponse WorldEvolutionSystem::requestProposal(const std::string& evolutionLevel,
@@ -76,11 +112,28 @@ ProviderResponse WorldEvolutionSystem::requestProposal(const std::string& evolut
             needs[needId] = Json{{"deficit", need.deficit}, {"sensitivity", need.sensitivity},
                                   {"confidence", need.evidenceConfidence}};
         }
-        npcs[id] = Json{{"location", npc.location}, {"strategy", npc.strategy}, {"goal_stage", npc.goalStage},
+        Json activity = Json{{"status", toString(npc.activity.status)}};
+        if (npc.activity.goal) {
+            activity["goal"] = Json{{"id", npc.activity.goal->id}, {"intent", npc.activity.goal->intent},
+                                     {"target", npc.activity.goal->target},
+                                     {"status", toString(npc.activity.goal->status)},
+                                     {"deadline", npc.activity.goal->deadline.minute}};
+        }
+        if (npc.activity.process) {
+            activity["process"] = Json{{"id", npc.activity.process->id},
+                                        {"action", npc.activity.process->actionId},
+                                        {"recipe", npc.activity.process->recipeId},
+                                        {"status", toString(npc.activity.process->status)},
+                                        {"progress", npc.activity.process->progress},
+                                        {"completes_at", npc.activity.process->completesAt.minute}};
+        }
+        npcs[id] = Json{{"location", npc.location}, {"mode", npc.mode}, {"strategy", npc.strategy},
+                        {"goal_stage", npc.goalStage}, {"activity", activity},
                         {"needs", needs}, {"active_process", npc.activity.process.has_value()},
                         {"memory_count", npc.memories.size()}, {"knowledge_count", npc.knowledge.size()},
                         {"experience_count", npc.experiences.size()}, {"knowledge", knowledgeEvidence(npc)},
-                        {"experiences", experienceEvidence(npc)}};
+                        {"experiences", experienceEvidence(npc)}, {"memories", memoryEvidence(npc)},
+                        {"relationships", relationshipEvidence(npc)}, {"stimuli", stimulusEvidence(npc)}};
     }
     Json allowedOperations = evolutionLevel == "level1"
                                  ? Json::array({"overlay_strategy", "overlay_schedule", "register_behavior_recipe"})
