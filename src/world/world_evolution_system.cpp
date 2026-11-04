@@ -250,6 +250,18 @@ std::size_t WorldEvolutionSystem::pumpAsyncProposals() {
                   Json{{"proposal", EvolutionManager::toJson(proposal)}, {"sandbox", sandboxJson}});
             finish();
         } catch (const std::exception& error) {
+            if (queued.request.attempt < 2 && queued.provider == "llama.cpp") {
+                const Json feedback{{"attempt", queued.request.attempt + 1},
+                                    {"code", "invalid_evolution_proposal"},
+                                    {"message", error.what()},
+                                    {"previous_proposal", queued.response.evolutionProposal}};
+                auto repair = queued.request;
+                ++repair.attempt;
+                repair.requestId += ":repair:" + std::to_string(repair.attempt);
+                repair.validationFeedback = feedback;
+                repair.context["validation_feedback"] = feedback;
+                if (world_.evolution_->submit(std::move(repair)).accepted) continue;
+            }
             audit("evolution.proposal_rejected", "The Runtime could not parse or sandbox an automatic evolution proposal",
                   Json{{"error", error.what()}});
             finish();
