@@ -394,12 +394,15 @@ DecisionContext WorldService::decisionContext(const std::string& npcId) const {
     // the just-created request is stale before the transaction closes.
     context.worldRevision = state_.revision + (transactionManager_.active() ? 1 : 0);
     context.npcStateVersion = npc.stateVersion;
+    const auto ownerIsNpc = [this](const std::string& owner) {
+        if (state_.npcs.contains(owner)) return true;
+        return owner.starts_with("npc:") && state_.npcs.contains(owner.substr(4));
+    };
     std::ostringstream resources;
     for (const auto& [id, resourceDefinition] : content_.resources) {
         const bool locationVisible = resourceDefinition.location.empty() || resourceDefinition.location == npc.location;
-        const bool ownerVisible = resourceDefinition.owner.empty() || resourceDefinition.owner == "world" ||
-                                  resourceDefinition.owner == "village" || resourceDefinition.owner == npcId ||
-                                  resourceDefinition.owner == npcEntityId(npcId);
+        const bool ownerVisible = !ownerIsNpc(resourceDefinition.owner) ||
+                                  resourceDefinition.owner == npcId || resourceDefinition.owner == npcEntityId(npcId);
         if (!locationVisible || !ownerVisible) continue;
         resources << id << '=' << resourceValue(id) << ' ' << resourceDefinition.unit << ';';
     }
@@ -591,9 +594,8 @@ DecisionContext WorldService::decisionContext(const std::string& npcId) const {
         if (definition == content_.resources.end()) continue;
         const auto& authoredResource = definition->second;
         const bool locationVisible = authoredResource.location.empty() || authoredResource.location == npc.location;
-        const bool ownerVisible = authoredResource.owner.empty() || authoredResource.owner == "world" ||
-                                  authoredResource.owner == "village" || authoredResource.owner == npcId ||
-                                  authoredResource.owner == npcEntityId(npcId);
+        const bool ownerVisible = !ownerIsNpc(authoredResource.owner) ||
+                                  authoredResource.owner == npcId || authoredResource.owner == npcEntityId(npcId);
         if (!locationVisible || !ownerVisible) continue;
         context.worldSnapshot["public_resources"][resourceId] =
             Json{{"amount", resource.amount}, {"reserved", resource.reserved},
