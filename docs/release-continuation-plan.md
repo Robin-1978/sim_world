@@ -154,7 +154,7 @@ Evolution Proposal Schema、提案库、EventLog 来源事实、回放沙箱、�
 
 | 目标 | 当前状态 | 验证或下一步 |
 |---|---|---|
-| Runtime Core：事实、事务、Revision、事件、调度、实体生命周期、快照/回放 | 纵向完成 | 继续保持单一 WorldState 写入边界；数据库 durable commit 属于后续适配器 |
+| Runtime Core：事实、事务、Revision、事件、调度、实体生命周期、快照/回放 | 纵向完成 | 继续保持单一 WorldState 写入边界；JSON 与可选 SQLite durable checkpoint 已接入，逐根事务自动 durable commit 仍需更强的崩溃恢复策略 |
 | Content Pack / Game Instance / World Runtime State 分离 | 纵向完成 | `data/README.md` 固定静态输入与运行存档边界；继续用第二、第三实例验证可替换性 |
 | 内驱：需求衰减、临界、满足、预期适应、多需求排序 | 纵向完成 | `DriveEvaluation` 已进入排序和 LLM 上下文；后续增加成本/风险的通用内容字段 |
 | 外驱与结构：Stimulus、Constraint、权限、异常和安全事实 | 纵向完成 | 继续扩展可声明事实类型，不用文本关键词代替模型理解 |
