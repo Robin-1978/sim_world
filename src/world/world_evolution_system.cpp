@@ -8,11 +8,46 @@
 namespace tide_marks {
 
 namespace {
+constexpr std::size_t kMaxEvolutionEvidenceEntries = 8;
+
 std::vector<std::string> overlayIds(const WorldState& state) {
     std::vector<std::string> ids;
     ids.reserve(state.activeOverlays.size());
     for (const auto& overlay : state.activeOverlays) ids.push_back(overlay.proposalId);
     return ids;
+}
+
+Json knowledgeEvidence(const NpcState& npc) {
+    Json result = Json::array();
+    const auto begin = npc.knowledge.size() > kMaxEvolutionEvidenceEntries
+                           ? npc.knowledge.size() - kMaxEvolutionEvidenceEntries
+                           : 0;
+    for (std::size_t index = begin; index < npc.knowledge.size(); ++index) {
+        const auto& fact = npc.knowledge[index];
+        result.push_back(Json{{"id", fact.id}, {"subject", fact.subject}, {"predicate", fact.predicate},
+                              {"value", fact.value}, {"source_sequence", fact.sourceSequence},
+                              {"source_type", fact.sourceType}, {"learned_at", fact.learnedAt.minute},
+                              {"scope", fact.scope}, {"confidence", fact.confidence},
+                              {"confirmed", fact.confirmed}});
+    }
+    return result;
+}
+
+Json experienceEvidence(const NpcState& npc) {
+    Json result = Json::array();
+    const auto begin = npc.experiences.size() > kMaxEvolutionEvidenceEntries
+                           ? npc.experiences.size() - kMaxEvolutionEvidenceEntries
+                           : 0;
+    for (std::size_t index = begin; index < npc.experiences.size(); ++index) {
+        const auto& experience = npc.experiences[index];
+        result.push_back(Json{{"id", experience.id}, {"domain", experience.domain},
+                              {"trigger", experience.trigger}, {"action", experience.action},
+                              {"outcome", experience.outcome}, {"source_sequences", experience.sourceSequences},
+                              {"learned_at", experience.learnedAt.minute},
+                              {"last_used", experience.lastUsed.minute},
+                              {"confidence", experience.confidence}, {"personal", experience.personal}});
+    }
+    return result;
 }
 }  // namespace
 
@@ -44,7 +79,8 @@ ProviderResponse WorldEvolutionSystem::requestProposal(const std::string& evolut
         npcs[id] = Json{{"location", npc.location}, {"strategy", npc.strategy}, {"goal_stage", npc.goalStage},
                         {"needs", needs}, {"active_process", npc.activity.process.has_value()},
                         {"memory_count", npc.memories.size()}, {"knowledge_count", npc.knowledge.size()},
-                        {"experience_count", npc.experiences.size()}};
+                        {"experience_count", npc.experiences.size()}, {"knowledge", knowledgeEvidence(npc)},
+                        {"experiences", experienceEvidence(npc)}};
     }
     Json allowedOperations = evolutionLevel == "level1"
                                  ? Json::array({"overlay_strategy", "overlay_schedule", "register_behavior_recipe"})
