@@ -1,0 +1,230 @@
+{
+  "kind": "world",
+  "content_version": "glass-orchard-1.0.0",
+  "id": "glass_orchard_world",
+  "display_name": "The Glass Orchard",
+  "initial_time": {"day": 21, "hour": 9},
+  "drive_adaptation": {
+    "enabled": true,
+    "expectation_learning_rate": 0.2,
+    "max_expectation_step": 0.04,
+    "cooldown_minutes": 90
+  },
+  "stimulus_policy": {
+    "max_active_per_npc": 8,
+    "novelty_decay": 0.45,
+    "habituation_step": 0.08,
+    "min_sensitivity": 0.4,
+    "max_sensitivity": 1.0,
+    "repeat_window_minutes": 300
+  },
+  "npc_deliberation": {
+    "enabled": true,
+    "min_stimulus_salience": 0.7,
+    "min_drive_pressure": 0.8,
+    "min_interrupt_salience": 0.9,
+    "cooldown_minutes": 300
+  },
+  "simulation_policy": {
+    "near_tick_minutes": 1,
+    "far_tick_minutes": 20
+  },
+  "promise_policy": {
+    "renegotiation_extension_minutes": 720,
+    "broken": {
+      "promiser": {"trust": -0.12, "respect": -0.08},
+      "promisee": {"trust": -0.05, "owed": 0.1}
+    },
+    "refused": {"actor": {"trust": -0.03}},
+    "accepted": {"actor": {"trust": 0.04}}
+  },
+  "stimulus_rules": [
+    {
+      "id": "orchard_exchange",
+      "event_prefix": "glass_orchard.exchange",
+      "category": "institutional_change",
+      "visibility": "world",
+      "relevance": 0.75,
+      "intensity": 0.55,
+      "urgency": 0.35,
+      "valence": 0.2,
+      "source_confidence": 1.0,
+      "ttl_minutes": 180
+    }
+  ],
+  "resources": {
+    "lamp_oil": {
+      "kind": "provisions",
+      "unit": "flask",
+      "owner": "world",
+      "initial": 20,
+      "minimum": 0,
+      "maximum": 40
+    },
+    "resin": {
+      "kind": "material",
+      "unit": "cake",
+      "owner": "world",
+      "initial": 12,
+      "minimum": 0,
+      "maximum": 30
+    }
+  },
+  "activities": [
+    {
+      "id": "ridge_exchange",
+      "trigger": "hour",
+      "hour": 10,
+      "actor": "orin",
+      "target": "ridge_compact",
+      "event_type": "glass_orchard.exchange",
+      "detail": "Orin and Kel renew the lamp-and-resin exchange",
+      "effects": [
+        {
+          "operation": "meta_action",
+          "meta_action": "exchange_harvest",
+          "args": {
+            "seller": "self",
+            "buyer": "kel",
+            "seller_resource": "lamp_oil",
+            "seller_amount": 1,
+            "buyer_resource": "resin",
+            "buyer_amount": 1
+          }
+        },
+        {"operation": "meta_action", "meta_action": "record_accord"},
+        {"operation": "meta_action", "meta_action": "renew_oath"},
+        {"operation": "need.relieve", "action": "exchange_harvest"}
+      ]
+    },
+    {
+      "id": "kel_accepts_harvest",
+      "trigger": "hour",
+      "hour": 11,
+      "actor": "kel",
+      "target": "glass_orchard",
+      "event_type": "glass_orchard.harvest_accepted",
+      "detail": "Kel records the exchange in the orchard ledger",
+      "effects": [
+        {"operation": "need.relieve", "action": "exchange_harvest"}
+      ]
+    }
+  ],
+  "entity_archetypes": [
+    {"id": "orchard_object", "kind": "object", "metadata": {"persistent": true}}
+  ],
+  "entities": [
+    {
+      "id": "lampsmith",
+      "kind": "workshop",
+      "display_name": "Ridge Lampsmith",
+      "bounds": {"min_x": 0, "max_x": 2, "min_z": 0, "max_z": 2},
+      "tags": ["region:north_ridge"]
+    },
+    {
+      "id": "ridge_gallery",
+      "kind": "gallery",
+      "display_name": "Wind Gallery",
+      "bounds": {"min_x": 3, "max_x": 5, "min_z": 0, "max_z": 2},
+      "tags": ["region:north_ridge", "public"]
+    },
+    {
+      "id": "glass_orchard",
+      "kind": "orchard",
+      "display_name": "Glass Orchard",
+      "bounds": {"min_x": 6, "max_x": 10, "min_z": 0, "max_z": 4},
+      "tags": ["region:salt_lowlands"]
+    }
+  ],
+  "links": [
+    {
+      "id": "wind_gallery",
+      "kind": "covered_bridge",
+      "endpoints": ["lampsmith", "ridge_gallery"],
+      "traversable": true,
+      "tags": ["mechanism", "region:north_ridge"]
+    },
+    {
+      "id": "orchard_stair",
+      "kind": "stair",
+      "endpoints": ["ridge_gallery", "glass_orchard"],
+      "traversable": true,
+      "tags": ["cross_region"]
+    }
+  ],
+  "social_groups": [
+    {
+      "id": "lantern_keepers",
+      "kind": "faction",
+      "name": "Lantern Keepers",
+      "metrics": {"legitimacy": 0.55, "oil_reserve": 0.45},
+      "initial_members": {"orin": "courier"},
+      "initial_relationships": {
+        "orchard_wardens": {"trust": 0.35, "respect": 0.45, "fear": 0.0, "owed": 0.1}
+      }
+    },
+    {
+      "id": "orchard_wardens",
+      "kind": "faction",
+      "name": "Orchard Wardens",
+      "metrics": {"canopy_health": 0.62, "resin_reserve": 0.5},
+      "initial_members": {"kel": "warden"},
+      "initial_relationships": {
+        "lantern_keepers": {"trust": 0.35, "respect": 0.45, "fear": 0.0, "owed": 0.1}
+      }
+    },
+    {
+      "id": "ridge_compact",
+      "kind": "institution",
+      "name": "Ridge Compact",
+      "metrics": {"accord": 0.42},
+      "initial_members": {"orin": "witness", "kel": "witness"}
+    }
+  ],
+  "conversation_policy": {
+    "default_world_action_allowed": false,
+    "speech_acts": [
+      {"id": "greeting", "world_action_allowed": false, "patterns": ["hello", "hi ", "你好", "您好"]},
+      {"id": "farewell", "world_action_allowed": false, "patterns": ["bye", "goodbye", "再见"]},
+      {"id": "request", "world_action_allowed": true, "patterns": ["please", "can you", "请", "帮我"]},
+      {"id": "inquiry", "world_action_allowed": false, "patterns": ["what ", "why ", "什么", "为什么", "?"]}
+    ]
+  },
+  "conversation_channel": "visitor_dialogue",
+  "autonomous_channel": "warden_reflection",
+  "decision_channels": [
+    {
+      "id": "visitor_dialogue",
+      "conversation": true,
+      "classify_speech_act": true,
+      "default_world_action_allowed": false,
+      "default_speech_act": "statement",
+      "event_type": "dialogue.turn",
+      "memory_kind": "conversation",
+      "event_target": "player",
+      "provider_policy": "player_dialogue"
+    },
+    {
+      "id": "warden_reflection",
+      "conversation": false,
+      "classify_speech_act": false,
+      "default_world_action_allowed": true,
+      "default_speech_act": "autonomous",
+      "event_type": "world.intent",
+      "memory_kind": "intent",
+      "event_target": "self",
+      "provider_policy": "autonomous_reappraisal"
+    }
+  ],
+  "anomaly_rules": [
+    {
+      "id": "compact_accord_low",
+      "operation": "group_metric.below",
+      "subject": "ridge_compact",
+      "metric": "accord",
+      "threshold": 0.45,
+      "severity": "warning",
+      "description": "The cross-region compact is below its trust floor."
+    }
+  ]
+}

@@ -1,0 +1,31 @@
+{
+  "id": "orin",
+  "name": "Orin",
+  "role": "ridge lamp courier",
+  "home": "lampsmith",
+  "workplace": "ridge_gallery",
+  "public_goal": "Keep the orchard lamps burning through the storm",
+  "hidden_goal": "Learn why the old boundary lamps stopped",
+  "boundary": "Will not carry a lamp through a closed gallery",
+  "simulation_tier": "near",
+  "initial": {"location": "lampsmith", "strategy": "carry_lanterns"},
+  "needs": [
+    {
+      "id": "route_stewardship",
+      "domain": "stewardship",
+      "dimension": "shared_access",
+      "initial_deficit": 0.25,
+      "decay_per_hour": 0.01,
+      "critical_threshold": 0.80,
+      "weight": 1.0,
+      "priority": 0.1,
+      "satisfiers": {
+        "exchange_harvest": {
+          "relief": 0.18,
+          "meta_actions": ["exchange_harvest", "relieve_need"]
+        }
+      }
+    }
+  ],
+  "schedule": {"00:00-00:00": "lampsmith"}
+}

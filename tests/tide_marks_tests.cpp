@@ -998,6 +998,53 @@ void port_slice_is_a_replaceable_social_instance() {
            "the replaceable harbor instance restores its social facts");
 }
 
+void glass_orchard_is_a_second_replaceable_world_instance() {
+    const auto fixtureRoot = std::filesystem::path(TIDE_MARKS_TEST_DATA_DIR) / "glass-orchard-pack";
+    auto service = WorldService::load(fixtureRoot.string());
+    expect(service.content().id == "fixture.glass_orchard" && service.state().worldId == "glass_orchard_world" &&
+               service.state().npcs.size() == 2,
+           "a second fiction instance loads without village or harbor identifiers");
+    expect(service.state().npcs.at("orin").needs.contains("route_stewardship") &&
+               service.state().npcs.at("kel").needs.contains("canopy_resilience"),
+           "the second instance supplies its own stewardship and ecological drives");
+    expect(service.planRoute("lampsmith", "glass_orchard").has_value(),
+           "the second instance supplies a connected cross-region topology");
+    expect(service.state().inventories.at("npc:orin").at("lamp_oil") == 3 &&
+               service.state().inventories.at("npc:kel").at("resin") == 2,
+           "the second instance seeds actor-owned resources through the common ledger");
+    service.advanceMinutes(60);
+    expect(service.state().inventories.at("npc:orin").at("lamp_oil") == 2 &&
+               service.state().inventories.at("npc:orin").at("resin") == 1 &&
+               service.state().inventories.at("npc:kel").at("lamp_oil") == 1 &&
+               service.state().inventories.at("npc:kel").at("resin") == 1,
+           "the second instance settles its authored exchange with the generic operator");
+    expect(service.state().socialGroups.at("ridge_compact").metrics.at("accord") > 0.49 &&
+               service.state().npcs.at("orin").relationships.at("kel").trust > 0.42,
+           "the second instance produces institution and relationship facts");
+    expect(std::any_of(service.state().events.begin(), service.state().events.end(), [](const auto& event) {
+               return event.type == "trade.settled";
+           }),
+           "the second instance exchange is represented by an auditable trade event");
+    const auto promise = service.createPromise("orin", "kel", "deliver the winter lamp oil", 1,
+                                               "glass-orchard-promise");
+    expect(promise.accepted &&
+               service.decidePromise(promise.message, PromiseStatus::Accepted, "kel",
+                                     "glass-orchard-promise-accept").accepted,
+           "the second instance uses the same persistent social contract lifecycle");
+    service.advanceMinutes(kMinutesPerDay);
+    expect(service.state().promises.at(promise.message).status == PromiseStatus::Broken &&
+               std::any_of(service.state().events.begin(), service.state().events.end(), [&promise](const auto& event) {
+                   return event.type == "promise.broken" && event.data.value("promise_id", "") == promise.message;
+               }),
+           "an overdue promise produces a later world consequence without a second exchange rule");
+    const auto snapshot = service.snapshotJson();
+    auto restored = WorldService::fromSnapshot(snapshot, fixtureRoot.string());
+    expect(restored.state().contentVersion == service.state().contentVersion &&
+               restored.state().npcs.at("kel").needs.at("canopy_resilience").deficit ==
+                   service.state().npcs.at("kel").needs.at("canopy_resilience").deficit,
+           "the second instance restores custom drive state without a compatibility alias");
+}
+
 void offline_scheduler_baseline_is_measurable() {
     auto village = WorldService::load();
     auto harbor = WorldService::load(
@@ -1272,6 +1319,8 @@ int main() {
     run("runtime_loads_a_world_without_village_identifiers", runtime_loads_a_world_without_village_identifiers);
     run("social_groups_trade_and_relationships_are_shared_facts", social_groups_trade_and_relationships_are_shared_facts);
     run("port_slice_is_a_replaceable_social_instance", port_slice_is_a_replaceable_social_instance);
+    run("glass_orchard_is_a_second_replaceable_world_instance",
+        glass_orchard_is_a_second_replaceable_world_instance);
     run("offline_scheduler_baseline_is_measurable", offline_scheduler_baseline_is_measurable);
     run("world_intelligence_detects_anomalies_and_runs_counterfactuals",
         world_intelligence_detects_anomalies_and_runs_counterfactuals);

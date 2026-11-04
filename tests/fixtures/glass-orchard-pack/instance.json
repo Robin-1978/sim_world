@@ -1,0 +1,30 @@
+{
+  "kind": "game_instance",
+  "schema_version": 1,
+  "id": "fixture.glass_orchard.instance",
+  "display_name": "The Glass Orchard",
+  "content_pack": "fixture.glass_orchard",
+  "content_version": "glass-orchard-1.0.0",
+  "world_id": "glass_orchard_world",
+  "initial_time": {
+    "day": 21,
+    "hour": 9,
+    "minute": 0
+  },
+  "npcs": {
+    "orin": {
+      "location": "lampsmith",
+      "schedule_label": "lampsmith",
+      "strategy": "carry_lanterns"
+    },
+    "kel": {
+      "location": "glass_orchard",
+      "schedule_label": "glass_orchard",
+      "strategy": "guard_canopy"
+    }
+  },
+  "inventories": {
+    "orin": {"lamp_oil": 3},
+    "kel": {"resin": 2}
+  }
+}

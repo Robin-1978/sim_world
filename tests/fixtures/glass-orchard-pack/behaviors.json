@@ -1,0 +1,83 @@
+{
+  "kind": "behavior_pack",
+  "schema_version": 2,
+  "meta_actions": [
+    {
+      "id": "relieve_need",
+      "category": "need",
+      "operator": "need.relieve"
+    },
+    {
+      "id": "exchange_harvest",
+      "category": "exchange",
+      "operator": "trade.execute"
+    },
+    {
+      "id": "record_accord",
+      "category": "institution",
+      "operator": "group.metric_adjust",
+      "args": {
+        "group": "ridge_compact",
+        "metric": "accord",
+        "delta": 0.08,
+        "reason": "The orchard and lampsmiths renewed their exchange"
+      }
+    },
+    {
+      "id": "renew_oath",
+      "category": "relationship",
+      "operator": "relationship.adjust",
+      "args": {
+        "target": "kel",
+        "trust": 0.08,
+        "respect": 0.04,
+        "owed": 0.02
+      }
+    }
+  ],
+  "conditions": [
+    {
+      "id": "always",
+      "operator": "always"
+    }
+  ],
+  "recipes": [
+    {
+      "id": "exchange_harvest",
+      "plan_id": "ridge_exchange",
+      "duration_minutes": 0,
+      "interruptible": true,
+      "interrupt_salience_threshold": 1.0,
+      "root": {
+        "type": "sequence",
+        "id": "exchange_harvest.sequence",
+        "children": [
+          {
+            "type": "condition",
+            "id": "exchange_harvest.always",
+            "name": "always"
+          },
+          {
+            "type": "meta_action",
+            "id": "exchange_harvest.swap",
+            "name": "exchange_harvest",
+            "args": {
+              "seller": "self",
+              "buyer": "kel",
+              "seller_resource": "lamp_oil",
+              "seller_amount": 1,
+              "buyer_resource": "resin",
+              "buyer_amount": 1
+            }
+          },
+          {
+            "type": "meta_action",
+            "id": "exchange_harvest.relieve",
+            "name": "relieve_need",
+            "args": {"action": "exchange_harvest"}
+          }
+        ]
+      }
+    }
+  ]
+}

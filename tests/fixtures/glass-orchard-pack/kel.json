@@ -1,0 +1,35 @@
+{
+  "id": "kel",
+  "name": "Kel",
+  "role": "glass orchard warden",
+  "home": "glass_orchard",
+  "workplace": "glass_orchard",
+  "public_goal": "Preserve the orchard through the salt wind",
+  "hidden_goal": "Keep the oldest tree alive until spring",
+  "boundary": "Will not trade away the last seed resin",
+  "simulation_tier": "far",
+  "initial": {
+    "location": "glass_orchard",
+    "strategy": "guard_canopy",
+    "peer_trust": {"orin": 0.4}
+  },
+  "needs": [
+    {
+      "id": "canopy_resilience",
+      "domain": "ecological",
+      "dimension": "canopy_health",
+      "initial_deficit": 0.18,
+      "decay_per_hour": 0.015,
+      "critical_threshold": 0.75,
+      "weight": 1.0,
+      "priority": 0.1,
+      "satisfiers": {
+        "exchange_harvest": {
+          "relief": 0.15,
+          "meta_actions": ["exchange_harvest", "relieve_need"]
+        }
+      }
+    }
+  ],
+  "schedule": {"00:00-00:00": "glass_orchard"}
+}

@@ -1,0 +1,11 @@
+{
+  "kind": "world_content_pack",
+  "schema_version": 1,
+  "id": "fixture.glass_orchard",
+  "version": "1.0.0",
+  "world": "world.json",
+  "npcs": ["orin.json", "kel.json"],
+  "dialogue": "dialogue.json",
+  "instance": "instance.json",
+  "behaviors": "behaviors.json"
+}

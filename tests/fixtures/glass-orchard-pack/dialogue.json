@@ -1,0 +1,26 @@
+{
+  "kind": "dialogue_beats",
+  "schema_version": 1,
+  "beats": [
+    {
+      "id": "orin_carry",
+      "npc": "orin",
+      "allowed_actions": ["exchange_harvest"],
+      "behaviors": {
+        "exchange_harvest": {
+          "keywords": ["trade", "oil", "resin", "lantern", "交易", "树脂"]
+        }
+      }
+    },
+    {
+      "id": "kel_guard",
+      "npc": "kel",
+      "allowed_actions": ["exchange_harvest"],
+      "behaviors": {
+        "exchange_harvest": {
+          "keywords": ["trade", "oil", "resin", "orchard", "交易", "果园"]
+        }
+      }
+    }
+  ]
+}
