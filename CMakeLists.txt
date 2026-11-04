@@ -10,7 +10,9 @@ if(TIDE_MARKS_ENABLE_SQLITE)
     find_path(TIDE_MARKS_SQLITE_INCLUDE_DIR sqlite3.h)
     find_library(TIDE_MARKS_SQLITE_LIBRARY NAMES sqlite3)
 endif()
-if(TIDE_MARKS_REQUIRE_SQLITE AND (NOT TIDE_MARKS_SQLITE_INCLUDE_DIR OR NOT TIDE_MARKS_SQLITE_LIBRARY))
+if(TIDE_MARKS_REQUIRE_SQLITE AND (NOT TIDE_MARKS_ENABLE_SQLITE OR
+                                  NOT TIDE_MARKS_SQLITE_INCLUDE_DIR OR
+                                  NOT TIDE_MARKS_SQLITE_LIBRARY))
     message(FATAL_ERROR "TIDE_MARKS_REQUIRE_SQLITE=ON but sqlite3 headers or library were not found")
 endif()
 
@@ -120,7 +122,7 @@ target_include_directories(tide_marks_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/sr
 target_compile_definitions(tide_marks_core PRIVATE
     TIDE_MARKS_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/data")
 target_link_libraries(tide_marks_core PUBLIC nlohmann_json::nlohmann_json Threads::Threads)
-if(TIDE_MARKS_SQLITE_INCLUDE_DIR AND TIDE_MARKS_SQLITE_LIBRARY)
+if(TIDE_MARKS_ENABLE_SQLITE AND TIDE_MARKS_SQLITE_INCLUDE_DIR AND TIDE_MARKS_SQLITE_LIBRARY)
     target_compile_definitions(tide_marks_core PUBLIC TIDE_MARKS_HAS_SQLITE=1)
     target_include_directories(tide_marks_core PUBLIC ${TIDE_MARKS_SQLITE_INCLUDE_DIR})
     target_link_libraries(tide_marks_core PUBLIC ${TIDE_MARKS_SQLITE_LIBRARY})
