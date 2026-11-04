@@ -1354,6 +1354,19 @@ void evolution_sandbox_isolated_and_versioned() {
                                           [](const auto& item) { return item.id == "market_stall"; }),
            "approved overlay operations can be applied to a versioned content view");
 
+    auto atomicOverlayContent = base.content();
+    const auto atomicOverlayVersion = atomicOverlayContent.contentVersion;
+    EvolutionProposal invalidBatch = approved;
+    invalidBatch.id = "overlay.partial.failure";
+    invalidBatch.operations = Json::array({
+        Json{{"operation", "create_entity_archetype"}, {"id", "temporary_stall"}, {"kind", "facility"}},
+        Json{{"operation", "unsupported_after_valid"}, {"id", "invalid_tail"}}});
+    const auto rejectedBatch = EvolutionManager::applyOverlay(atomicOverlayContent, invalidBatch);
+    expect(!rejectedBatch.valid && atomicOverlayContent.contentVersion == atomicOverlayVersion &&
+               std::none_of(atomicOverlayContent.entityArchetypes.begin(), atomicOverlayContent.entityArchetypes.end(),
+                            [](const auto& item) { return item.id == "temporary_stall"; }),
+           "a multi-operation overlay is committed only when every operation succeeds");
+
     const auto path = (std::filesystem::temp_directory_path() / "tide_marks_evolution.jsonl").string();
     std::filesystem::remove(path);
     EvolutionProposalStore::append(path, approved);

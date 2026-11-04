@@ -132,7 +132,7 @@ effective_salience = salience × adapted_sensitivity(source_type, actor)
 
 外驱的“自动演化”有两层：第一层是在已批准规则内，事件自动生成刺激、到期、聚合、习惯化和重新评价；第二层是新的刺激类型、评价规则或聚合方式，只能通过 `EvolutionProposal` 进入沙箱和版本化激活。后者不能由 LLM 直接登记为活动规则。
 
-安全需求必须有真实的威胁来源。当前 P0 的 `crossing_safety` 已参与缺口、目标排序和修船满足，但还没有攻击/破坏事件，因此它只能验证“安全状态衰减—修复—满足”的基础链路，不能宣称已经完成冲突驱动的安全模拟。P1 需要增加受约束的冲突事实：攻击或破坏是对目标的行动尝试，威胁和恐吓可以不造成物理损伤，防守、撤离、封锁和修复是响应行动。它们都必须先产生可审计事件，再由 `StimulusProjector` 投射为威胁刺激；实际安全缺口由事件、暴露时间、伤害/可用性变化和主体可信感知共同计算，LLM 只能权衡风险和响应，不能直接把安全感改成某个数值。
+安全需求必须有真实的威胁来源。P0 曾只用 `crossing_safety` 验证“安全状态衰减—修复—满足”；P1 现已增加 `conflict.attack`、`conflict.sabotage`、`security.threaten`、`security.defend`、`security.evacuate` 和 `security.repair`。攻击或破坏是对目标的行动尝试，威胁和恐吓可以只改变威胁与暴露而不造成物理损伤，防守、撤离和修复是独立响应。它们先提交可审计事件，再由 `StimulusProjector` 投射为威胁刺激；实际安全缺口由事件、暴露时间、完整性/可用性变化和主体可信感知共同计算，LLM 只能权衡风险和响应，不能直接把安全感改成某个数值。
 
 ### 结构：可执行约束与受治理演化
 
@@ -171,7 +171,7 @@ utility(a) = Σ(drive_i × expected_relief_i)
 
 个体需求通过共享资源和关系汇聚为社会驱力：粮食安全、运输能力、记录完整性、信任、成员流失、公共设施可用性和组织目标。集体指标必须声明参与实体、资源池、目标值、时间窗口、聚合方式、冲突权重和失败后果，不能简单取 NPC 平均值。
 
-P0 只实现个体需求和公共资源，验证“资源变化—行动—他人受影响”的因果链；P1 已增加可配置的组织成员、集体指标、跨主体关系与原子资源交易，冲突仲裁和近远场更新继续推进；P2 才允许 World Intelligence 提出新的社会指标或策略，并通过历史回放沙箱比较效果。自主性、胜任感和关系性作为横向调制因素，不压缩成单一需求层级。
+P0 只实现个体需求和公共资源，验证“资源变化—行动—他人受影响”的因果链；P1 已增加可配置的组织成员、集体指标、跨主体关系、原子资源交易、受约束的冲突/安全事实和近远场更新；P2 允许 World Intelligence 提出新的社会指标或策略，并通过历史回放沙箱比较效果。跨主体的资源抢占、复杂仲裁与更大规模协商仍是内容扩展项。自主性、胜任感和关系性作为横向调制因素，不压缩成单一需求层级。
 
 ### 世界模型的基本对象
 
@@ -348,19 +348,20 @@ Runtime 只向内容和模型暴露一组可审计的原子元动作。元动作
 | P1 operator | 移动 | `movement.traverse` / `movement.arrive` | 已实现：通过活动拓扑规划路线，校验通行状态后提交 `entity.moved` |
 | P1 operator | 冲突 | `conflict.attack` / `conflict.sabotage` | 已实现安全事实入口：只改变完整性、可用性、威胁和暴露，不直接销毁实体或改需求数值 |
 | P1 operator | 安全 | `security.threaten` / `security.defend` / `security.evacuate` / `security.repair` | 已实现：更新 `SecurityState` 并由 StimulusRule 投射安全外驱；修复可消费已定义资源 |
-| P1 operator | 承诺 | `create_promise` / `transition_promise` | 建立、接受、重谈、兑现或违约；当前 P0 通过命令接口验证承诺生命周期 |
+| P1 operator | 承诺 | `promise.create` / `promise.transition` | 建立、接受、重谈、兑现或违约；命令与 Behavior Recipe 共用同一事务和事件边界 |
 | P1 operator | 知识/经验 | `memory.append` / `knowledge.assert` / `experience.record` | 已实现为 NPC 作用域投影：记忆、知识和经验都必须引用已提交事件，保存时间、范围和置信度；它们不能直接改写客观事实 |
+| P1 operator | 生产 | `production.execute` | 先验证全部输入余量、资源注册和输出容量，再一次性交换，输入不足或容量溢出不产生部分事实 |
 | P0 command API | 实体 | `create_entity` / `set_entity_lifecycle` | 从注册原型创建实体，或休眠/销毁；当前不是 Behavior DSL operator |
 
 `emit_event` 不作为可由模型自由调用的独立“改写动作”；每个成功元动作和事务由 Runtime 自动产生 WorldEvent，避免事实与事件分开提交。`set_resource`、`adjust_resource` 和 `set_npc_resource` 这类可写入任意绝对值或第二份库存的接口不向内容和 LLM 暴露，内容使用受单位、所有权、预留、前置条件和容量约束的语义化元动作。
 
-村庄复合行为可以由当前已注册元动作自然生成：配给是“检查粮食 → 消耗粮食 → 满足需求 → 记录”；修船是“检查粮食和船况 → 消耗粮食 → 增加船况 → 调整关系”；档案整理使用资源/需求配方；资源转移、移动和安全响应已经可以作为配方节点进入内容包；知识、经验和承诺仍通过独立命令/策略接口逐步 operator 化。
+村庄复合行为可以由当前已注册元动作自然生成：配给是“检查粮食 → 消耗粮食 → 满足需求 → 记录”；修船是“检查粮食和船况 → 消耗粮食 → 增加船况 → 调整关系”；档案整理使用资源/需求配方；资源转移、生产、移动、安全和承诺都可以作为配方节点进入内容包，知识、经验和记忆通过带来源约束的 operator 写入主体投影。
 
 资源账本是可复用的 World Simulation Framework 能力，不是村庄专用规则。Runtime 只实现通用的数量、容量、所有权、转移、生产、消耗、预留和释放算子；资源 ID、单位、容量、衰减和替代关系由 Content Pack 声明。资源能力是可选的，未声明资源的世界不会因为 Runtime 存在资源算子而产生资源事实。
 
 长过程是否预留输入由行为配方的 `reservation_mode` 声明，当前值为 `none` 或 `input_resources`。Runtime 不根据持续时间、资源名称或 NPC 身份推断预留策略。`input_resources` 只建立本过程的计划占用，完成时消费并释放，暂停/取消时释放；它不改变资源事实数量。抢占不是当前已实现的能力，因为抢占会同时影响另一个过程的生命周期、重规划、通知和补偿。未来应以独立的声明式分配策略实现，并记录请求、批准、被抢占过程和后续重规划事件。
 
-定时 `Activity` 负责在作者定义的时刻唤醒内容动作；它可以直接声明已注册 operator，也可以用 `operation=meta_action` 引用行为包中的元动作和参数。Activity 的全部效果在嵌套事务中执行，任何一个 operator 失败都会撤销本次活动的暂存效果，并留下 `activity.failed` 审计事件。当前 P0 的 JSON Behavior DSL 已把资源和需求效果组合为条件、顺序、选择、超时和中断节点。`ProductionProcess` 的完整输入/输出和补偿语义仍属于 P1；`MetaActionDefinition` 描述单个已注册事实变更。三者由 ID 引用并分别校验。Game Instance 还可以声明 NPC/玩家库存初始值；这些是运行态事实的种子，不会写回 Content Pack。LLM 可以创造性提出新的行为组合、参数和目标，但必须使用已注册元动作；缺少表达力时生成 CapabilityProposal。整条计划先在暂存事务中汇总成本、预留和效果，不能逐个元动作直接写 WorldState。
+定时 `Activity` 负责在作者定义的时刻唤醒内容动作；它可以直接声明已注册 operator，也可以用 `operation=meta_action` 引用行为包中的元动作和参数。Activity 的全部效果在嵌套事务中执行，任何一个 operator 失败都会撤销本次活动的暂存效果，并留下 `activity.failed` 审计事件。JSON Behavior DSL 已把已注册效果组合为条件、顺序、选择、超时和中断节点；`production.execute` 已实现输入检查、输出容量检查和全量提交，长过程中断后的声明式补偿仍按具体内容声明。`MetaActionDefinition` 描述单个已注册事实变更，行为配方、过程与元动作由 ID 引用并分别校验。Game Instance 还可以声明 NPC/玩家库存初始值；这些是运行态事实的种子，不会写回 Content Pack。LLM 可以创造性提出新的行为组合、参数和目标，但必须使用已注册元动作；缺少表达力时生成 CapabilityProposal。整条计划先在暂存事务中汇总成本、预留和效果，不能逐个元动作直接写 WorldState。
 
 ```text
 IntentProposal + BehaviorRecipe

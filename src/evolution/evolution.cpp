@@ -242,16 +242,18 @@ EvolutionValidation EvolutionManager::applyOverlay(WorldContentPack& content,
     if (proposal.baseContentVersion != content.contentVersion) {
         return {false, "content_version_conflict", "Overlay base content does not match the active content."};
     }
+    auto candidate = content;
     EvolutionValidation applied;
     try {
-        applied = applyOperations(content, proposal);
+        applied = applyOperations(candidate, proposal);
     } catch (const std::exception& error) {
         return {false, "invalid_overlay_operation", error.what()};
     }
     if (!applied.valid) return applied;
-    content.contentVersion = content.contentVersion + "+overlay:" + proposal.id;
-    content.version = content.version + "+overlay:" + proposal.id;
-    if (content.instance) content.instance->contentVersion = content.contentVersion;
+    candidate.contentVersion = candidate.contentVersion + "+overlay:" + proposal.id;
+    candidate.version = candidate.version + "+overlay:" + proposal.id;
+    if (candidate.instance) candidate.instance->contentVersion = candidate.contentVersion;
+    content = std::move(candidate);
     return {true, "ok", "Approved overlay activated in the content view."};
 }
 

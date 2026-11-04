@@ -21,13 +21,13 @@
 | 内容包加载 | 已完成 | `WorldService::load/fromContent`, `data/`, `tests/fixtures/minimal-pack` |
 | 存档 schema 与事件截断点 | 已完成 | `world_state_json.*`, `save_schema_version=14`, `simulation_version=adaptive-runtime-p1.14`, `event_sequence`, `instance_id`, `inventories`, `relationships`, `social_groups`, `NpcActivity` 聚合、`lastSimulationTick/lastDriveTick`、`definition_id` 引用、实例/内容版本校验与可重放 overlay 栈；运行态不复制角色定义 |
 | 内驱/需求模型 | 需求域是内容定义的标签，村庄默认四域、Glass Orchard 使用 stewardship/ecological；显式满足配方和有界预期适应已实现，安全事实已支持冲突/威胁/防守/撤离/修复并通过 Stimulus 投射 | `src/npc/drive_system.*`, `NeedContent`, `NeedState`, `need.*` events, `tests/fixtures/glass-orchard-pack` |
-| 外驱/结构上下文 | 已实现结构化 Stimulus/Constraint、到期、习惯化和快照；结构演化治理已接入，沙箱留给 P2 | `DecisionContext.stimuli`, `constraints`, `WorldService::projectStimuli`, `src/evolution/evolution.*` |
-| LLM 解释与权衡 | 同步对话/自驱提案、channel 策略、Qwen JSON Schema、缺失 action 回退和异步 TurnQueue 已完成；过期结果只写审计事件 | `IntentProposal`, `IProvider`, `TurnQueue`, `decision_channels`, `WorldService::converse/deliberate/pumpAsyncTurns` |
+| 外驱/结构上下文 | 已实现结构化 Stimulus/Constraint、到期、习惯化和快照；结构演化治理、沙箱和版本化激活均已接入 | `DecisionContext.stimuli`, `constraints`, `WorldService::projectStimuli`, `src/evolution/evolution.*` |
+| LLM 解释与权衡 | 同步对话/自驱提案、channel 策略、Qwen JSON Schema、缺失 action 回退和异步 TurnQueue 已完成；有效上下文由主线程提交，过期结果只写审计事件 | `IntentProposal`, `IProvider`, `TurnQueue`, `decision_channels`, `WorldService::converse/deliberate/pumpAsyncTurns` |
 | 长过程执行 | 数据驱动时长、单一活动槽、配方声明的输入预留、完成/挂起/恢复事件和 Snapshot 恢复均已实现；挂起释放预留，刺激清除且资源可用时按原计划恢复并顺延完成时间；Goal、Process、FSM、BT 是同一活动的四个投影 | `ProcessExecution`, `NpcActivity`, `reservation_mode`, `WorldService::tickProcesses`, `resumeSuspendedProcesses`, `src/npc/state_machine.*` |
 | 通用资源与实例活动 | 通用资源数量、可选输入预留、实体库存、资源转移、生产、原子交易、承诺和定时 Activity 已实现；Activity 可组合已注册 operator 并在嵌套事务中失败补偿，跨主体抢占仍属于后续工作 | `ResourceContent`, `ResourceState(amount,reserved)`, `WorldState.inventories`, `GameInstanceContent.inventoryInitial`, `reservation_mode`, `tradeResources`, `ActivityContent`；承诺关系增量与重谈时长已由 `promise_policy` 驱动 |
 | 社会关系与组织 | 已实现 NPC/玩家/组织四轴关系、声明式社会组成员与指标、交易和快照恢复；港区与 Glass Orchard 分别使用自己的组织、阵营和制度事实，没有 Runtime 特例 | `NpcState.relationships`, `WorldState.socialGroups`, `SocialGroupContent`, `relationship.adjust`, `trade.execute`, `tests/fixtures/port-pack`, `tests/fixtures/glass-orchard-pack` |
 | 元动作语义目录 | 已冻结；故事动作 ID 由内容包绑定到通用 operator，行为配方在运行时编译为 BT | `src/world/meta_actions.*`, `src/npc/behavior_recipe.*`, `data/behaviors/village.json` |
-| World Intelligence 演化提案 | 提案持久化、验证、沙箱、版本化 overlay 激活/恢复/栈式回滚、内容声明异常检测和反事实场景实验已完成 | `src/evolution/evolution.*`, `src/evolution/anomaly.*`, `src/evolution/scenario.*`, `src/world/world_service.*`, `data/schemas/evolution-proposal.schema.json`, `data/schemas/scenario-proposal.schema.json`; 校验白名单、禁止 Core mutation、独立审批、快照重放和结果 JSON 审计已覆盖 |
+| World Intelligence 演化提案 | 提案持久化、验证、沙箱、版本化 overlay 激活/恢复/栈式回滚、内容声明异常检测和反事实场景实验已完成；配方节点引用和整批 overlay 原子性均由 Runtime 校验 | `src/evolution/evolution.*`, `src/evolution/anomaly.*`, `src/evolution/scenario.*`, `src/world/world_service.*`, `data/schemas/evolution-proposal.schema.json`, `data/schemas/scenario-proposal.schema.json`; 校验白名单、禁止 Core mutation、独立审批、快照重放和结果 JSON 审计已覆盖 |
 | 3D 表现和 Blender 场景 | 已完成内容化投影 | `src/client_main.cpp` 从当前内容包读取空间实体、连接、NPC、资源、场景资产与相机模式，无村庄 `world_id` 或角色分支；Xvfb 烟雾测试覆盖村庄和 Glass Orchard |
 
 ## 已完成验证
@@ -46,6 +46,8 @@
 - 行为树由 `recipes` 自动构造；Mira、Lorn、Eve 与故事动作没有专用 C++ BT。
 - 对话与自驱由 `decision_channels` 声明；通道属性、话语权限、事件/记忆投影和 Provider 策略不再依赖 trigger 字符串分支。
 - 嵌套配方失败只回滚自己的保存点，不会把所在世界时间步一起恢复；快照回滚不复制不可变事件历史。
+- 冲突与安全 operator 的 attack、sabotage、threaten、defend、evacuate、repair 均覆盖事实变化、主事件与 Snapshot；关闭的 authored topology 会阻止移动，生产输入不足或输出超重不会留下部分资源或事件。
+- Overlay 的 Behavior Recipe 只有在条件、元动作和节点 ID 都能解析时才可进入 Sandbox；多操作 Overlay 只有全部操作成功才整体交换内容视图。`CommandResult.event` 固定返回本次命令的主事件，不会被子事件或投射刺激覆盖。
 - 43 个核心测试和三个独立 `Glass Orchard` CLI 回归当前在本机以约 5 秒完成，单测耗时输出用于防止长期模拟回归。
 
 ## P0 工作顺序
@@ -104,7 +106,7 @@ P0-K 的提案校验、模型关闭回退、过期提案、重复提案、过程
 按以下顺序推进：
 
 1. ~~**异步决策队列**：Provider 在独立工作线程运行；请求保存 channel、World Revision、NPC State Version、内容/提示版本和幂等键；返回后只接受仍然有效的提案，过期提案进入审计日志，不阻塞 World Tick。~~ 已完成：`TurnQueue` 使用单独工作线程执行 Provider；主线程通过 `pumpAsyncTurns()` 在世界边界提交，revision、NPC state version、content/prompt version 任一变化都会拒绝事实提交并追加 `npc.intent_expired`；Provider 异常或校验失败追加 `npc.intent_rejected`。同步对话仍使用同一 `commitTurn` 校验路径。
-2. **已注册 operator 扩展**：~~先实现并测试 `transfer_resource`~~ 已完成：`resource.transfer` 使用实体库存和公共资源池，经过参与方/生命周期/余额/容量校验，原子提交 `resource.transferred`，快照保存库存，失败不产生部分变化。~~实现 `move_entity`/`arrive_entity`、`conflict.attack`/`conflict.sabotage`、`security.defend`/`security.evacuate`/`security.repair`~~ 已完成移动与安全事实 operator；继续实现承诺/合同结算、知识记忆来源和生产过程；每个 operator 都要有参数校验、事件、回放和失败补偿，再开放给 JSON 内容。
+2. **已注册 operator 扩展**：全部检查点已完成。`resource.transfer` 使用实体库存和公共资源池并原子提交；移动校验活动拓扑；`conflict.attack/sabotage` 与 `security.threaten/defend/evacuate/repair` 改变安全事实并产生刺激；`promise.create/transition`、`knowledge.assert`、`experience.record` 和 `production.execute` 均已有命令或配方路径、事件与失败原子性回归。跨主体资源抢占、复杂合同结算和声明式长过程补偿仍需新增内容契约后再实现。
 3. ~~**潮门港纵向切片**：增加交易、家庭/组织指标、阵营关系和近远场更新，仍使用同一 WorldState、ProcessExecution、EventLog 和 Replay 契约。~~ 已完成最小可替换切片：交易、组织指标、跨 NPC 关系、实例库存、近远场更新和 Snapshot 恢复均由 `tests/fixtures/port-pack` 验证。
 4. ~~**验证与性能**：增加多个实例并行离线推进、事件数量/内存指标和 `advance_to` 调度边界测试；保持本地三 NPC 回归在可接受时间内。~~ 已完成基线测试：多个实例共享 `advanceTo`，记录近/远场唤醒、跳过检查、模拟分钟和 Snapshot 序列化大小；本地回归约 4 秒。
 
