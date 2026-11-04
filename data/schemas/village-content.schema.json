@@ -21,6 +21,18 @@
     "kind": {
       "const": "world"
     },
+    "scene_asset": {
+      "type": "string",
+      "description": "Optional client scene asset; Runtime state never depends on it."
+    },
+    "camera": {
+      "type": "string",
+      "enum": [
+        "slanted_top_down",
+        "top_down"
+      ],
+      "default": "slanted_top_down"
+    },
     "content_version": {
       "type": "string"
     },

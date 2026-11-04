@@ -28,7 +28,7 @@
 | 社会关系与组织 | 已实现 NPC/玩家/组织四轴关系、声明式社会组成员与指标、交易和快照恢复；港区与 Glass Orchard 分别使用自己的组织、阵营和制度事实，没有 Runtime 特例 | `NpcState.relationships`, `WorldState.socialGroups`, `SocialGroupContent`, `relationship.adjust`, `trade.execute`, `tests/fixtures/port-pack`, `tests/fixtures/glass-orchard-pack` |
 | 元动作语义目录 | 已冻结；故事动作 ID 由内容包绑定到通用 operator，行为配方在运行时编译为 BT | `src/world/meta_actions.*`, `src/npc/behavior_recipe.*`, `data/behaviors/village.json` |
 | World Intelligence 演化提案 | 提案持久化、验证、沙箱、版本化 overlay 激活/恢复/栈式回滚、内容声明异常检测和反事实场景实验已完成 | `src/evolution/evolution.*`, `src/evolution/anomaly.*`, `src/evolution/scenario.*`, `src/world/world_service.*`, `data/schemas/evolution-proposal.schema.json`, `data/schemas/scenario-proposal.schema.json`; 校验白名单、禁止 Core mutation、独立审批、快照重放和结果 JSON 审计已覆盖 |
-| 3D 表现和 Blender 场景 | 已有 P0 原型 | 不参与当前平台模型验收 |
+| 3D 表现和 Blender 场景 | 已完成内容化投影 | `src/client_main.cpp` 从当前内容包读取空间实体、连接、NPC、资源、场景资产与相机模式，无村庄 `world_id` 或角色分支；Xvfb 烟雾测试覆盖村庄和 Glass Orchard |
 
 ## 已完成验证
 
@@ -41,6 +41,7 @@
 - 运行态 NPC 只保存 `definition_id`；快照引用已删除的内容或不同 `content_version` 时会明确拒绝加载。
 - 第二个最小内容实例（`tests/fixtures/minimal-pack`，NPC `sable`）可以独立加载、保存和查询实体投影，证明 Runtime 不依赖村庄角色。
 - 第三个独立小说实例（`tests/fixtures/glass-orchard-pack`）使用自定义需求域、两个区域、两个阵营和一个制度协定运行，并在一天后产生承诺违约的关系余波；headless 的标题、对话 NPC 和回放内容根也从当前实例读取。
+- 3D 客户端在默认构建和 raylib 构建中均通过编译；Xvfb 实测村庄与 Glass Orchard 都能完成窗口、OpenGL 和内容初始化并连续绘制。村庄 GLB 只在内容声明 `scene_asset` 且显式设置 `TIDE_MARKS_USE_GLB=1` 时加载。
 - 承诺的关系轴增量和重谈延长时长来自 `promise_policy`，修改内容即可改变结果。
 - 行为树由 `recipes` 自动构造；Mira、Lorn、Eve 与故事动作没有专用 C++ BT。
 - 对话与自驱由 `decision_channels` 声明；通道属性、话语权限、事件/记忆投影和 Provider 策略不再依赖 trigger 字符串分支。

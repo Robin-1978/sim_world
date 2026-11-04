@@ -80,6 +80,9 @@ void village_has_three_independent_npcs() {
                     {{"offer_ration", NeedSatisfier{0.2, {"relieve_need"}}}}}};
     const auto ranking = GoalSelector::rank(service.state().npcs.at("mira"), needs);
     expect(!ranking.empty() && ranking.front().score >= ranking.back().score, "GoalSelector ranks authored goals");
+    expect(service.content().sceneAsset == "../assets/blender/village.glb" &&
+               service.content().cameraMode == "slanted_top_down",
+           "presentation defaults are selected by content rather than the client");
 }
 
 void offline_progression_changes_village() {

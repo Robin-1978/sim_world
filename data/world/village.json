@@ -736,7 +736,7 @@
       ]
     }
   ],
-  "scene_asset": "assets/blender/village.glb",
+  "scene_asset": "../assets/blender/village.glb",
   "camera": "slanted_top_down",
   "conversation_policy": {
     "default_world_action_allowed": false,

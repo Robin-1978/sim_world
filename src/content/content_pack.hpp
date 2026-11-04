@@ -245,6 +245,11 @@ struct WorldContentPack {
     std::string version;
     std::string contentVersion;
     std::string worldId;
+    // Optional presentation data is still authored content. Runtime systems do
+    // not inspect these fields; clients use them to replace a default scene
+    // without branching on a story-specific world id.
+    std::string sceneAsset;
+    std::string cameraMode{"slanted_top_down"};
     GameTime startTime;
     DriveAdaptationPolicy driveAdaptation;
     StimulusPolicy stimulusPolicy;

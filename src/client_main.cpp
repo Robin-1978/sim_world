@@ -1,11 +1,16 @@
 #include "tide_marks.hpp"
 
-#include <array>
+#include <algorithm>
 #include <cmath>
 #include <cstdlib>
+#include <filesystem>
+#include <functional>
 #include <iostream>
+#include <limits>
 #include <memory>
+#include <sstream>
 #include <string>
+#include <vector>
 
 #if defined(TIDE_MARKS_HAS_RAYLIB)
 #include <raylib.h>
@@ -26,47 +31,174 @@ float distanceBetween(Vector3 left, Vector3 right) {
     return std::sqrt(dx * dx + dy * dy + dz * dz);
 }
 
-void drawVillageGeometry() {
-    DrawCube({0.0F, -0.35F, 0.0F}, 28.0F, 0.7F, 22.0F, Color{60, 102, 67, 255});
-    DrawCube({9.0F, -0.05F, 0.0F}, 6.0F, 0.35F, 22.0F, Color{24, 79, 120, 255});
-    DrawCube({0.0F, 0.05F, 0.0F}, 17.0F, 0.16F, 2.0F, Color{110, 111, 104, 255});
-    for (const Vector3 house : {Vector3{-6.0F, 1.0F, -5.0F}, Vector3{-1.0F, 1.0F, -5.0F},
-                                Vector3{4.0F, 1.0F, -5.0F}, Vector3{-5.0F, 1.0F, 3.0F},
-                                Vector3{3.0F, 1.0F, 3.0F}}) {
-        DrawCube(house, 3.6F, 2.0F, 3.0F, Color{190, 165, 121, 255});
-        DrawCube({house.x, 2.6F, house.z}, 4.5F, 1.1F, 4.0F, Color{38, 66, 98, 255});
+struct WorldBounds {
+    float minX{-10.0F};
+    float maxX{10.0F};
+    float minZ{-10.0F};
+    float maxZ{10.0F};
+};
+
+struct NpcMarker {
+    std::string id;
+    std::string name;
+    Vector3 position{};
+};
+
+WorldBounds worldBounds(const tide_marks::WorldService& world) {
+    WorldBounds result;
+    if (world.content().spatialEntities.empty()) return result;
+    result.minX = std::numeric_limits<float>::max();
+    result.maxX = std::numeric_limits<float>::lowest();
+    result.minZ = std::numeric_limits<float>::max();
+    result.maxZ = std::numeric_limits<float>::lowest();
+    for (const auto& entity : world.content().spatialEntities) {
+        result.minX = std::min(result.minX, static_cast<float>(entity.spatial.minX));
+        result.maxX = std::max(result.maxX, static_cast<float>(entity.spatial.maxX));
+        result.minZ = std::min(result.minZ, static_cast<float>(entity.spatial.minZ));
+        result.maxZ = std::max(result.maxZ, static_cast<float>(entity.spatial.maxZ));
     }
-    DrawCube({7.8F, 0.65F, 0.0F}, 2.6F, 0.5F, 1.1F, Color{124, 76, 35, 255});
-    DrawCube({6.2F, 0.12F, 0.0F}, 4.4F, 0.25F, 2.4F, Color{124, 76, 35, 255});
+    const float width = std::max(result.maxX - result.minX, 1.0F);
+    const float depth = std::max(result.maxZ - result.minZ, 1.0F);
+    const float padding = std::max(width, depth) * 0.18F;
+    result.minX -= padding;
+    result.maxX += padding;
+    result.minZ -= padding;
+    result.maxZ += padding;
+    return result;
 }
 
-Vector2 mapPoint(Vector3 world, int x, int y, int width, int height) {
-    return {static_cast<float>(x) + (world.x + 12.0F) / 24.0F * static_cast<float>(width),
-            static_cast<float>(y) + (world.z + 10.0F) / 20.0F * static_cast<float>(height)};
+Vector3 cameraPosition(const std::string& mode, const WorldBounds& bounds) {
+    const float centerX = (bounds.minX + bounds.maxX) * 0.5F;
+    const float centerZ = (bounds.minZ + bounds.maxZ) * 0.5F;
+    const float extent = std::max(bounds.maxX - bounds.minX, bounds.maxZ - bounds.minZ);
+    if (mode == "top_down") {
+        return {centerX, std::max(12.0F, extent * 1.4F), centerZ + 0.01F};
+    }
+    return {centerX + extent * 0.95F, std::max(10.0F, extent * 1.25F), centerZ + extent * 0.95F};
 }
 
-void drawVillageMap(Vector3 player, const std::array<std::pair<const char*, Vector3>, 3>& npcs) {
+Vector3 spatialCenter(const tide_marks::SpatialContent& entity) {
+    return {static_cast<float>((entity.spatial.minX + entity.spatial.maxX) * 0.5), 0.0F,
+            static_cast<float>((entity.spatial.minZ + entity.spatial.maxZ) * 0.5)};
+}
+
+Color stableColor(const std::string& value, unsigned char alpha = 255) {
+    const auto hash = std::hash<std::string>{}(value);
+    return Color{static_cast<unsigned char>(70U + (hash & 0x7FU)),
+                 static_cast<unsigned char>(80U + ((hash >> 8U) & 0x7FU)),
+                 static_cast<unsigned char>(95U + ((hash >> 16U) & 0x7FU)), alpha};
+}
+
+void drawWorldGeometry(const tide_marks::WorldService& world) {
+    // Geometry is a view of authored spatial entities. A content pack can
+    // replace this fallback with its own scene asset without changing Runtime.
+    for (const auto& link : world.content().links) {
+        if (link.link.endpoints.size() < 2) continue;
+        const auto findEntity = [&world](const std::string& id) {
+            return std::find_if(world.content().spatialEntities.begin(), world.content().spatialEntities.end(),
+                                [&id](const auto& entity) { return entity.id == id; });
+        };
+        const auto first = findEntity(link.link.endpoints[0]);
+        const auto second = findEntity(link.link.endpoints[1]);
+        if (first == world.content().spatialEntities.end() || second == world.content().spatialEntities.end()) continue;
+        auto start = spatialCenter(*first);
+        auto end = spatialCenter(*second);
+        start.y = 0.18F;
+        end.y = 0.18F;
+        DrawLine3D(start, end, link.link.traversable ? Color{150, 150, 145, 230} : Color{90, 65, 65, 230});
+    }
+    for (const auto& entity : world.content().spatialEntities) {
+        const auto center = spatialCenter(entity);
+        const auto width = static_cast<float>(std::max(entity.spatial.maxX - entity.spatial.minX, 0.8));
+        const auto depth = static_cast<float>(std::max(entity.spatial.maxZ - entity.spatial.minZ, 0.8));
+        DrawCube({center.x, 0.0F, center.z}, width, 0.3F, depth, stableColor(entity.kind));
+        DrawCubeWires({center.x, 0.17F, center.z}, width, 0.04F, depth, Color{210, 195, 160, 220});
+    }
+}
+
+Vector2 mapPoint(Vector3 world, const WorldBounds& bounds, int x, int y, int width, int height) {
+    const float worldWidth = std::max(bounds.maxX - bounds.minX, 1.0F);
+    const float worldDepth = std::max(bounds.maxZ - bounds.minZ, 1.0F);
+    return {static_cast<float>(x) + (world.x - bounds.minX) / worldWidth * static_cast<float>(width),
+            static_cast<float>(y) + (world.z - bounds.minZ) / worldDepth * static_cast<float>(height)};
+}
+
+void drawWorldMap(const tide_marks::WorldService& world, Vector3 player,
+                  const std::vector<NpcMarker>& npcs, const WorldBounds& bounds) {
     constexpr int x = 1018;
     constexpr int y = 430;
     constexpr int width = 238;
     constexpr int height = 238;
     DrawRectangle(x, y, width, height, Color{8, 18, 29, 235});
     DrawRectangleLines(x, y, width, height, Color{167, 148, 102, 255});
-    DrawText("VILLAGE MAP", x + 10, y + 8, 16, Color{240, 224, 177, 255});
-    const auto pathStart = mapPoint({-11.0F, 0.0F, 0.0F}, x, y + 30, width, height - 42);
-    const auto pathEnd = mapPoint({8.0F, 0.0F, 0.0F}, x, y + 30, width, height - 42);
-    DrawLineEx(pathStart, pathEnd, 4.0F, Color{133, 133, 126, 255});
-    const auto waterStart = mapPoint({9.0F, 0.0F, -9.0F}, x, y + 30, width, height - 42);
-    const auto waterEnd = mapPoint({9.0F, 0.0F, 9.0F}, x, y + 30, width, height - 42);
-    DrawLineEx(waterStart, waterEnd, 18.0F, Color{30, 93, 135, 210});
-    for (const auto& [name, position] : npcs) {
-        const auto point = mapPoint(position, x, y + 30, width, height - 42);
-        const Color color = name == std::string("Mira") ? Color{224, 80, 70, 255} :
-                            (name == std::string("Lorn") ? Color{75, 142, 225, 255} : Color{153, 90, 207, 255});
-        DrawCircleV(point, 5.0F, color);
-        DrawText(name, static_cast<int>(point.x) + 7, static_cast<int>(point.y) - 6, 11, RAYWHITE);
+    DrawText("WORLD MAP", x + 10, y + 8, 16, Color{240, 224, 177, 255});
+    for (const auto& entity : world.content().spatialEntities) {
+        const auto topLeft = mapPoint({static_cast<float>(entity.spatial.minX), 0.0F,
+                                       static_cast<float>(entity.spatial.minZ)}, bounds, x, y + 30, width, height - 42);
+        const auto bottomRight = mapPoint({static_cast<float>(entity.spatial.maxX), 0.0F,
+                                           static_cast<float>(entity.spatial.maxZ)}, bounds, x, y + 30, width, height - 42);
+        DrawRectangle(static_cast<int>(topLeft.x), static_cast<int>(topLeft.y),
+                      std::max(2, static_cast<int>(bottomRight.x - topLeft.x)),
+                      std::max(2, static_cast<int>(bottomRight.y - topLeft.y)), stableColor(entity.kind, 175));
     }
-    DrawCircleV(mapPoint(player, x, y + 30, width, height - 42), 5.0F, RAYWHITE);
+    for (const auto& link : world.content().links) {
+        if (link.link.endpoints.size() < 2) continue;
+        const auto findEntity = [&world](const std::string& id) {
+            return std::find_if(world.content().spatialEntities.begin(), world.content().spatialEntities.end(),
+                                [&id](const auto& entity) { return entity.id == id; });
+        };
+        const auto first = findEntity(link.link.endpoints[0]);
+        const auto second = findEntity(link.link.endpoints[1]);
+        if (first == world.content().spatialEntities.end() || second == world.content().spatialEntities.end()) continue;
+        const auto start = mapPoint(spatialCenter(*first), bounds, x, y + 30, width, height - 42);
+        const auto end = mapPoint(spatialCenter(*second), bounds, x, y + 30, width, height - 42);
+        DrawLineEx(start, end, 2.0F, link.link.traversable ? Color{188, 188, 176, 255} : Color{112, 76, 76, 255});
+    }
+    for (const auto& marker : npcs) {
+        const auto point = mapPoint(marker.position, bounds, x, y + 30, width, height - 42);
+        const Color color = stableColor(marker.id);
+        DrawCircleV(point, 5.0F, color);
+        DrawText(marker.name.c_str(), static_cast<int>(point.x) + 7, static_cast<int>(point.y) - 6, 11, RAYWHITE);
+    }
+    DrawCircleV(mapPoint(player, bounds, x, y + 30, width, height - 42), 5.0F, RAYWHITE);
+}
+
+std::vector<NpcMarker> npcMarkers(const tide_marks::WorldService& world) {
+    std::vector<NpcMarker> markers;
+    for (const auto& authored : world.content().npcs) {
+        const auto state = world.state().npcs.find(authored.definition.id);
+        if (state == world.state().npcs.end()) continue;
+        const auto spatial = std::find_if(world.content().spatialEntities.begin(),
+                                          world.content().spatialEntities.end(),
+                                          [&state](const auto& item) { return item.id == state->second.location; });
+        if (spatial == world.content().spatialEntities.end()) continue;
+        const auto& bounds = spatial->spatial;
+        markers.push_back(NpcMarker{authored.definition.id, authored.definition.name,
+                                    Vector3{static_cast<float>((bounds.minX + bounds.maxX) * 0.5), 1.4F,
+                                             static_cast<float>((bounds.minZ + bounds.maxZ) * 0.5)}});
+    }
+    return markers;
+}
+
+std::string resourceSummary(const tide_marks::WorldService& world) {
+    std::ostringstream output;
+    std::size_t shown = 0;
+    for (const auto& [id, resource] : world.state().resources) {
+        const auto item = id + "=" + std::to_string(resource.amount);
+        const auto separator = shown == 0 ? std::string{} : std::string{"  "};
+        if (output.str().size() + separator.size() + item.size() > 54) break;
+        output << separator << item;
+        ++shown;
+    }
+    if (shown < world.state().resources.size()) output << "  +" << (world.state().resources.size() - shown);
+    return output.str();
+}
+
+std::string resolveSceneAsset(const std::string& contentRoot, const std::string& sceneAsset) {
+    if (sceneAsset.empty()) return {};
+    const std::filesystem::path configured(sceneAsset);
+    if (configured.is_absolute()) return configured.lexically_normal().string();
+    return (std::filesystem::path(contentRoot) / configured).lexically_normal().string();
 }
 
 }  // namespace
@@ -74,10 +206,12 @@ void drawVillageMap(Vector3 player, const std::array<std::pair<const char*, Vect
 int main(int argc, char** argv) {
     std::string profilePath = tide_marks::defaultIntelligenceProfilePath();
     std::string providerOverride = "mock";
+    std::string contentRoot = tide_marks::ContentPackLoader::defaultRoot();
     for (int index = 1; index < argc; ++index) {
         const std::string argument = argv[index];
         if (argument == "--profile" && index + 1 < argc) profilePath = argv[++index];
         else if (argument == "--provider" && index + 1 < argc) providerOverride = argv[++index];
+        else if (argument == "--content-root" && index + 1 < argc) contentRoot = argv[++index];
     }
     std::unique_ptr<tide_marks::IProvider> provider;
     if (providerOverride == "mock") {
@@ -86,14 +220,27 @@ int main(int argc, char** argv) {
         const auto profile = tide_marks::loadIntelligenceProfile(profilePath);
         provider = tide_marks::makeProviderFromProfile(profile, providerOverride);
     }
-    auto village = tide_marks::WorldService::load(tide_marks::ContentPackLoader::defaultRoot(), std::move(provider));
-    InitWindow(1280, 720, "Tide Marks - Tidemark Village");
+    auto world = tide_marks::WorldService::load(contentRoot, std::move(provider));
+    const auto worldName = world.content().instance ? world.content().instance->displayName : world.content().worldId;
+#if defined(__linux__)
+    const char* display = std::getenv("DISPLAY");
+    if (display == nullptr || *display == '\0') {
+        std::cerr << "Tide Marks " << worldName
+                  << ": the 3D client requires an X11 DISPLAY; use tide_marks_headless or xvfb-run.\n";
+        return EXIT_FAILURE;
+    }
+#endif
+    const auto bounds = worldBounds(world);
+    InitWindow(1280, 720, (std::string("Tide Marks - ") + worldName).c_str());
     SetTargetFPS(60);
-    const bool sceneAssetAvailable = FileExists("assets/blender/village.glb");
+    const auto sceneAssetPath = resolveSceneAsset(contentRoot, world.content().sceneAsset);
+    const bool sceneAssetAvailable = !sceneAssetPath.empty() && FileExists(sceneAssetPath.c_str());
     const bool useGlb = sceneAssetAvailable && std::getenv("TIDE_MARKS_USE_GLB") != nullptr;
     Model sceneAsset{};
-    if (sceneAssetAvailable) sceneAsset = LoadModel("assets/blender/village.glb");
-    Vector3 player{0.0F, 0.65F, 0.0F};
+    if (useGlb) sceneAsset = LoadModel(sceneAssetPath.c_str());
+    const float centerX = (bounds.minX + bounds.maxX) * 0.5F;
+    const float centerZ = (bounds.minZ + bounds.maxZ) * 0.5F;
+    Vector3 player{centerX, 0.65F, centerZ};
     std::string dialogue = "Walk with WASD. Press E near a marker.";
     float timeAccumulator = 0.0F;
     while (!WindowShouldClose()) {
@@ -103,20 +250,19 @@ int main(int argc, char** argv) {
         if (IsKeyDown(KEY_S)) player.z += speed;
         if (IsKeyDown(KEY_A)) player.x -= speed;
         if (IsKeyDown(KEY_D)) player.x += speed;
-        player.x = clampValue(player.x, -11.0F, 8.0F);
-        player.z = clampValue(player.z, -9.0F, 9.0F);
+        player.x = clampValue(player.x, bounds.minX, bounds.maxX);
+        player.z = clampValue(player.z, bounds.minZ, bounds.maxZ);
         timeAccumulator += dt;
         if (timeAccumulator >= 1.0F) {
-            village.advanceMinutes(1);
+            world.advanceMinutes(1);
             timeAccumulator = 0.0F;
         }
-        const std::array<std::pair<const char*, Vector3>, 3> npcs{{
-            {"Mira", {-4.2F, 1.4F, 3.0F}}, {"Lorn", {6.0F, 1.4F, 0.0F}}, {"Eve", {3.0F, 1.4F, 2.2F}}}};
+        const auto npcs = npcMarkers(world);
         if (IsKeyPressed(KEY_E)) {
-            for (const auto& [name, position] : npcs) {
-                if (distanceBetween(player, position) < 2.5F) {
-                    const std::string id = name == std::string("Mira") ? "mira" : (name == "Lorn" ? "lorn" : "eve");
-                    const auto turn = village.converse(id, "Hello, tell me what is happening.", "client-turn-" + std::to_string(village.state().events.size()));
+            for (const auto& marker : npcs) {
+                if (distanceBetween(player, marker.position) < 2.5F) {
+                    const auto turn = world.converse(marker.id, "Hello, tell me what is happening.",
+                                                      "client-turn-" + std::to_string(world.state().events.size()));
                     dialogue = turn.accepted ? turn.dialogue : turn.error;
                 }
             }
@@ -128,16 +274,15 @@ int main(int argc, char** argv) {
         physics = std::make_unique<tide_marks::DeterministicPhysicsWorld>();
 #endif
         physics->addBody(tide_marks::PhysicsBody{"player", player.x, player.z, 0.45, true});
-        physics->addBody(tide_marks::PhysicsBody{"ferry", 7.8, 0.0, 1.3, false});
         physics->step(0.02);
         const auto physicsEvents = physics->drainEvents();
-        if (!physicsEvents.empty()) dialogue = "The ferry rocks as you bump the dock.";
+        if (!physicsEvents.empty()) dialogue = "The world reacts to your movement.";
 
         BeginDrawing();
         ClearBackground(Color{18, 27, 42, 255});
         Camera3D camera{};
-        camera.position = {14.0F, 17.0F, 17.0F};
-        camera.target = {0.0F, 0.0F, 0.0F};
+        camera.position = cameraPosition(world.content().cameraMode, bounds);
+        camera.target = {centerX, 0.0F, centerZ};
         camera.up = {0.0F, 1.0F, 0.0F};
         camera.fovy = 45.0F;
         camera.projection = CAMERA_PERSPECTIVE;
@@ -145,26 +290,22 @@ int main(int argc, char** argv) {
         if (useGlb) {
             DrawModel(sceneAsset, {0.0F, 0.0F, 0.0F}, 1.0F, WHITE);
         } else {
-            drawVillageGeometry();
+            drawWorldGeometry(world);
         }
         DrawCube(player, 0.8F, 1.3F, 0.8F, Color{220, 220, 224, 255});
-        for (const auto& [name, position] : npcs) {
-            const Color color = name == std::string("Mira") ? Color{210, 75, 65, 255} :
-                                (name == std::string("Lorn") ? Color{65, 125, 210, 255} : Color{130, 75, 190, 255});
-            DrawCube(position, 0.75F, 1.5F, 0.75F, color);
+        for (const auto& marker : npcs) {
+            DrawCube(marker.position, 0.75F, 1.5F, 0.75F, stableColor(marker.id));
         }
         EndMode3D();
         DrawRectangle(0, 0, 1280, 84, Color{10, 16, 26, 220});
-        DrawText("TIDEMARK VILLAGE  |  WASD move  E talk  ESC quit", 24, 16, 22, RAYWHITE);
+        DrawText((worldName + "  |  WASD move  E talk  ESC quit").c_str(), 24, 16, 22, RAYWHITE);
         DrawText(dialogue.c_str(), 24, 48, 18, Color{224, 210, 170, 255});
-        DrawText(TextFormat("%s  grain=%d  ferry=%d  records=%d", village.state().now.toString().c_str(),
-                            village.state().resources.at("grain").amount,
-                            village.state().resources.at("boat_integrity").amount,
-                            village.state().resources.at("records_integrity").amount), 820, 16, 16, RAYWHITE);
-        drawVillageMap(player, npcs);
+        const auto resourceLine = world.state().now.toString() + "  " + resourceSummary(world);
+        DrawText(resourceLine.c_str(), 600, 16, 16, RAYWHITE);
+        drawWorldMap(world, player, npcs, bounds);
         EndDrawing();
     }
-    if (sceneAssetAvailable) UnloadModel(sceneAsset);
+    if (useGlb) UnloadModel(sceneAsset);
     CloseWindow();
     return 0;
 }
@@ -175,21 +316,26 @@ int main(int argc, char** argv) {
 // scene inspector that can run in CI or over SSH. The raylib/TGUI presentation
 // layer will consume the same WorldService/ViewProjection API in the next
 // client milestone; no gameplay code depends on a renderer.
-int main() {
-    auto village = tide_marks::WorldService::load();
-    std::cout << "Tide Marks village client (headless scene preview)\n";
+int main(int argc, char** argv) {
+    std::string contentRoot = tide_marks::ContentPackLoader::defaultRoot();
+    for (int index = 1; index < argc; ++index) {
+        if (std::string(argv[index]) == "--content-root" && index + 1 < argc) contentRoot = argv[++index];
+    }
+    auto world = tide_marks::WorldService::load(contentRoot);
+    const auto worldName = world.content().instance ? world.content().instance->displayName : world.content().worldId;
+    std::cout << "Tide Marks " << worldName << " client (headless scene preview)\n";
     std::cout << "Renderer disabled. Reconfigure build with -DTIDE_MARKS_FETCH_RAYLIB=ON for the 3D window.\n";
-    std::cout << "camera=slanted-top-down scene=assets/blender/village.glb\n";
-    std::cout << tide_marks::summarize(village.state()) << '\n';
-    for (const auto& [id, npc] : village.state().npcs) {
+    std::cout << "camera=" << world.content().cameraMode
+              << " scene=" << (world.content().sceneAsset.empty() ? "procedural" : world.content().sceneAsset) << "\n";
+    std::cout << tide_marks::summarize(world.state()) << '\n';
+    for (const auto& [id, npc] : world.state().npcs) {
         std::cout << "npc " << npc.definitionId << " location=" << npc.location << '\n';
     }
     tide_marks::DeterministicPhysicsWorld physics;
     physics.addBody(tide_marks::PhysicsBody{"player", 0.0, 0.0, 0.5, true});
-    physics.addBody(tide_marks::PhysicsBody{"ferry", 2.0, 0.0, 1.0, false});
     physics.applyImpulse("player", 1.0, 0.0);
     physics.step(0.02);
-    std::cout << "physics_events=" << physics.drainEvents().size() << " (ferry interaction)\n";
+    std::cout << "physics_events=" << physics.drainEvents().size() << "\n";
     return 0;
 }
 

@@ -559,6 +559,14 @@ WorldContentPack ContentPackLoader::load(const std::string& rootPath) {
     }
     pack.contentVersion = requiredString(world, "content_version", worldPath);
     pack.worldId = requiredString(world, "id", worldPath);
+    pack.sceneAsset = world.value("scene_asset", "");
+    pack.cameraMode = world.value("camera", "slanted_top_down");
+    if (pack.cameraMode.empty()) {
+        throw std::runtime_error("world camera mode must not be empty: " + worldPath);
+    }
+    if (pack.cameraMode != "slanted_top_down" && pack.cameraMode != "top_down") {
+        throw std::runtime_error("unsupported camera mode '" + pack.cameraMode + "' in " + worldPath);
+    }
     const auto initialTime = world.value("initial_time", Json::object());
     pack.startTime = GameTime::fromDayHour(initialTime.value("day", 1), initialTime.value("hour", 6));
     if (!world.contains("drive_adaptation") || !world.at("drive_adaptation").is_object()) {

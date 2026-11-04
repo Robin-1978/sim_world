@@ -58,14 +58,20 @@ cmake --build build -j2
 ./build/tide_marks_client
 ```
 
-If GitHub is unreachable, set `HTTPS_PROXY` to a proxy configured for your environment for the configure command. The window uses a slanted 3D camera. **WASD** moves, **E** talks to a nearby NPC, and **Esc** exits. The client loads `assets/blender/village.glb` when started from the repository root.
+If GitHub is unreachable, set `HTTPS_PROXY` to a proxy configured for your environment for the configure command. **WASD** moves, **E** talks to a nearby NPC, and **Esc** exits. A content pack may declare an optional `scene_asset` relative to its content root and a supported `camera` mode (`slanted_top_down` or `top_down`). The procedural spatial view remains the fallback when no asset is configured.
 
-The default raylib view uses a colored procedural village layout and shows a village minimap. Set `TIDE_MARKS_USE_GLB=1` to preview the exported Blender mesh instead. The current world map covers the P0 village; the full island map is planned for the P1/P2 world expansion.
+The raylib view draws authored spatial entities and links from the selected content pack. If that pack declares a scene asset and `TIDE_MARKS_USE_GLB=1` is set, the client previews the asset instead of the procedural geometry. The map bounds, regions, links, NPC markers, and resource HUD are all derived from the loaded world.
 
 To use the running local model in the 3D client, select the checked-in intelligence profile:
 
 ```bash
 ./build/tide_marks_client --profile data/intelligence-profile.json --provider profile
+```
+
+The scene inspector derives NPC markers and resource HUD values from the selected content pack. Another instance therefore does not inherit village actors or named resource fields:
+
+```bash
+./build/tide_marks_client --content-root tests/fixtures/glass-orchard-pack --provider mock
 ```
 
 Bullet 3.25 is an independent CMake option for the production physics adapter:
