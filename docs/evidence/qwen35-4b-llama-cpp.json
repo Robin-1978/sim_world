@@ -269,6 +269,30 @@
     "elapsed_seconds": 35.29,
     "result": "passed"
   },
+  "current_real_evolution_probe": {
+    "commands": [
+      "./build/tide_marks_headless --profile data/intelligence-profile.json --provider profile --days 0 --evolve level1",
+      "./build/tide_marks_headless --profile data/intelligence-profile.json --provider profile --days 0 --evolve level2"
+    ],
+    "provider": "llama.cpp",
+    "level1": {
+      "elapsed_seconds": 11.13,
+      "proposal_kind": "strategy",
+      "operation": "overlay_strategy",
+      "status": "proposed",
+      "source_world_revision": 1,
+      "runtime_result": "accepted as a validated proposal; no overlay activation and no source-world mutation"
+    },
+    "level2": {
+      "elapsed_seconds": 17.75,
+      "proposal_kind": "content",
+      "operation": "create_entity_archetype",
+      "status": "proposed",
+      "source_world_revision": 1,
+      "runtime_result": "accepted as a validated proposal; no overlay activation and no source-world mutation"
+    },
+    "result": "passed"
+  },
   "latest_evolution_smoke": {
     "level1": {
       "command": "./build/tide_marks_headless --profile data/intelligence-profile.json --provider profile --days 0 --evolve level1",
