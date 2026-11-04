@@ -29,6 +29,7 @@ namespace tide_marks {
 struct EvolutionProposal;
 struct EvolutionSandboxResult;
 class ContractSystem;
+class NpcSimulationSystem;
 struct Command {
     std::string turnId;
     std::string kind;
@@ -193,6 +194,7 @@ public:
 
 private:
     friend class ContractSystem;
+    friend class NpcSimulationSystem;
     class TransactionScope {
     public:
         explicit TransactionScope(WorldService& service);
@@ -278,7 +280,7 @@ private:
     // The method is read-only; callers apply the plan only after it succeeds.
     [[nodiscard]] std::optional<std::vector<std::string>> planResourcePreemption(
         const std::string& requesterId, const std::map<std::string, int>& requirements,
-        int requesterPriority) const;
+        int requesterPriority);
     void applyNeedRelief(const std::string& npcId, const std::string& actionId);
     [[nodiscard]] const NpcContent* authoredNpc(const std::string& npcId) const;
     [[nodiscard]] std::vector<std::string> overlayIds() const;
