@@ -192,7 +192,9 @@ WorldEvent worldEventFromJson(const Json& json) {
                       jsonValue<std::string>(json, "detail", ""), jsonValue<std::uint64_t>(json, "world_revision", 0),
                       json.value("data", Json::object()), jsonValue<std::string>(json, "event_id", ""),
                       jsonValue<std::string>(json, "correlation_id", ""),
-                      jsonValue<std::uint64_t>(json, "causation_sequence", 0)};
+                      jsonValue<std::uint64_t>(json, "causation_sequence", 0),
+                      jsonValue<std::string>(json, "content_version", ""),
+                      jsonValue<std::string>(json, "simulation_version", std::string{kSimulationVersion})};
 }
 
 }  // namespace
@@ -203,7 +205,9 @@ Json worldEventToJson(const WorldEvent& event) {
                 {"target", event.target}, {"detail", event.detail},
                 {"world_revision", event.worldRevision}, {"data", event.data},
                 {"event_id", event.eventId}, {"correlation_id", event.correlationId},
-                {"causation_sequence", event.causationSequence}};
+                {"causation_sequence", event.causationSequence},
+                {"content_version", event.contentVersion},
+                {"simulation_version", event.simulationVersion}};
 }
 
 Json worldStateToJson(const WorldState& state) {
@@ -315,7 +319,8 @@ Json worldStateToJson(const WorldState& state) {
                                 {"overlay_version", overlay.overlayVersion},
                                 {"operations", overlay.operations}});
     }
-    return Json{{"save_schema_version", 16}, {"simulation_version", "adaptive-runtime-p1.17"},
+    return Json{{"save_schema_version", kSnapshotSchemaVersion},
+                {"simulation_version", kSimulationVersion},
                 {"event_sequence", state.events.size()}, {"world_id", state.worldId},
                 {"instance_id", state.instanceId},
                 {"content_version", state.contentVersion}, {"now", state.now.minute},

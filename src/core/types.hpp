@@ -13,6 +13,9 @@ using Json = nlohmann::json;
 
 inline constexpr std::int64_t kMinutesPerHour = 60;
 inline constexpr std::int64_t kMinutesPerDay = 1440;
+inline constexpr int kWorldEventSchemaVersion = 3;
+inline constexpr int kSnapshotSchemaVersion = 17;
+inline constexpr char kSimulationVersion[] = "adaptive-runtime-p1.18";
 
 struct GameTime {
     std::int64_t minute{0};
@@ -296,7 +299,7 @@ std::string toString(EntityLifecycle lifecycle);
 EntityLifecycle entityLifecycleFromString(const std::string& value);
 
 struct WorldEvent {
-    int schemaVersion{2};
+    int schemaVersion{kWorldEventSchemaVersion};
     std::uint64_t sequence{0};
     GameTime at;
     std::string type;
@@ -311,6 +314,10 @@ struct WorldEvent {
     std::string eventId;
     std::string correlationId;
     std::uint64_t causationSequence{0};
+    // Versions capture the content and runtime semantics active when this
+    // event was committed. Later overlay activation must not rewrite history.
+    std::string contentVersion;
+    std::string simulationVersion;
 };
 
 // Active declarative overlays are runtime state. Their operations must travel

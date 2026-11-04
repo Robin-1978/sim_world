@@ -97,9 +97,13 @@ void restoreTransactionalBackup(WorldState& state, WorldState backup,
 void validateEventHistory(const WorldState& state) {
     for (std::size_t index = 0; index < state.events.size(); ++index) {
         const auto& event = state.events[index];
-        if (event.schemaVersion != 2 || event.sequence != index + 1 ||
+        if (event.schemaVersion != kWorldEventSchemaVersion || event.sequence != index + 1 ||
             event.eventId != "event:" + std::to_string(event.sequence)) {
             throw std::runtime_error("snapshot contains an invalid event identity");
+        }
+        if (event.contentVersion.empty() ||
+            event.simulationVersion != kSimulationVersion) {
+            throw std::runtime_error("snapshot event has incomplete version provenance");
         }
         const std::string prefix = "correlation:";
         if (!event.correlationId.starts_with(prefix) || event.correlationId.size() == prefix.size()) {
@@ -2856,10 +2860,10 @@ WorldEvent WorldService::addEvent(std::string type, std::string actor, std::stri
     } else {
         correlationId = "correlation:" + std::to_string(sequence);
     }
-    state_.events.push_back(WorldEvent{2, sequence, state_.now, std::move(type), std::move(actor),
+    state_.events.push_back(WorldEvent{kWorldEventSchemaVersion, sequence, state_.now, std::move(type), std::move(actor),
                                        std::move(target), std::move(detail), state_.revision, std::move(data),
                                        "event:" + std::to_string(sequence), std::move(correlationId),
-                                       causationSequence});
+                                       causationSequence, state_.contentVersion, kSimulationVersion});
     if (!transactionFrames_.empty()) transactionFrames_.back().lastEventSequence = sequence;
     const WorldEvent committed = state_.events.back();
     if (!transactionFrames_.empty()) {
@@ -2928,12 +2932,14 @@ WorldService WorldService::fromContentSnapshot(const WorldContentPack& content, 
     const auto& snapshot = json.contains("state") ? json.at("state") : json;
     if (!snapshot.is_object() || !snapshot.contains("save_schema_version") ||
         !snapshot.at("save_schema_version").is_number_integer() ||
-        snapshot.at("save_schema_version").get<int>() != 16) {
-        throw std::runtime_error("unsupported snapshot schema; expected save_schema_version=16");
+        snapshot.at("save_schema_version").get<int>() != kSnapshotSchemaVersion) {
+        throw std::runtime_error("unsupported snapshot schema; expected save_schema_version=" +
+                                 std::to_string(kSnapshotSchemaVersion));
     }
     if (!snapshot.contains("simulation_version") || !snapshot.at("simulation_version").is_string() ||
-        snapshot.at("simulation_version") != "adaptive-runtime-p1.17") {
-        throw std::runtime_error("unsupported snapshot simulation version; expected adaptive-runtime-p1.17");
+        snapshot.at("simulation_version") != kSimulationVersion) {
+        throw std::runtime_error("unsupported snapshot simulation version; expected " +
+                                 std::string{kSimulationVersion});
     }
     service.state_ = deserializeWorldState(snapshot);
     validateEventHistory(service.state_);

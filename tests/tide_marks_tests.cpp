@@ -972,7 +972,7 @@ void snapshot_and_replay_are_deterministic() {
                !std::filesystem::exists(snapshotPath.string() + ".tmp"),
            "snapshot and replay writes replace complete files without leaving staging files behind");
     const auto snapshot = service.snapshotJson();
-    expect(snapshot.at("save_schema_version").get<int>() == 16, "snapshot declares its schema version");
+    expect(snapshot.at("save_schema_version").get<int>() == 17, "snapshot declares its schema version");
     expect(snapshot.at("instance_id") == "tide_marks.village.instance",
            "snapshot records the concrete game instance identity");
     expect(snapshot.at("event_sequence").get<std::size_t>() == service.state().events.size(),
@@ -1042,11 +1042,15 @@ void event_history_has_causal_identity() {
     bool sawChain = false;
     for (std::size_t index = 0; index < events.size(); ++index) {
         const auto& event = events[index];
-        expect(event.schemaVersion == 2, "runtime events use the current event schema");
+        expect(event.schemaVersion == 3, "runtime events use the current event schema");
         expect(event.eventId == "event:" + std::to_string(event.sequence),
                "every event has a stable event id");
         expect(event.sequence == index + 1, "event sequence remains contiguous");
         expect(!event.correlationId.empty(), "every event has a correlation id");
+        expect(event.contentVersion == service.state().contentVersion,
+               "every event records the content version active at commit time");
+        expect(event.simulationVersion == kSimulationVersion,
+               "every event records its simulation semantics version");
         if (event.causationSequence == 0) continue;
         const auto previous = std::find_if(events.begin(), events.end(), [&event](const auto& candidate) {
             return candidate.sequence == event.causationSequence;
@@ -1065,7 +1069,9 @@ void event_history_has_causal_identity() {
     for (std::size_t index = 0; index < events.size() && index < restored.state().events.size(); ++index) {
         expect(restored.state().events[index].eventId == events[index].eventId &&
                    restored.state().events[index].correlationId == events[index].correlationId &&
-                   restored.state().events[index].causationSequence == events[index].causationSequence,
+                   restored.state().events[index].causationSequence == events[index].causationSequence &&
+                   restored.state().events[index].contentVersion == events[index].contentVersion &&
+                   restored.state().events[index].simulationVersion == events[index].simulationVersion,
                "snapshot preserves event causal identity");
     }
     auto broken = service.snapshotJson();
