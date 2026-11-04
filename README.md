@@ -119,6 +119,15 @@ To exercise governed Level 1 and Level 2 evolution with the real model, run:
 
 These commands print the LLM proposal only. Runtime validation, sandbox execution, independent approval, and versioned overlay activation are separate steps; requesting a proposal never mutates the source world. For deterministic schema and governance tests, use the repository's CTest suite, which injects `MockProvider` explicitly.
 
+The village content pack also enables automatic, asynchronous evolution proposals at configured day boundaries. This path does not block a world tick and does not self-approve an overlay. To observe a bounded Level 1 proposal while advancing an interactive-style day, use `--wait-llm-ms` (the local model may still take several seconds per queued request):
+
+```bash
+./build/tide_marks_headless --profile data/intelligence-profile.json \
+  --provider profile --days 1 --wait-llm-ms 30000 --dump-events
+```
+
+The resulting `evolution.proposal_ready` event contains the validated proposal and deterministic sandbox result. A developer or world designer must approve and activate it through the normal overlay governance path.
+
 An explicit durable checkpoint can be requested from the C++ API with `WorldService::saveDurableCommit(path)`. JSON remains the default inspectable artifact; when SQLite is discovered at configure time, `SqlitePersistence` stores the checkpoint transactionally. This checkpoint operation is explicit and does not write the database on every simulation minute.
 
 The project goal is summarized in [`docs/goal.md`](docs/goal.md); architecture and continuation checkpoints are in [`docs/design.md`](docs/design.md) and [`docs/release-continuation-plan.md`](docs/release-continuation-plan.md).

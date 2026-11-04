@@ -180,6 +180,7 @@ Evolution Proposal Schema、提案库、EventLog 来源事实、回放沙箱、�
 | P2-1 | Evolution Sandbox | 已完成：从快照运行候选变化，输出指标、事件差异和来源，不污染原始 Pack |
 | P2-2 | Overlay 激活与回滚 | 已完成：内容/策略/日程版本可审计、可观察，沙箱与提案必须锁定当前 Revision，快照恢复后仍可按栈回退 |
 | P2-3 | 场景实验 | 已完成当前通用边界：资源、组织指标、NPC 需求的声明式反事实实验；小店、利率、政策等具体机制待其事实模型落地后再接入 |
+| P2-4 | 自动 LLM 演化边界 | 已完成：`evolution_policy` 配置 Level 1/2 日间隔；`EvolutionCoordinator` 在已提交边界异步排队，结果按当前事实重新验证、Sandbox 并审计，不能自动批准或激活 Overlay；Mock Provider 不冒充演化 |
 | P3 | 新世界实例 | 已完成 Glass Orchard 纵向切片：第三个实例、跨区域、阵营、制度、自定义需求域和长期承诺余波均由内容驱动 |
 
 ## 自动化验证命令
