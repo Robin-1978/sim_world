@@ -7,6 +7,7 @@
 #include "world/world_evolution_system.hpp"
 #include "world/security_system.hpp"
 #include "world/cognition_system.hpp"
+#include "world/stimulus_system.hpp"
 #include "world/resource_system.hpp"
 #include "world/social_system.hpp"
 #include "world/meta_action_executor.hpp"
@@ -898,98 +899,18 @@ void WorldService::applyNeedRelief(const std::string& npcId, const std::string& 
 }
 
 void WorldService::projectStimuli(const WorldEvent& event) {
-    const WorldEvent source = event;
-    const auto rule = std::find_if(content_.stimulusRules.begin(), content_.stimulusRules.end(),
-                                   [&source](const auto& candidate) {
-                                       return source.type.starts_with(candidate.eventPrefix);
-                                   });
-    if (rule == content_.stimulusRules.end()) return;
-    for (auto& [npcId, npc] : state_.npcs) {
-        const auto entity = state_.entities.find(npcEntityId(npcId));
-        if (entity != state_.entities.end() && entity->second.lifecycle != EntityLifecycle::Active) continue;
-        const bool participant = source.actor == npcId || source.target == npcId;
-        const bool visible = rule->visibility == "world" ||
-                             (rule->visibility == "participants" && participant) ||
-                             (rule->visibility == "actor" && source.actor == npcId) ||
-                             (rule->visibility == "target" && source.target == npcId);
-        if (!visible) continue;
-        auto sensitivity = npc.stimulusSensitivity.find(rule->category);
-        if (sensitivity == npc.stimulusSensitivity.end()) {
-            sensitivity = npc.stimulusSensitivity.emplace(rule->category, content_.stimulusPolicy.maxSensitivity).first;
-        }
-        const std::int64_t windowStart = state_.now.minute - content_.stimulusPolicy.repeatWindowMinutes;
-        const int repetitions = static_cast<int>(std::count_if(
-            npc.stimuli.begin(), npc.stimuli.end(), [&](const auto& prior) {
-                return prior.active && prior.category == rule->category && prior.actor == source.actor &&
-                       prior.observedAt.minute >= windowStart;
-            }));
-        std::erase_if(npc.stimuli, [this](const auto& stimulus) {
-            return !stimulus.active && state_.now.minute - stimulus.expiresAt.minute > 0;
-        });
-        while (npc.stimuli.size() >= content_.stimulusPolicy.maxActivePerNpc) {
-            auto oldest = std::min_element(npc.stimuli.begin(), npc.stimuli.end(),
-                                           [](const auto& left, const auto& right) {
-                                               if (left.effectiveSalience == right.effectiveSalience) {
-                                                   return left.observedAt.minute < right.observedAt.minute;
-                                               }
-                                               return left.effectiveSalience < right.effectiveSalience;
-                                           });
-            if (oldest == npc.stimuli.end()) break;
-            npc.stimuli.erase(oldest);
-        }
-        const double novelty = std::pow(content_.stimulusPolicy.noveltyDecay,
-                                        std::max(0, repetitions));
-        const double sensitivityBefore = sensitivity->second;
-        if (repetitions > 0) {
-            sensitivity->second = std::clamp(
-                sensitivityBefore - content_.stimulusPolicy.habituationStep * repetitions,
-                content_.stimulusPolicy.minSensitivity, content_.stimulusPolicy.maxSensitivity);
-            if (std::abs(sensitivity->second - sensitivityBefore) >= 0.000001) {
-                addEvent("stimulus.habituated", npcId, rule->category,
-                         "Repeated stimuli reduced this character's sensitivity",
-                         Json{{"category", rule->category}, {"source_type", source.type},
-                              {"repetitions", repetitions}, {"before", sensitivityBefore},
-                              {"after", sensitivity->second}, {"rule", rule->id}});
-            }
-        }
-        const double salience = std::clamp(rule->relevance * rule->intensity * rule->urgency *
-                                               novelty * rule->sourceConfidence, 0.0, 1.0);
-        ExternalStimulus stimulus;
-        stimulus.id = "stimulus:" + std::to_string(source.sequence) + ":" + npcId;
-        stimulus.sourceEvent = source.type;
-        stimulus.sourceSequence = source.sequence;
-        stimulus.category = rule->category;
-        stimulus.actor = source.actor;
-        stimulus.target = source.target;
-        stimulus.observedAt = state_.now;
-        stimulus.expiresAt = GameTime{state_.now.minute + rule->ttlMinutes};
-        stimulus.visibilityScope = rule->visibility;
-        stimulus.sourceConfidence = rule->sourceConfidence;
-        stimulus.relevance = rule->relevance;
-        stimulus.intensity = rule->intensity;
-        stimulus.urgency = rule->urgency;
-        stimulus.novelty = novelty;
-        stimulus.valence = rule->valence;
-        stimulus.salience = salience;
-        stimulus.effectiveSalience = salience * sensitivity->second;
-        npc.stimuli.push_back(std::move(stimulus));
-    }
+    StimulusSystem(*this).project(event);
 }
 
 void WorldService::expireStimuli() {
-    for (auto& [id, npc] : state_.npcs) {
-        (void)id;
-        for (auto& stimulus : npc.stimuli) {
-            if (stimulus.active && state_.now.minute >= stimulus.expiresAt.minute) stimulus.active = false;
-        }
-    }
+    StimulusSystem(*this).expire();
 }
 
 WorldEvent WorldService::addEvent(std::string type, std::string actor, std::string target,
                                   std::string detail, Json data) {
     return eventJournal_.append(state_, transactionManager_, eventBus_, content_.contentVersion,
                                 std::move(type), std::move(actor), std::move(target), std::move(detail),
-                                std::move(data), [this](const WorldEvent& event) { projectStimuli(event); });
+                                std::move(data), [this](const WorldEvent& event) { StimulusSystem(*this).project(event); });
 }
 
 Json WorldService::snapshotJson() const { return worldStateToJson(state_); }
