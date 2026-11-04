@@ -258,7 +258,7 @@ Observe -> Understand / Evaluate -> Intent or Evolution Proposal
 -> Measure -> Retain or Roll Back
 ```
 
-世界演化对象包括 Content、Knowledge、Strategy 和 Declarative Capability。提案统一使用 JSON，带提案 ID、来源模型和上下文、依据事实、影响范围、类型化 operations、预期指标、资源预算、过期时间、兼容版本、沙箱结果和回滚点。模型可以提出新聚落、路线、组织、策略、需求或行为组合；不能修改 Runtime Core、注入 C++、任意加载脚本或绕过权限。
+世界演化对象包括 Content、Knowledge、Strategy 和 Declarative Capability。提案统一使用 `schema_version=1` 的 JSON，带提案 ID、来源模型和上下文、依据事实的事件 Sequence、影响范围、类型化 operations、预期指标、资源预算、过期时间、兼容版本、沙箱结果和回滚点。当前 Runtime 强制校验 `source`、治理类别和 `evidence_event_sequences`：只接受当前 EventLog 中真实存在且不重复的事件引用，不能用一个模型名称或虚构事实替代审计依据。模型可以提出新聚落、路线、组织、策略、需求或行为组合；不能修改 Runtime Core、注入 C++、任意加载脚本或绕过权限。
 
 Level 2 的“世界底座演化”只改变可声明、可验证的 Simulation Framework/Content Overlay：新的实体原型、组件组合、行为配方、社会策略、知识归纳或规则参数都先以 Proposal 进入快照沙箱，比较事件差异和指标，再由独立开发/设计审批激活。Entity、事务、事件、权限、回放和回滚这些 Runtime Core 不属于 LLM 可演化对象；需要新的 C++ 能力时只能形成 capability request，待开发者发布注册 operator。
 

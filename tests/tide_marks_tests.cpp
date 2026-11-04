@@ -1239,8 +1239,55 @@ void evolution_proposals_are_governed() {
         Json::array({Json{{"operation", "register_behavior_recipe"}, {"id", "assist_neighbor"},
                          {"root", Json{{"type", "meta_action"}, {"id", "assist"},
                                        {"name", "relieve_need"}}}}})};
-    const auto valid = EvolutionManager::validate(proposal, service.content(), service.state().revision);
-    expect(valid.valid, "declarative evolution proposal passes structural validation");
+    proposal.evidenceEventSequences = {service.state().events.back().sequence};
+    const auto valid = EvolutionManager::validate(proposal, service.content(), service.state());
+    expect(valid.valid, "declarative evolution proposal passes structural and evidence validation");
+    const auto proposalJson = EvolutionManager::toJson(proposal);
+    expect(proposalJson.at("schema_version") == 1 &&
+               EvolutionManager::fromJson(proposalJson).evidenceEventSequences == proposal.evidenceEventSequences,
+           "evolution proposal JSON round-trips its schema version and source evidence");
+    auto missingEvidenceJson = proposalJson;
+    missingEvidenceJson.erase("evidence_event_sequences");
+    bool missingEvidenceRejected = false;
+    try {
+        static_cast<void>(EvolutionManager::fromJson(missingEvidenceJson));
+    } catch (const std::exception&) {
+        missingEvidenceRejected = true;
+    }
+    expect(missingEvidenceRejected, "proposal parsing rejects missing source evidence before sandboxing");
+    auto unsupportedSchemaJson = proposalJson;
+    unsupportedSchemaJson["schema_version"] = 2;
+    bool unsupportedSchemaRejected = false;
+    try {
+        static_cast<void>(EvolutionManager::fromJson(unsupportedSchemaJson));
+    } catch (const std::exception&) {
+        unsupportedSchemaRejected = true;
+    }
+    expect(unsupportedSchemaRejected, "proposal parsing rejects unsupported schema versions");
+    auto missingSourceJson = proposalJson;
+    missingSourceJson.erase("source");
+    bool missingSourceRejected = false;
+    try {
+        static_cast<void>(EvolutionManager::fromJson(missingSourceJson));
+    } catch (const std::exception&) {
+        missingSourceRejected = true;
+    }
+    expect(missingSourceRejected, "proposal parsing requires an explicit model or actor source");
+
+    auto noEvidence = proposal;
+    noEvidence.evidenceEventSequences.clear();
+    expect(EvolutionManager::validate(noEvidence, service.content(), service.state()).code == "evidence_required",
+           "evolution proposals cannot enter governance without committed source evidence");
+    auto unknownEvidence = proposal;
+    unknownEvidence.evidenceEventSequences = {static_cast<std::uint64_t>(service.state().events.size() + 1000)};
+    expect(EvolutionManager::validate(unknownEvidence, service.content(), service.state()).code ==
+               "unknown_evidence_event",
+           "evolution proposals cannot cite fabricated events");
+    auto invalidKind = proposal;
+    invalidKind.kind = "runtime_core";
+    expect(EvolutionManager::validate(invalidKind, service.content(), service.state()).code ==
+               "invalid_proposal_kind",
+           "evolution kinds come from the governed registry");
     proposal.status = EvolutionProposalStatus::Validated;
     const auto approved = EvolutionManager::approve(proposal, "developer", true);
     expect(approved.valid && proposal.status == EvolutionProposalStatus::Approved,
@@ -1248,13 +1295,13 @@ void evolution_proposals_are_governed() {
     EvolutionProposal forbidden = proposal;
     forbidden.status = EvolutionProposalStatus::Proposed;
     forbidden.operations = Json::array({Json{{"operation", "inject_code"}, {"id", "bad"}}});
-    expect(!EvolutionManager::validate(forbidden, service.content(), service.state().revision).valid,
+    expect(!EvolutionManager::validate(forbidden, service.content(), service.state()).valid,
            "Runtime Core mutation is rejected before approval");
     expect(!EvolutionManager::approve(forbidden, "llm", true).valid,
            "LLM cannot approve its own evolution proposal");
     auto stale = proposal;
     stale.baseWorldRevision = service.state().revision + 1;
-    expect(EvolutionManager::validate(stale, service.content(), service.state().revision).code ==
+    expect(EvolutionManager::validate(stale, service.content(), service.state()).code ==
                "revision_conflict",
            "evolution proposals cannot silently bind to a different world revision");
 
@@ -1264,8 +1311,9 @@ void evolution_proposals_are_governed() {
         Json::array({Json{{"operation", "register_behavior_recipe"}, {"id", "invalid_action_recipe"},
                          {"root", Json{{"type", "meta_action"}, {"id", "action"},
                                        {"name", "not_a_registered_meta_action"}}}}})};
+    unknownAction.evidenceEventSequences = proposal.evidenceEventSequences;
     const auto unknownActionValidation =
-        EvolutionManager::validate(unknownAction, service.content(), service.state().revision);
+        EvolutionManager::validate(unknownAction, service.content(), service.state());
     expect(!unknownActionValidation.valid && unknownActionValidation.code == "unknown_meta_action_reference",
            "overlay recipes cannot invoke meta-actions absent from the active content registry");
     const auto unknownActionSandbox = EvolutionManager::sandbox(unknownAction, service);
@@ -1278,7 +1326,8 @@ void evolution_proposals_are_governed() {
         Json::array({Json{{"operation", "register_behavior_recipe"}, {"id", "invalid_condition_recipe"},
                          {"root", Json{{"type", "condition"}, {"id", "condition"},
                                        {"name", "not_a_registered_condition"}}}}})};
-    expect(EvolutionManager::validate(unknownCondition, service.content(), service.state().revision).code ==
+    unknownCondition.evidenceEventSequences = proposal.evidenceEventSequences;
+    expect(EvolutionManager::validate(unknownCondition, service.content(), service.state()).code ==
                "unknown_condition_reference",
            "overlay recipes cannot invoke conditions absent from the active content registry");
 
@@ -1292,7 +1341,8 @@ void evolution_proposals_are_governed() {
         service.state().revision,
         Json::array({Json{{"operation", "register_behavior_recipe"}, {"id", "duplicate_node_recipe"},
                          {"root", duplicateRoot}}})};
-    expect(EvolutionManager::validate(duplicateNode, service.content(), service.state().revision).code ==
+    duplicateNode.evidenceEventSequences = proposal.evidenceEventSequences;
+    expect(EvolutionManager::validate(duplicateNode, service.content(), service.state()).code ==
                "invalid_behavior_recipe",
            "overlay recipes reject duplicate behavior node identities");
 }
@@ -1304,6 +1354,7 @@ void evolution_sandbox_isolated_and_versioned() {
         base.state().revision,
         Json::array({Json{{"operation", "create_entity_archetype"}, {"id", "market_stall"},
                          {"kind", "facility"}, {"default_metadata", Json{{"capacity", 12}}}}})};
+    proposal.evidenceEventSequences = {base.state().events.back().sequence};
     const auto sandbox = EvolutionManager::sandbox(proposal, base, 60);
     expect(sandbox.passed && sandbox.overlayVersion.find("overlay.archetype.sandbox") != std::string::npos,
            "an evolution proposal runs in an isolated versioned sandbox");
@@ -1383,6 +1434,7 @@ void overlay_stack_restores_and_rolls_back_in_order() {
         "overlay.stack.first", "declarative_capability", "llm", rootVersion, base.state().revision,
         Json::array({Json{{"operation", "create_entity_archetype"}, {"id", "market_stall"},
                          {"kind", "facility"}}})};
+    first.evidenceEventSequences = {base.state().events.back().sequence};
     const auto firstSandbox = EvolutionManager::sandbox(first, base);
     first.status = EvolutionProposalStatus::Validated;
     expect(firstSandbox.passed && EvolutionManager::approve(first, "developer", true).valid &&
@@ -1393,6 +1445,7 @@ void overlay_stack_restores_and_rolls_back_in_order() {
         base.state().revision,
         Json::array({Json{{"operation", "create_entity_archetype"}, {"id", "market_awning"},
                          {"kind", "facility"}}})};
+    second.evidenceEventSequences = {base.state().events.back().sequence};
     const auto secondSandbox = EvolutionManager::sandbox(second, base);
     second.status = EvolutionProposalStatus::Validated;
     expect(secondSandbox.passed && EvolutionManager::approve(second, "developer", true).valid &&

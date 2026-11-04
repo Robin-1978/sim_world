@@ -17,6 +17,20 @@ std::string requiredString(const Json& value, const char* key) {
     return value.at(key).get<std::string>();
 }
 
+std::vector<std::uint64_t> requiredEventSequences(const Json& value, const char* key) {
+    if (!value.contains(key) || !value.at(key).is_array() || value.at(key).empty()) {
+        throw std::runtime_error(std::string("evolution proposal requires non-empty ") + key);
+    }
+    std::vector<std::uint64_t> sequences;
+    for (const auto& item : value.at(key)) {
+        if (!item.is_number_unsigned() || item.get<std::uint64_t>() == 0) {
+            throw std::runtime_error(std::string("evolution proposal ") + key + " must contain event sequences");
+        }
+        sequences.push_back(item.get<std::uint64_t>());
+    }
+    return sequences;
+}
+
 BehaviorNodeContent behaviorNodeFromJson(const Json& value) {
     if (!value.is_object()) throw std::runtime_error("evolution behavior node must be an object");
     BehaviorNodeContent node;
@@ -117,23 +131,39 @@ EvolutionProposal EvolutionManager::fromJson(const Json& value) {
     if (value.value("schema_version", 0) != 1) {
         throw std::runtime_error("unsupported evolution proposal schema_version");
     }
+    if (!value.contains("base_world_revision") || !value.at("base_world_revision").is_number_unsigned()) {
+        throw std::runtime_error("evolution proposal requires an unsigned base_world_revision");
+    }
+    if (!value.contains("status") || !value.at("status").is_string()) {
+        throw std::runtime_error("evolution proposal requires a status");
+    }
+    if (!value.contains("operations") || !value.at("operations").is_array() || value.at("operations").empty()) {
+        throw std::runtime_error("evolution proposal requires non-empty operations");
+    }
     EvolutionProposal proposal;
     proposal.id = requiredString(value, "id");
     proposal.kind = requiredString(value, "kind");
-    proposal.source = value.value("source", "unknown");
+    proposal.source = requiredString(value, "source");
     proposal.baseContentVersion = requiredString(value, "base_content_version");
-    proposal.baseWorldRevision = value.value("base_world_revision", 0ULL);
-    proposal.operations = value.value("operations", Json::array());
-    proposal.status = evolutionProposalStatusFromString(value.value("status", "proposed"));
-    if (!proposal.operations.is_array()) throw std::runtime_error("evolution operations must be an array");
+    proposal.baseWorldRevision = value.at("base_world_revision").get<std::uint64_t>();
+    proposal.operations = value.at("operations");
+    proposal.evidenceEventSequences = requiredEventSequences(value, "evidence_event_sequences");
+    const auto status = value.at("status").get<std::string>();
+    if (status != "proposed" && status != "validated" && status != "approved" && status != "rejected") {
+        throw std::runtime_error("unsupported evolution proposal status");
+    }
+    proposal.status = evolutionProposalStatusFromString(status);
     return proposal;
 }
 
 Json EvolutionManager::toJson(const EvolutionProposal& proposal) {
+    Json evidence = Json::array();
+    for (const auto sequence : proposal.evidenceEventSequences) evidence.push_back(sequence);
     return Json{{"kind", proposal.kind}, {"schema_version", 1}, {"id", proposal.id}, {"source", proposal.source},
                 {"base_content_version", proposal.baseContentVersion},
                 {"base_world_revision", proposal.baseWorldRevision},
-                {"operations", proposal.operations}, {"status", toString(proposal.status)}};
+                {"evidence_event_sequences", evidence}, {"operations", proposal.operations},
+                {"status", toString(proposal.status)}};
 }
 
 void EvolutionProposalStore::append(const std::string& path, const EvolutionProposal& proposal) {
@@ -155,12 +185,34 @@ std::vector<EvolutionProposal> EvolutionProposalStore::load(const std::string& p
 
 EvolutionValidation EvolutionManager::validate(const EvolutionProposal& proposal,
                                                const WorldContentPack& content,
-                                               std::uint64_t currentRevision) {
-    if (proposal.id.empty() || proposal.kind.empty()) return {false, "invalid_identity", "Proposal id and kind are required."};
+                                               const WorldState& state) {
+    if (proposal.id.empty() || proposal.source.empty()) {
+        return {false, "invalid_identity", "Proposal id and source are required."};
+    }
+    static const std::set<std::string> kinds{
+        "content", "knowledge", "strategy", "declarative_capability"};
+    if (!kinds.contains(proposal.kind)) {
+        return {false, "invalid_proposal_kind", "Proposal kind is outside the governed evolution registry."};
+    }
+    if (proposal.evidenceEventSequences.empty()) {
+        return {false, "evidence_required", "An evolution proposal must cite committed world events."};
+    }
+    std::set<std::uint64_t> evidence;
+    for (const auto sequence : proposal.evidenceEventSequences) {
+        if (sequence == 0 || !evidence.insert(sequence).second) {
+            return {false, "invalid_evidence", "Evidence event sequences must be positive and unique."};
+        }
+        if (std::none_of(state.events.begin(), state.events.end(), [sequence](const auto& event) {
+                return event.sequence == sequence;
+            })) {
+            return {false, "unknown_evidence_event",
+                    "Evolution evidence must cite committed events from the source world."};
+        }
+    }
     if (proposal.baseContentVersion != content.contentVersion) {
         return {false, "content_version_conflict", "Proposal was created against a different content version."};
     }
-    if (proposal.baseWorldRevision != currentRevision) {
+    if (proposal.baseWorldRevision != state.revision) {
         return {false, "revision_conflict", "Proposal must reference the current world revision."};
     }
     if (!proposal.operations.is_array() || proposal.operations.empty()) {
@@ -264,7 +316,7 @@ EvolutionSandboxResult EvolutionManager::sandbox(const EvolutionProposal& propos
     result.proposalId = proposal.id;
     result.baseContentVersion = base.content().contentVersion;
     result.baseRevision = base.state().revision;
-    const auto validation = validate(proposal, base.content(), base.state().revision);
+    const auto validation = validate(proposal, base.content(), base.state());
     if (!validation.valid) {
         result.code = validation.code;
         result.message = validation.message;

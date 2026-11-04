@@ -20,6 +20,7 @@ struct EvolutionProposal {
     std::uint64_t baseWorldRevision{0};
     Json operations = Json::array();
     EvolutionProposalStatus status{EvolutionProposalStatus::Proposed};
+    std::vector<std::uint64_t> evidenceEventSequences;
 };
 
 struct EvolutionValidation {
@@ -52,7 +53,7 @@ class EvolutionManager {
 public:
     [[nodiscard]] static EvolutionValidation validate(const EvolutionProposal& proposal,
                                                        const WorldContentPack& content,
-                                                       std::uint64_t currentRevision);
+                                                       const WorldState& state);
     [[nodiscard]] static EvolutionValidation approve(EvolutionProposal& proposal,
                                                        const std::string& approver,
                                                        bool sandboxPassed);

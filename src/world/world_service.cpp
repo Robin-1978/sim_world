@@ -1358,7 +1358,7 @@ CommandResult WorldService::rollbackOverlay(const std::string& proposalId) {
     for (auto record = state_.activeOverlays.begin(); record != active; ++record) {
         EvolutionProposal replay{record->proposalId, "declarative_capability", "snapshot",
                                  record->baseContentVersion, 0, record->operations,
-                                 EvolutionProposalStatus::Approved};
+                                 EvolutionProposalStatus::Approved, {}};
         const auto applied = EvolutionManager::applyOverlay(content_, replay);
         if (!applied.valid) return reject(applied.code, applied.message);
         if (content_.contentVersion != record->overlayVersion) {
@@ -2400,7 +2400,7 @@ WorldService WorldService::fromContentSnapshot(const WorldContentPack& content, 
         for (const auto& overlay : service.state_.activeOverlays) {
             EvolutionProposal replay{overlay.proposalId, "declarative_capability", "snapshot",
                                      overlay.baseContentVersion, 0, overlay.operations,
-                                     EvolutionProposalStatus::Approved};
+                                     EvolutionProposalStatus::Approved, {}};
             const auto applied = EvolutionManager::applyOverlay(rebuilt, replay);
             if (!applied.valid) {
                 throw std::runtime_error("cannot restore overlay " + overlay.proposalId + ": " + applied.message);

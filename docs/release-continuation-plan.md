@@ -7,7 +7,7 @@
 
 维护三 NPC 小村庄、可替换港区和第三个独立小说实例，并在同一契约上补齐 World Intelligence 的可审计闭环：需求/内驱随游戏时间变化，外部事件和结构约束进入决策上下文，规则或 LLM 产生意图，C++ 校验并提交事实，结果进入 EventLog、Snapshot、Replay 和文本调试界面；异常规则做确定性检测，Scenario Proposal 从同一 Snapshot 对照运行且不污染源世界。P3 的可替换性纵向切片已经完成；后续工作是把同一模型扩展到更多内容与真实领域，不把尚未建模的商店、利率或政策伪装成可计算结果。
 
-当前 P0、P1、P2 与 P3 可替换性检查点均已完成。P1 增加了异步决策队列、已注册 operator、港区社会切片和近远场调度基准；P2 增加了内容声明异常检测、反事实场景实验、结果 JSON 审计与 CLI 复现入口；P3 增加了跨区域、双阵营、制度协定、自定义需求域和长期承诺余波的第三个内容实例。这些能力均保持同一 Runtime Core 契约。
+当前 P0、P1、P2 与 P3 的“最小纵向检查点”均已完成。这里的完成表示对应契约已有可运行、可回放、可测试的闭环，不表示完整产品愿景已经做完。P1 增加了异步决策队列、已注册 operator、港区社会切片和近远场调度基准；P2 增加了内容声明异常检测、反事实场景实验、结果 JSON 审计与 CLI 复现入口；P3 增加了跨区域、双阵营、制度协定、自定义需求域和长期承诺余波的第三个内容实例。跨主体资源抢占、复杂合同结算、声明式长过程补偿、商店/利率/政策模型、大规模社会校准与运行时 Schema 热演化仍属于后续扩展。
 
 ## 当前检查点
 
@@ -27,7 +27,7 @@
 | 通用资源与实例活动 | 通用资源数量、可选输入预留、实体库存、资源转移、生产、原子交易、承诺和定时 Activity 已实现；Activity 可组合已注册 operator 并在嵌套事务中失败补偿，跨主体抢占仍属于后续工作 | `ResourceContent`, `ResourceState(amount,reserved)`, `WorldState.inventories`, `GameInstanceContent.inventoryInitial`, `reservation_mode`, `tradeResources`, `ActivityContent`；承诺关系增量与重谈时长已由 `promise_policy` 驱动 |
 | 社会关系与组织 | 已实现 NPC/玩家/组织四轴关系、声明式社会组成员与指标、交易和快照恢复；港区与 Glass Orchard 分别使用自己的组织、阵营和制度事实，没有 Runtime 特例 | `NpcState.relationships`, `WorldState.socialGroups`, `SocialGroupContent`, `relationship.adjust`, `trade.execute`, `tests/fixtures/port-pack`, `tests/fixtures/glass-orchard-pack` |
 | 元动作语义目录 | 已冻结；故事动作 ID 由内容包绑定到通用 operator，行为配方在运行时编译为 BT | `src/world/meta_actions.*`, `src/npc/behavior_recipe.*`, `data/behaviors/village.json` |
-| World Intelligence 演化提案 | 提案持久化、验证、沙箱、版本化 overlay 激活/恢复/栈式回滚、内容声明异常检测和反事实场景实验已完成；配方节点引用和整批 overlay 原子性均由 Runtime 校验 | `src/evolution/evolution.*`, `src/evolution/anomaly.*`, `src/evolution/scenario.*`, `src/world/world_service.*`, `data/schemas/evolution-proposal.schema.json`, `data/schemas/scenario-proposal.schema.json`; 校验白名单、禁止 Core mutation、独立审批、快照重放和结果 JSON 审计已覆盖 |
+| World Intelligence 演化提案 | 提案持久化、来源事件证据、验证、沙箱、版本化 overlay 激活/恢复/栈式回滚、内容声明异常检测和反事实场景实验已完成；配方节点引用和整批 overlay 原子性均由 Runtime 校验 | `src/evolution/evolution.*`, `src/evolution/anomaly.*`, `src/evolution/scenario.*`, `src/world/world_service.*`, `data/schemas/evolution-proposal.schema.json`, `data/schemas/scenario-proposal.schema.json`; 校验白名单、EventLog 来源、治理类别、禁止 Core mutation、独立审批、快照重放和结果 JSON 审计已覆盖 |
 | 3D 表现和 Blender 场景 | 已完成内容化投影 | `src/client_main.cpp` 从当前内容包读取空间实体、连接、NPC、资源、场景资产与相机模式，无村庄 `world_id` 或角色分支；Xvfb 烟雾测试覆盖村庄和 Glass Orchard |
 
 ## 已完成验证
@@ -48,7 +48,7 @@
 - 嵌套配方失败只回滚自己的保存点，不会把所在世界时间步一起恢复；快照回滚不复制不可变事件历史。
 - 冲突与安全 operator 的 attack、sabotage、threaten、defend、evacuate、repair 均覆盖事实变化、主事件与 Snapshot；关闭的 authored topology 会阻止移动，生产输入不足或输出超重不会留下部分资源或事件。
 - Overlay 的 Behavior Recipe 只有在条件、元动作和节点 ID 都能解析时才可进入 Sandbox；多操作 Overlay 只有全部操作成功才整体交换内容视图。`CommandResult.event` 固定返回本次命令的主事件，不会被子事件或投射刺激覆盖。
-- 43 个核心测试和三个独立 `Glass Orchard` CLI 回归当前在本机以约 5 秒完成，单测耗时输出用于防止长期模拟回归。
+- 核心测试、可执行程序构建和三个独立内容实例的 CLI 回归以当前机器实测耗时为准；单测耗时输出用于防止长期模拟回归。
 
 ## P0 工作顺序
 
@@ -97,7 +97,7 @@ P0-K 的提案校验、模型关闭回退、过期提案、重复提案、过程
 2. ~~让内容加载器校验单位、所有权、容量、输入/输出、时间窗口、权限和引用~~ 已完成当前资源、拓扑、需求、行为配方和引用校验；质量、所有权、交易输入/输出的完整语义属于 P1 operator。
 3. ~~完成 P0 元动作注册表：资源消耗/产出/预留、需求满足、关系调整和连接状态~~ 已完成；当前已注册执行器为 `resource.consume`、`resource.produce`、`resource.reserve`、`resource.release`、`need.relieve`、`relationship.adjust`、`link.set_state`。资源转移、移动、承诺和知识动作保留为 P1 operator，不提前写入可加载内容。
 4. ~~把小村庄真实的配给、修船、档案整理和承诺行为组合为 BehaviorRecipe；不再为每个 NPC 添加 C++ 特例。~~ 已完成：`data/behaviors/village.json` 定义 meta actions、conditions 和 recipes，Runtime 编译 Sequence/Selector/Condition/Action/Timeout/Interruptible 节点；ActionCandidate 只引用配方，ProcessExecution 在完成时执行同一配方。
-5. ~~为元动作、复合行为、事务失败和回滚补自动化测试~~ 已完成；当前完整测试约 4.5 秒通过。新增商店、利率或政策规则前，必须先完成对应的 P1 事实模型。
+5. ~~为元动作、复合行为、事务失败和回滚补自动化测试~~ 已完成。新增商店、利率或政策规则前，必须先完成对应的 P1 事实模型。
 
 ## 后续工作包
 
@@ -108,13 +108,13 @@ P0-K 的提案校验、模型关闭回退、过期提案、重复提案、过程
 1. ~~**异步决策队列**：Provider 在独立工作线程运行；请求保存 channel、World Revision、NPC State Version、内容/提示版本和幂等键；返回后只接受仍然有效的提案，过期提案进入审计日志，不阻塞 World Tick。~~ 已完成：`TurnQueue` 使用单独工作线程执行 Provider；主线程通过 `pumpAsyncTurns()` 在世界边界提交，revision、NPC state version、content/prompt version 任一变化都会拒绝事实提交并追加 `npc.intent_expired`；Provider 异常或校验失败追加 `npc.intent_rejected`。同步对话仍使用同一 `commitTurn` 校验路径。
 2. **已注册 operator 扩展**：全部检查点已完成。`resource.transfer` 使用实体库存和公共资源池并原子提交；移动校验活动拓扑；`conflict.attack/sabotage` 与 `security.threaten/defend/evacuate/repair` 改变安全事实并产生刺激；`promise.create/transition`、`knowledge.assert`、`experience.record` 和 `production.execute` 均已有命令或配方路径、事件与失败原子性回归。跨主体资源抢占、复杂合同结算和声明式长过程补偿仍需新增内容契约后再实现。
 3. ~~**潮门港纵向切片**：增加交易、家庭/组织指标、阵营关系和近远场更新，仍使用同一 WorldState、ProcessExecution、EventLog 和 Replay 契约。~~ 已完成最小可替换切片：交易、组织指标、跨 NPC 关系、实例库存、近远场更新和 Snapshot 恢复均由 `tests/fixtures/port-pack` 验证。
-4. ~~**验证与性能**：增加多个实例并行离线推进、事件数量/内存指标和 `advance_to` 调度边界测试；保持本地三 NPC 回归在可接受时间内。~~ 已完成基线测试：多个实例共享 `advanceTo`，记录近/远场唤醒、跳过检查、模拟分钟和 Snapshot 序列化大小；本地回归约 4 秒。
+4. ~~**验证与性能**：增加多个实例并行离线推进、事件数量/内存指标和 `advance_to` 调度边界测试；保持本地三 NPC 回归在可接受时间内。~~ 已完成基线测试：多个实例共享 `advanceTo`，记录近/远场唤醒、跳过检查、模拟分钟和 Snapshot 序列化大小。
 
 验收标准是同一 Runtime 加载港区内容后，交易和社会变化能由事件链解释，暂停/恢复/回放不调用 LLM，远端实体不会逐帧模拟。
 
 ### P2：World Intelligence 演化和沙箱（当前检查点已完成）
 
-Evolution Proposal Schema、提案库、来源事实、回放沙箱、指标评估、审批策略、版本化 overlay、激活、快照恢复和栈式回滚已完成。内容包可声明 `resource.below/above`、`need.above`、`group_metric.below/above` 和 `promise.overdue` 异常规则；`AnomalyDetector` 输出带规则、观测值、阈值和最近事实事件证据的 JSON。`ScenarioProposal` 只允许对已建模的资源、组织指标和 NPC 需求做有边界的 delta，要求精确的内容版本和世界 Revision，从同一 Snapshot 分别运行 baseline/scenario，并输出指标、数值差、两侧事件和结果 Snapshot。CLI 的 `--anomalies` 与 `--experiment` 可复现实验，源世界不被修改。小店、利率和政策仍不是已实现机制；没有对应事实模型时会被拒绝，不能由 LLM 直接生成数值结果。
+Evolution Proposal Schema、提案库、EventLog 来源事实、回放沙箱、指标评估、审批策略、版本化 overlay、激活、快照恢复和栈式回滚已完成。提案的 `kind` 必须来自治理注册表，`evidence_event_sequences` 必须引用当前世界中已提交且不重复的事件，无法解析的证据在进入 Sandbox 前即被拒绝。内容包可声明 `resource.below/above`、`need.above`、`group_metric.below/above` 和 `promise.overdue` 异常规则；`AnomalyDetector` 输出带规则、观测值、阈值和最近事实事件证据的 JSON。`ScenarioProposal` 只允许对已建模的资源、组织指标和 NPC 需求做有边界的 delta，要求精确的内容版本和世界 Revision，从同一 Snapshot 分别运行 baseline/scenario，并输出指标、数值差、两侧事件和结果 Snapshot。CLI 的 `--anomalies` 与 `--experiment` 可复现实验，源世界不被修改。小店、利率和政策仍不是已实现机制；没有对应事实模型时会被拒绝，不能由 LLM 直接生成数值结果。
 
 ### P3：可替换世界实例
 
