@@ -43,6 +43,7 @@
 | WorldService 职责拆分 | 未完成 | 先抽 `TransactionManager`、`EventJournal`、`SimulationScheduler`、`IntelligenceCoordinator`，事实写入仍只经统一事务边界；不做微服务 |
 | 事件驱动调度 | 未完成 | 直接跳到下一日程/完成/截止边界；大规模推进不按分钟全量遍历和备份全部 WorldState，同时通过分区等价性回归 |
 | ECS 定位 | 已冻结为投影模型 | `WorldState` 是事实权威，`EntityRegistry` 是当前已知类型的查询投影；自定义 Component 进入权威持久化前，不宣称支持通用动态 ECS |
+| 行动效用分项 | 已完成最小闭环 | `utility_profile` 可声明资源成本、风险、关系影响、未来价值和结构惩罚；范围校验、确定性合成和审计分项已接入；复杂社会效用模型仍由内容扩展 |
 
 开放评审中的正确判断包括：当前 `writeReplay()` 的 Snapshot 已包含最终事实，事件行没有参与重建；`WorldService` 体量过大；分钟级全量调度不扩展到大型世界；内存事务不等于持久化事务；内容与规则可组合不等于 LLM 可新增任意 C++ Primitive。
 
