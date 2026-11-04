@@ -126,6 +126,18 @@ if(TIDE_MARKS_FETCH_BULLET)
     target_include_directories(tide_marks_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 endif()
 add_test(NAME tide_marks_tests COMMAND tide_marks_tests)
+add_test(NAME glass_orchard_headless
+    COMMAND tide_marks_headless --content-root ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/glass-orchard-pack
+            --days 0 --provider mock)
+set_tests_properties(glass_orchard_headless PROPERTIES
+    PASS_REGULAR_EXPRESSION "The Glass Orchard"
+    FAIL_REGULAR_EXPRESSION "unknown_npc")
+add_test(NAME glass_orchard_replay
+    COMMAND tide_marks_headless --content-root ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/glass-orchard-pack
+            --days 0 --provider mock --replay ${CMAKE_CURRENT_BINARY_DIR}/glass-orchard-replay.jsonl)
+set_tests_properties(glass_orchard_replay PROPERTIES
+    PASS_REGULAR_EXPRESSION "replay: glass_orchard_world"
+    FAIL_REGULAR_EXPRESSION "replay error")
 
 set_target_properties(tide_marks_headless tide_marks_client tide_marks_text tide_marks_tests
     PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})

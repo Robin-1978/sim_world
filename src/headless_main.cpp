@@ -12,7 +12,7 @@ namespace {
 
 void usage(const char* program) {
     std::cout << "Usage: " << program
-              << " [--content-root PATH] [--scenario village] [--days N] [--profile PATH]"
+              << " [--content-root PATH] [--days N] [--profile PATH]"
                  " [--provider mock|profile|llama_cpp] [--replay PATH] [--dump-events]"
                  " [--anomalies] [--experiment PATH]\n";
 }
@@ -61,7 +61,10 @@ int main(int argc, char** argv) {
         provider = makeProviderFromProfile(profile, providerName);
     }
     auto service = WorldService::load(contentRoot, std::move(provider));
-    std::cout << "《潮痕》 village scenario | provider=" << service.providerName() << '\n';
+    const auto worldName = service.content().instance
+                               ? service.content().instance->displayName
+                               : service.content().worldId;
+    std::cout << "《潮痕》 " << worldName << " | provider=" << service.providerName() << '\n';
     std::cout << summarize(service.state()) << '\n';
 
     if (dumpAnomalies) {
@@ -89,15 +92,20 @@ int main(int argc, char** argv) {
         }
     }
 
-    const auto dialogue = service.converse("mira", "Can you spare a ration?", "turn-opening-mira");
-    std::cout << "dialogue: " << (dialogue.accepted ? dialogue.dialogue : dialogue.error)
-              << " provider=" << dialogue.provider << (dialogue.error.empty() ? "" : " error=" + dialogue.error) << '\n';
+    if (!service.content().npcs.empty()) {
+        const auto& openingNpc = service.content().npcs.front().definition.id;
+        const auto dialogue = service.converse(openingNpc, "Please tell me what you are doing.",
+                                               "opening:" + service.state().instanceId);
+        std::cout << "dialogue: " << (dialogue.accepted ? dialogue.dialogue : dialogue.error)
+                  << " provider=" << dialogue.provider
+                  << (dialogue.error.empty() ? "" : " error=" + dialogue.error) << '\n';
+    }
     service.advanceMinutes(static_cast<std::int64_t>(days) * kMinutesPerDay);
     std::cout << "after " << days << " day(s): " << summarize(service.state()) << '\n';
     if (!replayPath.empty()) {
         service.writeReplay(replayPath);
-        const auto replayed = WorldService::replay(replayPath);
-        std::cout << "replay: " << summarize(replayed.state()) << '\n';
+        const auto replayed = WorldService::replay(replayPath, contentRoot);
+        std::cout << "replay: " << replayed.state().worldId << " | " << summarize(replayed.state()) << '\n';
     }
     if (dumpEvents) {
         for (const auto& event : service.state().events) {
