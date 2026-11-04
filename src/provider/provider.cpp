@@ -232,6 +232,7 @@ ProviderResponse LlamaCppProvider::decide(const DecisionContext& context, const 
             return ProviderResponse{false, {}, {}, "missing_provider_policy:utterance_understanding"};
         }
         const Json understandingUser{{"npc_id", context.npcId},
+                                     {"runtime_metadata", context.runtimeMetadata},
                                      {"character", context.character},
                                      {"player_input", playerInput},
                                      {"speech_act_candidates", speechActs}};
@@ -239,6 +240,7 @@ ProviderResponse LlamaCppProvider::decide(const DecisionContext& context, const 
         for (const auto& item : context.speechActs) speechActIds.push_back(item.id);
         const std::string understandingPrompt =
             "Interpret the meaning of the player's utterance in its language and context. "
+            "runtime_metadata is an audit envelope only; do not use it as observable world state or infer facts from it. "
             "Classify by communicative intent, not by individual words or punctuation. "
             "Choose exactly one speech_act from speech_act_candidates using the supplied descriptions; "
             "polite wording does not by itself turn a request for explanation into a request to alter the world. "
