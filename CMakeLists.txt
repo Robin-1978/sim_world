@@ -5,9 +5,13 @@ project(tide_marks LANGUAGES CXX)
 find_package(Threads REQUIRED)
 
 option(TIDE_MARKS_ENABLE_SQLITE "Build the optional SQLite persistence adapter when sqlite3 is available" ON)
+option(TIDE_MARKS_REQUIRE_SQLITE "Fail configuration when the SQLite persistence adapter cannot be built" OFF)
 if(TIDE_MARKS_ENABLE_SQLITE)
     find_path(TIDE_MARKS_SQLITE_INCLUDE_DIR sqlite3.h)
     find_library(TIDE_MARKS_SQLITE_LIBRARY NAMES sqlite3)
+endif()
+if(TIDE_MARKS_REQUIRE_SQLITE AND (NOT TIDE_MARKS_SQLITE_INCLUDE_DIR OR NOT TIDE_MARKS_SQLITE_LIBRARY))
+    message(FATAL_ERROR "TIDE_MARKS_REQUIRE_SQLITE=ON but sqlite3 headers or library were not found")
 endif()
 
 set(CMAKE_CXX_STANDARD 20)

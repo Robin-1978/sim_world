@@ -30,8 +30,11 @@ jobs:
       - name: Check out
         uses: actions/checkout@v4
 
+      - name: Install SQLite development headers
+        run: sudo apt-get update && sudo apt-get install -y libsqlite3-dev
+
       - name: Configure with SQLite adapter
-        run: cmake -S . -B build-sqlite -G Ninja -DCMAKE_BUILD_TYPE=Debug -DTIDE_MARKS_ENABLE_SQLITE=ON
+        run: cmake -S . -B build-sqlite -G Ninja -DCMAKE_BUILD_TYPE=Debug -DTIDE_MARKS_ENABLE_SQLITE=ON -DTIDE_MARKS_REQUIRE_SQLITE=ON
 
       - name: Build
         run: cmake --build build-sqlite -j2
