@@ -160,6 +160,7 @@ struct ProcessExecution {
     std::string interruptionReason;
     bool interruptible{true};
     double interruptSalienceThreshold{1.0};
+    std::string reservationMode{"none"};
     std::map<std::string, int> reservedResources;
     std::map<std::string, int> requiredResources;
     std::uint64_t proposalWorldRevision{0};

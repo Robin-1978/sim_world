@@ -23,8 +23,8 @@
 | 内驱/需求模型 | 四域、显式满足配方和有界预期适应已实现；安全事实已支持冲突/威胁/防守/撤离/修复并通过 Stimulus 投射，需求仍由规则链路维护 | `src/npc/drive_system.*`, `NeedContent`, `NeedState`, `need.*` events |
 | 外驱/结构上下文 | 已实现结构化 Stimulus/Constraint、到期、习惯化和快照；结构演化治理已接入，沙箱留给 P2 | `DecisionContext.stimuli`, `constraints`, `WorldService::projectStimuli`, `src/evolution/evolution.*` |
 | LLM 解释与权衡 | 同步对话/自驱提案、channel 策略、Qwen JSON Schema、缺失 action 回退和异步 TurnQueue 已完成；过期结果只写审计事件 | `IntentProposal`, `IProvider`, `TurnQueue`, `decision_channels`, `WorldService::converse/deliberate/pumpAsyncTurns` |
-| 长过程执行 | 数据驱动时长、单一活动槽、资源预留、完成/挂起/恢复事件和 Snapshot 恢复均已实现；挂起释放预留，刺激清除且资源可用时按原计划恢复并顺延完成时间；Goal、Process、FSM、BT 是同一活动的四个投影 | `ProcessExecution`, `NpcActivity`, `WorldService::tickProcesses`, `resumeSuspendedProcesses`, `src/npc/state_machine.*` |
-| 通用资源与实例活动 | 资源数量/预留、实体库存、资源转移、定时 Activity 和基础生产效果已实现；生产过程、交易结算属于 P1 | `ResourceContent`, `ResourceState(amount,reserved)`, `WorldState.inventories`, `ActivityContent`, data-driven schedule effects；承诺关系增量与重谈时长已由 `promise_policy` 驱动 |
+| 长过程执行 | 数据驱动时长、单一活动槽、配方声明的输入预留、完成/挂起/恢复事件和 Snapshot 恢复均已实现；挂起释放预留，刺激清除且资源可用时按原计划恢复并顺延完成时间；Goal、Process、FSM、BT 是同一活动的四个投影 | `ProcessExecution`, `NpcActivity`, `reservation_mode`, `WorldService::tickProcesses`, `resumeSuspendedProcesses`, `src/npc/state_machine.*` |
+| 通用资源与实例活动 | 通用资源数量、可选输入预留、实体库存、资源转移、生产、承诺和定时 Activity 已实现；交易结算与跨主体抢占仍属于后续工作 | `ResourceContent`, `ResourceState(amount,reserved)`, `WorldState.inventories`, `reservation_mode`, `ActivityContent`, data-driven schedule effects；承诺关系增量与重谈时长已由 `promise_policy` 驱动 |
 | 元动作语义目录 | 已冻结；故事动作 ID 由内容包绑定到通用 operator，行为配方在运行时编译为 BT | `src/world/meta_actions.*`, `src/npc/behavior_recipe.*`, `data/behaviors/village.json` |
 | World Intelligence 演化提案 | 结构治理已完成，沙箱/激活待 P2 | `src/evolution/evolution.*`, `data/schemas/evolution-proposal.schema.json`; 校验白名单、禁止 Core mutation、独立审批已覆盖 |
 | 3D 表现和 Blender 场景 | 已有 P0 原型 | 不参与当前平台模型验收 |

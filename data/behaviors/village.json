@@ -8,6 +8,7 @@
       "duration_minutes": 120,
       "interruptible": false,
       "interrupt_salience_threshold": 1.0,
+      "reservation_mode": "input_resources",
       "root": {
         "type": "sequence",
         "id": "repair_ferry.sequence",
@@ -56,6 +57,7 @@
       "duration_minutes": 30,
       "interruptible": true,
       "interrupt_salience_threshold": 0.85,
+      "reservation_mode": "input_resources",
       "root": {
         "type": "sequence",
         "id": "offer_ration.sequence",

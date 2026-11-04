@@ -14,6 +14,7 @@ struct ActionCandidate {
     int durationMinutes{0};
     bool interruptible{true};
     double interruptSalienceThreshold{1.0};
+    std::string reservationMode{"none"};
     // Optional content-authored words used only by the offline MockProvider's
     // natural-language spotter. Runtime validation never depends on them.
     std::vector<std::string> keywords;

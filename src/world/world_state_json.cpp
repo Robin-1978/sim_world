@@ -91,6 +91,7 @@ Json processJson(const ProcessExecution& process) {
                 {"behavior_status", process.behaviorStatus},
                 {"interruptible", process.interruptible},
                 {"interrupt_salience_threshold", process.interruptSalienceThreshold},
+                {"reservation_mode", process.reservationMode},
                 {"reserved_resources", reserved},
                 {"required_resources", [&process] { Json required = Json::object(); for (const auto& [resource, amount] : process.requiredResources) required[resource] = amount; return required; }()},
                 {"proposal_world_revision", process.proposalWorldRevision},
@@ -116,6 +117,7 @@ ProcessExecution processFromJson(const Json& json) {
     process.behaviorStatus = jsonValue<std::string>(json, "behavior_status", "running");
     process.interruptible = jsonValue<bool>(json, "interruptible", true);
     process.interruptSalienceThreshold = jsonValue<double>(json, "interrupt_salience_threshold", 1.0);
+    process.reservationMode = jsonValue<std::string>(json, "reservation_mode", "none");
     const auto reserved = json.value("reserved_resources", Json::object());
     for (auto it = reserved.begin(); it != reserved.end(); ++it) {
         process.reservedResources[it.key()] = it.value().get<int>();

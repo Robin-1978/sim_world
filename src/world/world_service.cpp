@@ -1510,7 +1510,7 @@ DialogueTurn WorldService::commitTurn(const TurnRequest& request, ProviderRespon
         cancelProcess(request.npcId, *mutableNpc.activity.process, request.trigger);
         mutableNpc.activity = NpcActivity{};
     }
-    std::map<std::string, int> reservations = candidate->durationMinutes > 0
+    std::map<std::string, int> reservations = candidate->reservationMode == "input_resources"
                                                    ? candidate->reservations
                                                    : std::map<std::string, int>{};
     for (const auto& [resource, amount] : reservations) {
@@ -1548,6 +1548,7 @@ DialogueTurn WorldService::commitTurn(const TurnRequest& request, ProviderRespon
         process.behaviorNodeId = candidate->planId;
         process.interruptible = candidate->interruptible;
         process.interruptSalienceThreshold = candidate->interruptSalienceThreshold;
+        process.reservationMode = candidate->reservationMode;
         process.reservedResources = reservations;
         process.requiredResources = reservations;
         process.proposalWorldRevision = response.proposal.worldRevision;

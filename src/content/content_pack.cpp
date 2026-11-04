@@ -144,6 +144,10 @@ void parseBehaviorPack(WorldContentPack& pack, const Json& document, const std::
         recipe.durationMinutes = item.value("duration_minutes", 0);
         recipe.interruptible = item.value("interruptible", true);
         recipe.interruptSalienceThreshold = item.value("interrupt_salience_threshold", 1.0);
+        recipe.reservationMode = item.value("reservation_mode", "none");
+        if (recipe.reservationMode != "none" && recipe.reservationMode != "input_resources") {
+            throw std::runtime_error("unsupported reservation_mode in behavior recipe: " + id);
+        }
         if (recipe.durationMinutes < 0 || recipe.interruptSalienceThreshold < 0.0 ||
             recipe.interruptSalienceThreshold > 1.0) {
             throw std::runtime_error("invalid behavior recipe timing or interrupt threshold: " + id);
@@ -260,6 +264,7 @@ std::vector<ActionCandidate> parseActions(const Json& beats, const std::string& 
             if (!definition.is_object()) throw std::runtime_error("dialogue behavior must be an object: " + id);
             ActionCandidate candidate{id, recipe->planId, beat.value("id", "content"), recipe->durationMinutes,
                                       recipe->interruptible, recipe->interruptSalienceThreshold,
+                                      recipe->reservationMode,
                                       stringArray(definition, "keywords", "dialogue content"), recipe->id, {}};
             collectBehaviorReservations(recipe->root, pack, candidate.reservations);
             result.push_back(std::move(candidate));

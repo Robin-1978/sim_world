@@ -47,6 +47,10 @@ struct BehaviorRecipeContent {
     int durationMinutes{0};
     bool interruptible{true};
     double interruptSalienceThreshold{1.0};
+    // Reservation is an authored process policy. Runtime supports the
+    // generic modes "none" and "input_resources"; it never infers policy
+    // from duration or resource names.
+    std::string reservationMode{"none"};
     std::vector<std::string> allowedActors;
     std::map<std::string, int> reservations;
     BehaviorNodeContent root;

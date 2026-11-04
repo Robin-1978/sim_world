@@ -51,6 +51,36 @@
           }
         ]
       }
+    },
+    {
+      "id": "cool_service_lift",
+      "plan_id": "cool_service_lift",
+      "duration_minutes": 10,
+      "reservation_mode": "input_resources",
+      "root": {
+        "type": "sequence",
+        "id": "cool_service_lift.sequence",
+        "children": [
+          {
+            "type": "condition",
+            "id": "cool_service_lift.available",
+            "name": "resource_available",
+            "args": {
+              "resource": "energy",
+              "minimum": 2
+            }
+          },
+          {
+            "type": "meta_action",
+            "id": "cool_service_lift.consume",
+            "name": "consume_resource",
+            "args": {
+              "resource": "energy",
+              "amount": 2
+            }
+          }
+        ]
+      }
     }
   ]
 }

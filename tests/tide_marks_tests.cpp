@@ -144,6 +144,8 @@ void accepted_intent_runs_without_reasking_llm() {
     auto restored = WorldService::fromSnapshot(snapshot);
     expect(restored.state().npcs.at("mira").activity.process.has_value(),
            "an in-flight process survives snapshot restore");
+    expect(restored.state().npcs.at("mira").activity.process->reservationMode == "input_resources",
+           "a process restores its authored reservation policy");
     restored.advanceMinutes(29);
     expect(restored.state().resources.at("grain").amount == 100,
            "long-running effects are not committed before completion");
@@ -161,6 +163,17 @@ void accepted_intent_runs_without_reasking_llm() {
            }),
            "completion is recorded as a world event");
     expect(providerCalls == 1, "world time advances without another model call");
+}
+
+void reservation_policy_is_authored_per_process() {
+    auto service = WorldService::load();
+    const auto turn = service.converse("mira", "please sleep", "reservation-none");
+    expect(turn.accepted, "a long process without resource inputs can start");
+    const auto& process = service.state().npcs.at("mira").activity.process;
+    expect(process && process->actionId == "rest" && process->reservationMode == "none",
+           "duration does not implicitly enable resource reservation");
+    expect(process && process->reservedResources.empty() && service.state().resources.at("grain").reserved == 0,
+           "a none-policy process leaves the shared resource ledger untouched");
 }
 
 void autonomous_deliberation_is_triggered_not_per_tick() {
@@ -295,6 +308,14 @@ void meta_actions_are_loaded_from_content() {
            "structural transitions are configured by action id");
     expect(!content.metaActions.contains("transfer_resource"),
            "an undeclared action is absent rather than supplied by C++");
+    const auto repair = std::find_if(content.behaviorRecipes.begin(), content.behaviorRecipes.end(),
+                                     [](const auto& recipe) { return recipe.id == "repair_ferry"; });
+    const auto rest = std::find_if(content.behaviorRecipes.begin(), content.behaviorRecipes.end(),
+                                   [](const auto& recipe) { return recipe.id == "rest"; });
+    expect(repair != content.behaviorRecipes.end() && repair->reservationMode == "input_resources",
+           "a resource-consuming process opts into input reservation through content");
+    expect(rest != content.behaviorRecipes.end() && rest->reservationMode == "none",
+           "a long process without resource inputs does not reserve merely because it has duration");
 }
 
 void needs_cover_domains_and_explicit_execution_paths() {
@@ -780,6 +801,15 @@ void runtime_loads_a_world_without_village_identifiers() {
     expect(initialResources.contains("energy") && initialResources.contains("coolant") &&
                !initialResources.contains("grain"),
            "arbitrary world resources load from JSON without village-specific fields");
+    const auto turn = service.converse("sable", "please cool the service lift", "fixture-reservation");
+    expect(turn.accepted && service.state().npcs.at("sable").activity.process &&
+               service.state().npcs.at("sable").activity.process->actionId == "cool_service_lift",
+           "the fixture world runs an arbitrary configured resource process");
+    expect(service.state().resources.at("energy").reserved == 2,
+           "reservation mode works for fixture resources without village identifiers");
+    service.advanceMinutes(10);
+    expect(service.state().resources.at("energy").amount == 5,
+           "the generic runtime settles arbitrary resource inputs at process completion");
     const auto workshop = service.entities().record("spatial:workshop");
     const auto serviceLift = service.entities().record("link:service_lift");
     expect(workshop.has_value() && workshop->kind == "zone", "authored spatial kinds remain generic");
@@ -927,6 +957,7 @@ int main() {
     run("autonomous_deliberation_is_triggered_not_per_tick", autonomous_deliberation_is_triggered_not_per_tick);
     run("async_turn_queue_does_not_commit_expired_results", async_turn_queue_does_not_commit_expired_results);
     run("high_salience_stimulus_interrupts_and_releases_reservations", high_salience_stimulus_interrupts_and_releases_reservations);
+    run("reservation_policy_is_authored_per_process", reservation_policy_is_authored_per_process);
     run("behavior_tree_supports_sequence_timeout_and_interrupt", behavior_tree_supports_sequence_timeout_and_interrupt);
     run("provider_and_action_validation_are_safe", provider_and_action_validation_are_safe);
     run("meta_actions_are_loaded_from_content", meta_actions_are_loaded_from_content);
