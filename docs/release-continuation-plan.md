@@ -44,7 +44,7 @@
 - 行为树由 `recipes` 自动构造；Mira、Lorn、Eve 与故事动作没有专用 C++ BT。
 - 对话与自驱由 `decision_channels` 声明；通道属性、话语权限、事件/记忆投影和 Provider 策略不再依赖 trigger 字符串分支。
 - 嵌套配方失败只回滚自己的保存点，不会把所在世界时间步一起恢复；快照回滚不复制不可变事件历史。
-- 27 个核心测试当前在本机以约 3 秒完成，单测耗时输出用于防止长期模拟回归。
+- 40 个核心测试当前在本机以约 4.5 秒完成，单测耗时输出用于防止长期模拟回归。
 
 ## P0 工作顺序
 
@@ -93,7 +93,7 @@ P0-K 的提案校验、模型关闭回退、过期提案、重复提案、过程
 2. ~~让内容加载器校验单位、所有权、容量、输入/输出、时间窗口、权限和引用~~ 已完成当前资源、拓扑、需求、行为配方和引用校验；质量、所有权、交易输入/输出的完整语义属于 P1 operator。
 3. ~~完成 P0 元动作注册表：资源消耗/产出/预留、需求满足、关系调整和连接状态~~ 已完成；当前已注册执行器为 `resource.consume`、`resource.produce`、`resource.reserve`、`resource.release`、`need.relieve`、`relationship.adjust`、`link.set_state`。资源转移、移动、承诺和知识动作保留为 P1 operator，不提前写入可加载内容。
 4. ~~把小村庄真实的配给、修船、档案整理和承诺行为组合为 BehaviorRecipe；不再为每个 NPC 添加 C++ 特例。~~ 已完成：`data/behaviors/village.json` 定义 meta actions、conditions 和 recipes，Runtime 编译 Sequence/Selector/Condition/Action/Timeout/Interruptible 节点；ActionCandidate 只引用配方，ProcessExecution 在完成时执行同一配方。
-5. ~~为元动作、复合行为、事务失败和回滚补自动化测试~~ 已完成；当前完整测试约 3 秒通过。新增商店、利率或政策规则前，必须先完成对应的 P1 事实模型。
+5. ~~为元动作、复合行为、事务失败和回滚补自动化测试~~ 已完成；当前完整测试约 4.5 秒通过。新增商店、利率或政策规则前，必须先完成对应的 P1 事实模型。
 
 ## 后续工作包
 
