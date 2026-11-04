@@ -48,6 +48,10 @@ ValidationResult ActionValidator::validate(const DecisionContext& context, const
                 }
                 continue;
             }
+            if (!definition.value().is_object()) {
+                return {false, "invalid_action_parameter_schema",
+                        "The authored behavior parameter definition must be an object: " + item.key()};
+            }
             const auto type = definition.value().value("type", "");
             if (!type.empty() && !typeMatches(item.value(), type)) {
                 return {false, "invalid_action_parameter_type", "The behavior parameter has the wrong type: " + item.key()};
@@ -78,8 +82,12 @@ ValidationResult ActionValidator::validate(const DecisionContext& context, const
             }
             if (item.value().is_array() && rules.contains("items")) {
                 const auto itemSchema = rules.at("items");
+                if (!itemSchema.is_object()) {
+                    return {false, "invalid_action_parameter_schema",
+                            "The authored array item schema must be an object: " + item.key()};
+                }
                 const auto itemType = itemSchema.value("type", "");
-                if (!itemSchema.is_object() || itemType.empty() ||
+                if (itemType.empty() ||
                     std::any_of(item.value().begin(), item.value().end(),
                                 [&itemType, &typeMatches](const auto& entry) {
                                     return !typeMatches(entry, itemType);

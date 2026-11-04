@@ -971,6 +971,21 @@ void decision_context_projects_location_relevant_resources() {
            "locationless collective resources remain visible and resource provenance stays explicit");
 }
 
+void action_validator_rejects_malformed_nested_schema_without_throwing() {
+    DecisionContext context;
+    ActionCandidate candidate;
+    candidate.actionId = "fixture_action";
+    candidate.parameterSchema = Json::object();
+    candidate.parameterSchema["type"] = "object";
+    candidate.parameterSchema["properties"]["destinations"] =
+        Json{{"type", "array"}, {"items", "not-an-object"}};
+    context.candidates.push_back(candidate);
+    const auto validation = ActionValidator::validate(
+        context, "fixture_action", Json{{"destinations", Json::array({"archive"})}});
+    expect(!validation.valid && validation.code == "invalid_action_parameter_schema",
+           "malformed nested parameter schemas fail closed with structured validation feedback");
+}
+
 void llm_action_validation_returns_bounded_repair_feedback() {
     auto provider = std::make_unique<RepairingLlamaProvider>();
     auto* raw = provider.get();
@@ -2555,6 +2570,8 @@ int main() {
     run("provider_and_action_validation_are_safe", provider_and_action_validation_are_safe);
     run("decision_context_projects_location_relevant_resources",
         decision_context_projects_location_relevant_resources);
+    run("action_validator_rejects_malformed_nested_schema_without_throwing",
+        action_validator_rejects_malformed_nested_schema_without_throwing);
     run("llm_action_validation_returns_bounded_repair_feedback",
         llm_action_validation_returns_bounded_repair_feedback);
     run("meta_actions_are_loaded_from_content", meta_actions_are_loaded_from_content);
