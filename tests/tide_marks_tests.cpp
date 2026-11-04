@@ -879,6 +879,12 @@ void runtime_loads_a_world_without_village_identifiers() {
            "replacement world snapshot contains only its content reference");
     expect(service.state().npcs.at("sable").needs.contains("safety"),
            "arbitrary authored NPC needs load from JSON content");
+    const auto& authoredNpc = *std::find_if(service.content().npcs.begin(), service.content().npcs.end(),
+                                            [](const auto& npc) { return npc.definition.id == "sable"; });
+    const auto& authoredNeed = *std::find_if(authoredNpc.needs.begin(), authoredNpc.needs.end(),
+                                             [](const auto& need) { return need.id == "safety"; });
+    expect(authoredNeed.domain == "operational_resilience",
+           "a replacement world can author a domain outside the village's four default domains");
     const auto initialResources = service.state().resources;
     expect(initialResources.contains("energy") && initialResources.contains("coolant") &&
                !initialResources.contains("grain"),

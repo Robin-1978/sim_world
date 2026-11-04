@@ -10,7 +10,7 @@
   "simulation_tier": "far",
   "initial": {"location": "workshop", "strategy": "inspect"},
   "needs": [
-    {"id": "safety", "domain": "psychological", "dimension": "safety", "initial_deficit": 0.10, "decay_per_hour": 0.01, "critical_threshold": 0.80, "weight": 1.0, "priority": 0.1, "satisfiers": {"inspect": {"relief": 0.2, "meta_actions": ["relieve_need"]}}}
+    {"id": "safety", "domain": "operational_resilience", "dimension": "service_continuity", "initial_deficit": 0.10, "decay_per_hour": 0.01, "critical_threshold": 0.80, "weight": 1.0, "priority": 0.1, "satisfiers": {"inspect": {"relief": 0.2, "meta_actions": ["relieve_need"]}}}
   ],
   "schedule": {"00:00-00:00": "workshop"}
 }

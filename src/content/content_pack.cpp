@@ -305,10 +305,10 @@ std::vector<NeedContent> parseNeeds(const Json& value, const std::vector<ActionC
         NeedContent need;
         need.id = requiredString(item, "id", path);
         need.domain = requiredString(item, "domain", path);
-        if (need.domain != "physiological" && need.domain != "psychological" &&
-            need.domain != "social" && need.domain != "cognitive") {
-            throw std::runtime_error("need domain must be physiological, psychological, social or cognitive in " + path);
-        }
+        // Domains are semantic content labels, not a Runtime enum.  The
+        // village uses four human-motivation domains, while another world
+        // may author ecological, institutional, spiritual, or entirely new
+        // domains.  DriveSystem only consumes the numeric state contract.
         need.dimension = item.value("dimension", "");
         if (!needIds.insert(need.id).second) throw std::runtime_error("duplicate need id: " + need.id);
         need.initialDeficit = boundedNumber(item, "initial_deficit", path, 0.0, 1.0);

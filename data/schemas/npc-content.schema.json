@@ -89,12 +89,8 @@
             "pattern": "^[a-z0-9_-]+$"
           },
           "domain": {
-            "enum": [
-              "physiological",
-              "psychological",
-              "social",
-              "cognitive"
-            ]
+            "type": "string",
+            "minLength": 1
           },
           "dimension": {
             "type": "string"
