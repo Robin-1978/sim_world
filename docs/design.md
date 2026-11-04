@@ -245,11 +245,13 @@ NPC 由身份、物理状态、需求、长期目标、关系、感知、记忆�
 | Behavior Tree | 执行短计划并报告结果 | 注册节点和内容配方 |
 | Memory | 由事件生成事实、关系和摘要 | EventLog + MemoryService |
 | World Intelligence | 解释复杂情境、权衡社会后果、提出意图、策略和演化提案 | 受约束 LLM |
-| WorldService | 校验并提交事实 | 事务和领域规则 |
+| WorldService | 协调系统并提交事实 | 事务边界和领域系统 |
 
 NPC 不每帧调用 LLM。日常移动、进食、休息、工作、资源结算和远端生活由规则推进；玩家交互、重大冲突、反思、社会策略和演化提案才进入串行 TurnQueue。NPC 具有 active、dormant、destroyed 生命周期；休眠不删除身份和历史。后台自主请求使用内容声明的 `max_decision_age_minutes` 截止点；同一 NPC、同一决策通道的尚未开始请求可由 `coalesce_pending` 合并，过期或被合并的结果只产生审计事件，不能启动旧活动。玩家交互仍按通道单独处理，不被后台请求吞掉。异步 decision channel 还可以声明 `allow_intervening_world_changes`：会话默认关闭；自驱可开启以允许同一调度边界中其他主体的无关提交先发生，但返回时仍必须通过主体版本、时间、权限、参数和当前事实校验。这个声明只放宽全局 Revision 的乐观并发检查，不授予模型绕过 Runtime 的权限。
 
 经验与知识不是同一个对象。EventLog 是事实来源；NPC 的 episodic memory 保留“发生了什么”，KnowledgeFact 表示主体对实体/关系/规则的带来源判断，Experience 表示从一次或多次行动结果中抽象出的可复用倾向或技能。直接感知、亲身行动结果、观察他人事件、可信 testimony 和探索结果都可以产生候选经验；Runtime 只接受带来源、时间、范围和置信度的声明，LLM 可以总结或提出归纳但不能把文本直接变成客观事实。通用经验可被多个 NPC 或策略模板复用，个人经验绑定 NPC、关系和视角。决策上下文同时提供已确认知识与经验，但候选行动仍必须经过当前事实校验。
+
+`WorldService` 是唯一协调入口，但不应成为所有领域规则的实现容器。合同协调由 `ContractSystem` 负责承诺和交换的状态机、参与方权限、截止时间与结算规划；它通过 WorldService 的统一事务和事件回调提交事实，不拥有独立状态副本。资源、社会、元动作和合同系统都遵守同一条 `validate -> transaction -> WorldState/EventLog` 路径。
 
 一次有效的 `IntentProposal` 只负责选择并启动一个已登记的行为/过程，不负责逐 tick 指挥。运行时把它固化为 NPC 的 `ProcessExecution`：记录 `process_id`、动作与配方 ID、开始/完成时间、进度、资源预留、上下文 Revision、可中断策略和状态。之后每个游戏时间步只推进过程、重算前置条件和检查中断信号；完成、失败或中断才提交对应事实。只要过程仍有效，不重复询问 LLM；过程结束后或出现高显著性外驱、硬约束变化、资源失效时，当前 WorldService 的重评估入口才重新安排意图，未来可抽出独立 GoalSystem。一个 NPC 只有一个 `NpcActivity` 槽，它是活动生命周期的唯一所有者；槽中的 `ActivityStatus` 是唯一阶段，Goal 和 ProcessExecution 的状态字段只是该阶段的持久化投影。Goal、ProcessExecution、FSM 和 BT 是同一个活动的四个视角，各自只回答一个问题：Goal 回答“为什么做、是否仍值得做”，ProcessExecution 回答“正在执行哪个过程、进度和预留是什么”，FSM 回答“NPC 当前处于什么运行模式”，BT/BehaviorRecipe 回答“当前过程如何逐步执行”。Goal 的终止状态只能由 `NpcActivity` 的转换函数根据过程结果、中断信号或失效条件统一写入；FSM 模式由同一转换函数投影得到；BT 只返回 `Running/Success/Failure/Interrupted`，不能直接改写 Goal 或过程状态。
 
