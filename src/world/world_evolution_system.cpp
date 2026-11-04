@@ -87,26 +87,32 @@ Json stimulusEvidence(const NpcState& npc) {
 }
 }  // namespace
 
-ProviderResponse WorldEvolutionSystem::requestProposal(const std::string& evolutionLevel,
+ProviderResponse WorldEvolutionSystem::requestProposal(const WorldService& world,
+                                                       const std::string& evolutionLevel,
                                                        const std::string& trigger,
-                                                       const Json& validationFeedback) const {
+                                                       const Json& validationFeedback) {
+    // This path is read-only with respect to WorldState. Keeping the world
+    // reference const makes the proposal context unable to mutate facts;
+    // activation uses the non-const instance method below.
+    const auto& state = world.state_;
+    const auto& content = world.content_;
     if (evolutionLevel != "level1" && evolutionLevel != "level2") {
         return ProviderResponse{false, {}, {}, "invalid_evolution_level", Json::object()};
     }
     Json events = Json::array();
-    const std::size_t first = world_.state_.events.size() > 32 ? world_.state_.events.size() - 32 : 0;
-    for (std::size_t index = first; index < world_.state_.events.size(); ++index) {
-        const auto& event = world_.state_.events[index];
+    const std::size_t first = state.events.size() > 32 ? state.events.size() - 32 : 0;
+    for (std::size_t index = first; index < state.events.size(); ++index) {
+        const auto& event = state.events[index];
         events.push_back(Json{{"sequence", event.sequence}, {"at", event.at.minute},
                               {"type", event.type}, {"actor", event.actor}, {"target", event.target},
                               {"detail", event.detail}, {"data", event.data}});
     }
     Json resources = Json::object();
-    for (const auto& [id, resource] : world_.state_.resources) {
+    for (const auto& [id, resource] : state.resources) {
         resources[id] = Json{{"amount", resource.amount}, {"reserved", resource.reserved}};
     }
     Json npcs = Json::object();
-    for (const auto& [id, npc] : world_.state_.npcs) {
+    for (const auto& [id, npc] : state.npcs) {
         Json needs = Json::object();
         for (const auto& [needId, need] : npc.needs) {
             needs[needId] = Json{{"deficit", need.deficit}, {"sensitivity", need.sensitivity},
@@ -139,27 +145,27 @@ ProviderResponse WorldEvolutionSystem::requestProposal(const std::string& evolut
                                  ? Json::array({"overlay_strategy", "overlay_schedule", "register_behavior_recipe"})
                                  : Json::array({"create_entity_archetype", "register_behavior_recipe"});
     Json contentSummary{
-        {"content_id", world_.content_.id}, {"content_version", world_.content_.contentVersion},
-        {"entity_archetypes", world_.content_.entityArchetypes.size()},
-        {"behavior_recipes", world_.content_.behaviorRecipes.size()},
-        {"strategy_rules", world_.content_.strategyRules.size()},
+        {"content_id", content.id}, {"content_version", content.contentVersion},
+        {"entity_archetypes", content.entityArchetypes.size()},
+        {"behavior_recipes", content.behaviorRecipes.size()},
+        {"strategy_rules", content.strategyRules.size()},
         {"registered_meta_actions", Json::array()}, {"registered_conditions", Json::array()}};
-    for (const auto& [id, definition] : world_.content_.metaActions) {
+    for (const auto& [id, definition] : content.metaActions) {
         (void)definition;
         contentSummary["registered_meta_actions"].push_back(id);
     }
-    for (const auto& [id, definition] : world_.content_.conditions) {
+    for (const auto& [id, definition] : content.conditions) {
         (void)definition;
         contentSummary["registered_conditions"].push_back(id);
     }
     const Json context{{"trigger", trigger}, {"evolution_level", evolutionLevel},
-                       {"base_content_version", world_.content_.contentVersion},
-                       {"base_world_revision", world_.state_.revision},
-                       {"world_time", world_.state_.now.minute}, {"resources", resources},
+                       {"base_content_version", content.contentVersion},
+                       {"base_world_revision", state.revision},
+                       {"world_time", state.now.minute}, {"resources", resources},
                        {"npcs", npcs}, {"content", contentSummary},
                        {"allowed_operations", allowedOperations}, {"evidence_events", events},
                        {"validation_feedback", validationFeedback}};
-    return world_.provider_->proposeEvolution(context, evolutionLevel, validationFeedback);
+    return world.provider_->proposeEvolution(context, evolutionLevel, validationFeedback);
 }
 
 CommandResult WorldEvolutionSystem::activateOverlay(const EvolutionProposal& proposal,

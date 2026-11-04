@@ -19,9 +19,10 @@ class WorldEvolutionSystem {
 public:
     explicit WorldEvolutionSystem(WorldService& world) : world_(world) {}
 
-    [[nodiscard]] ProviderResponse requestProposal(const std::string& evolutionLevel,
-                                                    const std::string& trigger,
-                                                    const Json& validationFeedback) const;
+    [[nodiscard]] static ProviderResponse requestProposal(const WorldService& world,
+                                                           const std::string& evolutionLevel,
+                                                           const std::string& trigger,
+                                                           const Json& validationFeedback);
     CommandResult activateOverlay(const EvolutionProposal& proposal,
                                   const EvolutionSandboxResult& sandbox);
     CommandResult rollbackOverlay(const std::string& proposalId);

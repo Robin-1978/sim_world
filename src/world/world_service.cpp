@@ -749,8 +749,7 @@ DialogueTurn WorldService::deliberate(const std::string& npcId, const std::strin
 ProviderResponse WorldService::requestEvolutionProposal(const std::string& evolutionLevel,
                                                          const std::string& trigger,
                                                          const Json& validationFeedback) const {
-    return WorldEvolutionSystem(*const_cast<WorldService*>(this)).requestProposal(
-        evolutionLevel, trigger, validationFeedback);
+    return WorldEvolutionSystem::requestProposal(*this, evolutionLevel, trigger, validationFeedback);
 }
 
 TurnRequest WorldService::makeTurnRequest(const std::string& npcId, const std::string& input,
