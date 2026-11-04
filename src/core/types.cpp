@@ -1,6 +1,7 @@
 #include "core/types.hpp"
 #include <algorithm>
 #include <sstream>
+#include <stdexcept>
 
 namespace tide_marks {
 int GameTime::day() const {
@@ -148,7 +149,45 @@ ActivityStatus activityStatusFromString(const std::string& value) {
     return ActivityStatus::Proposed;
 }
 
+std::optional<std::string> npcActivityInvariantError(const NpcActivity& activity) {
+    const bool empty = !activity.goal && !activity.process;
+    if (activity.status == ActivityStatus::Proposed) {
+        if (!empty) return "proposed activity must not contain a goal or process";
+        return std::nullopt;
+    }
+    if (!activity.goal || !activity.process) {
+        return "non-empty activity requires both a goal and a process";
+    }
+    if (activity.goal->id.empty() || activity.process->id.empty() ||
+        activity.goal->id != activity.process->goalId) {
+        return "activity goal and process identities do not agree";
+    }
+    const auto expectedGoal = activity.status == ActivityStatus::Active      ? GoalStatus::Active
+                              : activity.status == ActivityStatus::Suspended ? GoalStatus::Suspended
+                              : activity.status == ActivityStatus::Completed ? GoalStatus::Completed
+                              : activity.status == ActivityStatus::Failed    ? GoalStatus::Failed
+                                                                               : GoalStatus::Cancelled;
+    const auto expectedProcess = activity.status == ActivityStatus::Active      ? ProcessStatus::Running
+                                 : activity.status == ActivityStatus::Suspended ? ProcessStatus::Suspended
+                                 : activity.status == ActivityStatus::Completed ? ProcessStatus::Completed
+                                 : activity.status == ActivityStatus::Failed    ? ProcessStatus::Failed
+                                                                                 : ProcessStatus::Cancelled;
+    if (activity.goal->status != expectedGoal) {
+        return "activity status does not match its goal projection";
+    }
+    if (activity.process->status != expectedProcess) {
+        return "activity status does not match its process projection";
+    }
+    return std::nullopt;
+}
+
 void setActivityStatus(NpcActivity& activity, ActivityStatus status) {
+    if (status == ActivityStatus::Proposed && (activity.goal || activity.process)) {
+        throw std::invalid_argument("a populated activity cannot return to proposed");
+    }
+    if (status != ActivityStatus::Proposed && (!activity.goal || !activity.process)) {
+        throw std::invalid_argument("a non-proposed activity requires a goal and process");
+    }
     activity.status = status;
     if (activity.goal) {
         switch (status) {
@@ -169,6 +208,9 @@ void setActivityStatus(NpcActivity& activity, ActivityStatus status) {
         case ActivityStatus::Failed: activity.process->status = ProcessStatus::Failed; break;
         case ActivityStatus::Cancelled: activity.process->status = ProcessStatus::Cancelled; break;
         }
+    }
+    if (const auto error = npcActivityInvariantError(activity)) {
+        throw std::logic_error("invalid NPC activity projection: " + *error);
     }
 }
 

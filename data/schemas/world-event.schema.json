@@ -19,7 +19,7 @@
     "simulation_version"
   ],
   "properties": {
-    "schema_version": {"const": 3},
+    "schema_version": {"const": 4},
     "sequence": {"type": "integer", "minimum": 1},
     "minute": {"type": "integer"},
     "type": {"type": "string", "minLength": 1},
@@ -32,7 +32,7 @@
     "correlation_id": {"type": "string", "pattern": "^correlation:[1-9][0-9]*$"},
     "causation_sequence": {"type": "integer", "minimum": 0},
     "content_version": {"type": "string", "minLength": 1},
-    "simulation_version": {"const": "adaptive-runtime-p1.18"}
+    "simulation_version": {"const": "adaptive-runtime-p1.19"}
   },
   "additionalProperties": false
 }

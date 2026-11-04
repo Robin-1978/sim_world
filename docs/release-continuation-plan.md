@@ -19,7 +19,7 @@
 | NPC 状态机、行为树、全局/局部规划 | 已完成 | `src/npc/state_machine.*`, `src/npc/behavior_tree.*`, `src/navigation/*` |
 | 文本调试界面和 headless 回放 | 已完成 | `src/text_ui_main.cpp`, `src/headless_main.cpp` |
 | 内容包加载 | 已完成 | `WorldService::load/fromContent`, `data/`, `tests/fixtures/minimal-pack` |
-| 存档 schema 与事件因果链 | 已完成 | `world_state_json.*`, `save_schema_version=17`, `simulation_version=adaptive-runtime-p1.18`, 事件 schema 3、稳定 `event_id`、事务 `correlation_id`、直接 `causation_sequence`、逐事件内容/模拟版本、Snapshot 因果与版本完整性校验、`event_sequence`, `instance_id`, `inventories`, `relationships`, `social_groups`, `exchange_contracts`, `NpcActivity` 聚合、`lastSimulationTick/lastDriveTick`、`definition_id` 引用、实例/内容版本校验与可重放 overlay 栈；运行态不复制角色定义 |
+| 存档 schema 与事件因果链 | 已完成 | `world_state_json.*`, `save_schema_version=18`, `simulation_version=adaptive-runtime-p1.19`, 事件 schema 4、稳定 `event_id`、事务 `correlation_id`、直接 `causation_sequence`、逐事件内容/模拟版本、Snapshot 因果与版本完整性校验、`event_sequence`, `instance_id`, `inventories`, `relationships`, `social_groups`, `exchange_contracts`, `NpcActivity` 聚合、`lastSimulationTick/lastDriveTick`、`definition_id` 引用、实例/内容版本校验与可重放 overlay 栈；运行态不复制角色定义 |
 | 内驱/需求模型 | 需求域是内容定义的标签，村庄默认四域、Glass Orchard 使用 stewardship/ecological；`DriveEvaluation` 统一 urgency、effective weight、预期满足、证据置信度和效用贡献，同一行动满足多个需求时逐项求和；显式满足配方和有界预期适应已实现，安全事实已支持冲突/威胁/防守/撤离/修复并通过 Stimulus 投射 | `src/npc/drive_system.*`, `src/npc/goal_selector.*`, `NeedContent`, `NeedState`, `need.*` events, `tests/fixtures/glass-orchard-pack` |
 | 外驱/结构上下文 | 已实现结构化 Stimulus/Constraint、到期、习惯化和快照；结构演化治理、沙箱和版本化激活均已接入 | `DecisionContext.stimuli`, `constraints`, `WorldService::projectStimuli`, `src/evolution/evolution.*` |
 | LLM 解释与权衡 | 同步对话/自驱提案、channel 策略、Qwen JSON Schema、两阶段话语理解、失败关闭和异步 TurnQueue 已完成；有效上下文由主线程提交，过期结果只写审计事件 | `IntentProposal`, `IProvider`, `TurnQueue`, `decision_channels`, `WorldService::converse/deliberate/pumpAsyncTurns` |
@@ -30,6 +30,22 @@
 | World Intelligence 演化提案 | 提案持久化、来源事件证据、验证、沙箱、版本化 overlay 激活/恢复/栈式回滚、内容声明异常检测和反事实场景实验已完成；配方节点引用和整批 overlay 原子性均由 Runtime 校验 | `src/evolution/evolution.*`, `src/evolution/anomaly.*`, `src/evolution/scenario.*`, `src/world/world_service.*`, `data/schemas/evolution-proposal.schema.json`, `data/schemas/scenario-proposal.schema.json`; 校验白名单、EventLog 来源、治理类别、禁止 Core mutation、独立审批、快照重放和结果 JSON 审计已覆盖 |
 | 3D 表现和 Blender 场景 | 已完成内容化投影 | `src/client_main.cpp` 从当前内容包读取空间实体、连接、NPC、资源、场景资产与相机模式，无村庄 `world_id` 或角色分支；Xvfb 烟雾测试覆盖村庄和 Glass Orchard |
 
+## Runtime 契约收敛队列
+
+这组工作的优先级高于继续增加 NPC、剧情或需求类型。判断依据是事实来源、过期决策、恢复和可验证性；不能把已有广覆盖设计当成生产级 Runtime。
+
+| 优先项 | 当前状态 | 完成条件 |
+|---|---|---|
+| Revision 与世界时钟 | 已完成本次修正 | `world_revision` 每个已提交根状态转换只增加一次；无事件的分钟推进会令旧异步提案失效；同事务事件共享 Revision；回滚不推进 Revision |
+| Activity 生命周期不变量 | 已完成本次修正 | `proposed` 只能是空槽；非空 Goal/Process 身份和阶段投影必须一致；Snapshot 遇到非法组合直接拒绝 |
+| 真正的 Event Replay | 未完成 | 从基线状态应用可验证的提交归约记录，重建最终 WorldState，并与 Revision、事件链、内容/模拟版本和最终状态摘要比对；当前 JSONL 只是 Snapshot + 审计事件，禁止称为 Event Sourcing |
+| Persistence Adapter | 未完成 | 冻结 `IWorldPersistence` 边界；在满足 ADR 触发条件时以 SQLite 单事务提交状态、事件、Revision、幂等记录和 Overlay |
+| WorldService 职责拆分 | 未完成 | 先抽 `TransactionManager`、`EventJournal`、`SimulationScheduler`、`IntelligenceCoordinator`，事实写入仍只经统一事务边界；不做微服务 |
+| 事件驱动调度 | 未完成 | 直接跳到下一日程/完成/截止边界；大规模推进不按分钟全量遍历和备份全部 WorldState，同时通过分区等价性回归 |
+| ECS 定位 | 已冻结为投影模型 | `WorldState` 是事实权威，`EntityRegistry` 是当前已知类型的查询投影；自定义 Component 进入权威持久化前，不宣称支持通用动态 ECS |
+
+开放评审中的正确判断包括：当前 `writeReplay()` 的 Snapshot 已包含最终事实，事件行没有参与重建；`WorldService` 体量过大；分钟级全量调度不扩展到大型世界；内存事务不等于持久化事务；内容与规则可组合不等于 LLM 可新增任意 C++ Primitive。
+
 ## 已完成验证
 
 - 任意最小内容包可以启动，不依赖 Mira、Lorn、Eve 或村庄专用 API。
@@ -38,6 +54,8 @@
 - LLM 不可用时，自驱世界推进可走无语言理解的确定性候选回退；玩家对话失败关闭，不猜测语义、不写事实。
 - Snapshot/Replay 不访问 LLM；事件只在事务提交后发布。
 - 每个事件都有稳定 `event_id`，并冻结提交时的内容与模拟版本；同事务事件共享 `correlation_id` 并以前序 `causation_sequence` 形成直接因果链。嵌套保存点失败时暂存事件与因果位置一起撤销，Snapshot 会拒绝越序、跨链或缺少版本来源的事件。
+- `event_sequence` 与 `world_revision` 已分离：时间推进即使没有业务事件也推进 World Revision；同根事务事件共享同一个 Revision；异步上下文绑定事务即将提交的 Revision，避免边界刚完成就把自身判为过期。
+- Activity Snapshot 不再静默归一化非法 Goal/Process 投影；`proposed` 空槽、身份一致性和阶段投影均有严格校验。
 - 候选行动的多需求收益按每个需求的 `effective_weight × expected_relief × evidence_confidence` 求和；排序分数和分项贡献进入 LLM 候选上下文与意图事件。
 - 需求缺口会随游戏时间增加，已提交动作会产生 `need.relieved`，跨阈值会产生 `need.critical`，需求状态可保存和恢复。
 - 运行态 NPC 只保存 `definition_id`；快照引用已删除的内容或不同 `content_version` 时会明确拒绝加载。

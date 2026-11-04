@@ -653,10 +653,13 @@ void time_step_partitioning_preserves_deterministic_world_state() {
     content.npcDeliberation.enabled = false;
     auto singleJump = WorldService::fromContent(content, std::make_unique<MockProvider>());
     auto partitioned = WorldService::fromContent(content, std::make_unique<MockProvider>());
+    const auto initialRevision = singleJump.state().revision;
     singleJump.advanceMinutes(kMinutesPerDay);
     for (int hour = 0; hour < 24; ++hour) partitioned.advanceMinutes(kMinutesPerHour);
     expect(singleJump.snapshotJson() == partitioned.snapshotJson(),
            "without external intervention, one large advance and hourly partitions commit identical facts");
+    expect(singleJump.state().revision == initialRevision + static_cast<std::uint64_t>(kMinutesPerDay),
+           "each committed simulation minute advances the world revision exactly once");
 }
 
 void high_salience_stimulus_interrupts_and_releases_reservations() {
@@ -972,7 +975,9 @@ void snapshot_and_replay_are_deterministic() {
                !std::filesystem::exists(snapshotPath.string() + ".tmp"),
            "snapshot and replay writes replace complete files without leaving staging files behind");
     const auto snapshot = service.snapshotJson();
-    expect(snapshot.at("save_schema_version").get<int>() == 17, "snapshot declares its schema version");
+    expect(snapshot.at("save_schema_version").get<int>() == 18 &&
+               snapshot.at("world_revision").is_number_unsigned(),
+           "snapshot declares its schema and explicit world revision");
     expect(snapshot.at("instance_id") == "tide_marks.village.instance",
            "snapshot records the concrete game instance identity");
     expect(snapshot.at("event_sequence").get<std::size_t>() == service.state().events.size(),
@@ -1042,7 +1047,7 @@ void event_history_has_causal_identity() {
     bool sawChain = false;
     for (std::size_t index = 0; index < events.size(); ++index) {
         const auto& event = events[index];
-        expect(event.schemaVersion == 3, "runtime events use the current event schema");
+        expect(event.schemaVersion == 4, "runtime events use the current event schema");
         expect(event.eventId == "event:" + std::to_string(event.sequence),
                "every event has a stable event id");
         expect(event.sequence == index + 1, "event sequence remains contiguous");
@@ -1051,6 +1056,8 @@ void event_history_has_causal_identity() {
                "every event records the content version active at commit time");
         expect(event.simulationVersion == kSimulationVersion,
                "every event records its simulation semantics version");
+        expect(event.worldRevision > 0 && event.worldRevision <= service.state().revision,
+               "every event points to a committed world revision");
         if (event.causationSequence == 0) continue;
         const auto previous = std::find_if(events.begin(), events.end(), [&event](const auto& candidate) {
             return candidate.sequence == event.causationSequence;
@@ -1083,6 +1090,15 @@ void event_history_has_causal_identity() {
         rejected = true;
     }
     expect(rejected, "snapshot rejects event causation that does not precede its effect");
+    auto wrongRevision = service.snapshotJson();
+    wrongRevision["events"].back()["world_revision"] = 999999;
+    bool wrongRevisionRejected = false;
+    try {
+        static_cast<void>(WorldService::fromSnapshot(wrongRevision));
+    } catch (const std::runtime_error&) {
+        wrongRevisionRejected = true;
+    }
+    expect(wrongRevisionRejected, "snapshot rejects event revisions beyond the committed world");
 }
 
 void physics_events_are_deterministic_and_drained() {
@@ -1819,6 +1835,26 @@ void npc_activity_slot_is_single_owner() {
     expect(restoredActivity.status == ActivityStatus::Active && restoredActivity.goal &&
                restoredActivity.goal->id == activity.goal->id,
            "activity slot restores with the same goal identity");
+    auto brokenProjection = service.snapshotJson();
+    brokenProjection["npcs"]["mira"]["activity"]["process"]["status"] = "suspended";
+    bool brokenProjectionRejected = false;
+    try {
+        static_cast<void>(WorldService::fromSnapshot(brokenProjection));
+    } catch (const std::runtime_error&) {
+        brokenProjectionRejected = true;
+    }
+    expect(brokenProjectionRejected,
+           "snapshot loading rejects activity projections that disagree with the lifecycle phase");
+    auto proposedPayload = service.snapshotJson();
+    proposedPayload["npcs"]["mira"]["activity"]["status"] = "proposed";
+    bool proposedPayloadRejected = false;
+    try {
+        static_cast<void>(WorldService::fromSnapshot(proposedPayload));
+    } catch (const std::runtime_error&) {
+        proposedPayloadRejected = true;
+    }
+    expect(proposedPayloadRejected,
+           "snapshot loading rejects a proposed activity that already owns executable state");
     auto completed = WorldService::fromSnapshot(service.snapshotJson());
     completed.advanceMinutes(30);
     const auto& after = completed.state().npcs.at("mira").activity;

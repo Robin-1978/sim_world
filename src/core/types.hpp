@@ -13,9 +13,9 @@ using Json = nlohmann::json;
 
 inline constexpr std::int64_t kMinutesPerHour = 60;
 inline constexpr std::int64_t kMinutesPerDay = 1440;
-inline constexpr int kWorldEventSchemaVersion = 3;
-inline constexpr int kSnapshotSchemaVersion = 17;
-inline constexpr char kSimulationVersion[] = "adaptive-runtime-p1.18";
+inline constexpr int kWorldEventSchemaVersion = 4;
+inline constexpr int kSnapshotSchemaVersion = 18;
+inline constexpr char kSimulationVersion[] = "adaptive-runtime-p1.19";
 
 struct GameTime {
     std::int64_t minute{0};
@@ -185,6 +185,10 @@ struct NpcActivity {
     std::optional<GoalState> goal;
     std::optional<ProcessExecution> process;
 };
+
+// Returns a stable diagnostic for a lifecycle aggregate that cannot exist.
+// Snapshot loading rejects these errors instead of rewriting the projection.
+[[nodiscard]] std::optional<std::string> npcActivityInvariantError(const NpcActivity& activity);
 
 // The only operation that changes the lifecycle phase. It keeps Goal and
 // ProcessExecution status fields as projections of the same activity phase.

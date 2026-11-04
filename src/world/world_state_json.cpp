@@ -324,7 +324,7 @@ Json worldStateToJson(const WorldState& state) {
                 {"event_sequence", state.events.size()}, {"world_id", state.worldId},
                 {"instance_id", state.instanceId},
                 {"content_version", state.contentVersion}, {"now", state.now.minute},
-                {"revision", state.revision},
+                {"world_revision", state.revision},
                 {"resources", resources}, {"inventories", inventories}, {"security", security},
                 {"active_overlays", overlays},
                 {"entities", entities}, {"links", links}, {"npcs", npcs}, {"social_groups", socialGroups},
@@ -338,7 +338,10 @@ WorldState deserializeWorldState(const Json& json) {
     state.instanceId = jsonValue<std::string>(json, "instance_id", "");
     state.contentVersion = jsonValue<std::string>(json, "content_version", "");
     state.now = GameTime{jsonValue<std::int64_t>(json, "now", 0)};
-    state.revision = jsonValue<std::uint64_t>(json, "revision", 0);
+    if (!json.contains("world_revision") || !json.at("world_revision").is_number_unsigned()) {
+        throw std::runtime_error("snapshot must contain an unsigned world_revision");
+    }
+    state.revision = json.at("world_revision").get<std::uint64_t>();
     const auto resources = json.value("resources", Json::object());
     if (!resources.is_object()) throw std::runtime_error("snapshot resources must be an object");
     for (auto it = resources.begin(); it != resources.end(); ++it) {
@@ -448,7 +451,11 @@ WorldState deserializeWorldState(const Json& json) {
         }
         if (activity.is_object()) {
             npc.activity.status = activityStatusFromString(jsonValue<std::string>(activity, "status", "proposed"));
-            if (npc.activity.goal || npc.activity.process) setActivityStatus(npc.activity, npc.activity.status);
+            if (const auto error = npcActivityInvariantError(npc.activity)) {
+                throw std::runtime_error("snapshot NPC " + it.key() + " has an invalid activity: " + *error);
+            }
+        } else if (!activity.is_null()) {
+            throw std::runtime_error("snapshot NPC activity must be an object or null");
         }
         state.npcs[it.key()] = std::move(npc);
     }

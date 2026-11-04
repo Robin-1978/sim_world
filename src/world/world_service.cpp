@@ -95,6 +95,8 @@ void restoreTransactionalBackup(WorldState& state, WorldState backup,
 }
 
 void validateEventHistory(const WorldState& state) {
+    std::map<std::string, std::uint64_t> correlationRevisions;
+    std::uint64_t previousRevision = 0;
     for (std::size_t index = 0; index < state.events.size(); ++index) {
         const auto& event = state.events[index];
         if (event.schemaVersion != kWorldEventSchemaVersion || event.sequence != index + 1 ||
@@ -105,9 +107,19 @@ void validateEventHistory(const WorldState& state) {
             event.simulationVersion != kSimulationVersion) {
             throw std::runtime_error("snapshot event has incomplete version provenance");
         }
+        if (event.worldRevision == 0 || event.worldRevision > state.revision ||
+            event.worldRevision < previousRevision) {
+            throw std::runtime_error("snapshot event has an invalid world revision");
+        }
+        previousRevision = event.worldRevision;
         const std::string prefix = "correlation:";
         if (!event.correlationId.starts_with(prefix) || event.correlationId.size() == prefix.size()) {
             throw std::runtime_error("snapshot event has an invalid correlation id");
+        }
+        const auto [revision, inserted] =
+            correlationRevisions.emplace(event.correlationId, event.worldRevision);
+        if (!inserted && revision->second != event.worldRevision) {
+            throw std::runtime_error("snapshot transaction combines events from different world revisions");
         }
         if (event.causationSequence == 0) continue;
         if (event.causationSequence >= event.sequence) {
@@ -142,6 +154,10 @@ public:
         service_.rollbackTransaction();
     }
 
+    // Used by a state transition whose durable effect is not represented by
+    // a WorldEvent, notably the passage of simulated time.
+    void markChanged() { service_.markTransactionChanged(); }
+
     TransactionScope(const TransactionScope&) = delete;
     TransactionScope& operator=(const TransactionScope&) = delete;
 
@@ -168,7 +184,8 @@ void WorldService::beginTransaction() {
 
 void WorldService::commitTransaction() {
     if (transactionFrames_.empty()) throw std::logic_error("transaction commit without an active scope");
-    const auto completedLastEventSequence = transactionFrames_.back().lastEventSequence;
+    auto completed = std::move(transactionFrames_.back());
+    const auto completedLastEventSequence = completed.lastEventSequence;
     transactionFrames_.pop_back();
     if (!transactionFrames_.empty()) {
         // A nested savepoint is part of the enclosing causal chain only after
@@ -176,11 +193,20 @@ void WorldService::commitTransaction() {
         transactionFrames_.back().lastEventSequence = completedLastEventSequence;
         return;
     }
+    if (completed.changed) ++state_.revision;
     rebuildEntityRegistry();
     auto events = std::move(deferredEvents_);
     deferredEvents_.clear();
     for (const auto& event : events) eventBus_.publish(event);
     eventBus_.dispatch();
+}
+
+void WorldService::markTransactionChanged() {
+    if (transactionFrames_.empty()) {
+        ++state_.revision;
+        return;
+    }
+    transactionFrames_.front().changed = true;
 }
 
 void WorldService::rollbackTransaction() {
@@ -387,7 +413,10 @@ DecisionContext WorldService::decisionContext(const std::string& npcId) const {
     context.contentVersion = content_.contentVersion;
     context.promptVersion = content_.contentVersion + ":" + content_.id;
     context.now = state_.now;
-    context.worldRevision = state_.revision;
+    // A decision may be captured inside the transaction that advances the
+    // clock. Bind it to the revision that transaction will commit, otherwise
+    // the just-created request is stale before the transaction closes.
+    context.worldRevision = state_.revision + (transactionFrames_.empty() ? 0 : 1);
     context.npcStateVersion = npc.stateVersion;
     std::ostringstream resources;
     for (const auto& [id, resourceDefinition] : content_.resources) {
@@ -572,6 +601,9 @@ void WorldService::advanceMinutes(std::int64_t minutes) {
         if (state_.now.minute % kMinutesPerDay == 0) processDayBoundary(state_.now.day(), dueNpcIds);
         applyPromiseDeadline();
         applyExchangeDeadlines();
+        // Time itself is authoritative state. Even an otherwise quiet minute
+        // invalidates proposals captured before that minute elapsed.
+        transaction.markChanged();
     }
     pumpAsyncTurns();
     syncNpcEntityState();
@@ -1985,7 +2017,6 @@ TurnRequest WorldService::makeTurnRequest(const std::string& npcId, const std::s
     request.trigger = trigger;
     request.playerInput = input;
     request.contentVersion = content_.contentVersion;
-    request.worldRevision = state_.revision;
     request.npcStateVersion = state_.npcs.at(npcId).stateVersion;
     request.createdAt = state_.now;
     const auto channel = content_.decisionChannels.find(channelId);
@@ -2014,6 +2045,7 @@ TurnRequest WorldService::makeTurnRequest(const std::string& npcId, const std::s
         request.context.speechAct = channel->second.defaultSpeechAct;
         request.context.worldActionAllowed = channel->second.defaultWorldActionAllowed;
     }
+    request.worldRevision = request.context.worldRevision;
     return request;
 }
 
@@ -2849,7 +2881,12 @@ void WorldService::expireStimuli() {
 
 WorldEvent WorldService::addEvent(std::string type, std::string actor, std::string target,
                                   std::string detail, Json data) {
-    ++state_.revision;
+    // A root transaction already owns the new world revision. Direct event
+    // creation (bootstrap and other non-transactional paths) gets its own
+    // generation here.
+    if (transactionFrames_.empty()) ++state_.revision;
+    else markTransactionChanged();
+    const auto committedRevision = state_.revision + (transactionFrames_.empty() ? 0 : 1);
     const auto sequence = state_.events.size() + 1;
     std::string correlationId;
     std::uint64_t causationSequence = 0;
@@ -2861,7 +2898,7 @@ WorldEvent WorldService::addEvent(std::string type, std::string actor, std::stri
         correlationId = "correlation:" + std::to_string(sequence);
     }
     state_.events.push_back(WorldEvent{kWorldEventSchemaVersion, sequence, state_.now, std::move(type), std::move(actor),
-                                       std::move(target), std::move(detail), state_.revision, std::move(data),
+                                       std::move(target), std::move(detail), committedRevision, std::move(data),
                                        "event:" + std::to_string(sequence), std::move(correlationId),
                                        causationSequence, state_.contentVersion, kSimulationVersion});
     if (!transactionFrames_.empty()) transactionFrames_.back().lastEventSequence = sequence;

@@ -168,6 +168,7 @@ private:
         std::size_t backupDeferredEventCount{0};
         std::string correlationId;
         std::uint64_t lastEventSequence{0};
+        bool changed{false};
     };
 
     WorldState state_;
@@ -188,6 +189,7 @@ private:
     void beginTransaction();
     void commitTransaction();
     void rollbackTransaction();
+    void markTransactionChanged();
     void rebuildEntityRegistry();
     void syncNpcEntityState();
     WorldEvent addEvent(std::string type, std::string actor, std::string target,
