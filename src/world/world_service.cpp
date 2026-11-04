@@ -94,6 +94,25 @@ void restoreTransactionalBackup(WorldState& state, WorldState backup,
     state.events = std::move(committed);
 }
 
+Json replayFactJson(const WorldState& state, std::size_t eventSequence) {
+    Json json = worldStateToJson(state);
+    json.erase("events");
+    json["event_sequence"] = eventSequence;
+    return json;
+}
+
+std::string stateDigest(const Json& state) {
+    std::uint64_t hash = 1469598103934665603ULL;
+    const std::string canonical = state.dump();
+    for (const unsigned char byte : canonical) {
+        hash ^= byte;
+        hash *= 1099511628211ULL;
+    }
+    std::ostringstream digest;
+    digest << "fnv1a64:" << std::hex << hash;
+    return digest.str();
+}
+
 void validateEventHistory(const WorldState& state) {
     std::map<std::string, std::uint64_t> correlationRevisions;
     std::uint64_t previousRevision = 0;
@@ -321,6 +340,8 @@ WorldService WorldService::fromContent(const WorldContentPack& content,
     service.addEvent("world.initialized", kWorldActor, content.id, "World content pack loaded",
                      Json{{"content_pack", content.id}, {"content_version", content.version},
                           {"instance", instance != nullptr ? instance->id : "default"}, {"npcs", ids}});
+    service.replayBaseline_ = service.snapshotJson();
+    service.replayBaselineEvents_ = service.state_.events;
     return service;
 }
 
@@ -2942,8 +2963,25 @@ void WorldService::writeReplay(const std::string& path) const {
     const std::string temporaryPath = path + ".tmp";
     std::ofstream output(temporaryPath, std::ios::trunc);
     if (!output) throw std::runtime_error("cannot write replay: " + path);
-    output << Json{{"kind", "snapshot"}, {"state", snapshotJson()}}.dump() << '\n';
-    for (const auto& event : state_.events) output << Json{{"kind", "event"}, {"event", worldEventToJson(event)}}.dump() << '\n';
+    Json baseline = replayBaseline_.is_object() && !replayBaseline_.empty() ? replayBaseline_ : snapshotJson();
+    const auto baselineRevision = baseline.at("world_revision").get<std::uint64_t>();
+    Json baselineFact = baseline;
+    baselineFact.erase("events");
+    const Json currentFact = replayFactJson(state_, state_.events.size());
+    const auto patch = Json::diff(baselineFact, currentFact);
+    const bool hasChanges = !patch.empty() || state_.events.size() > replayBaselineEvents_.size();
+    output << Json{{"kind", "replay_header"}, {"schema_version", 2}, {"state", baseline},
+                   {"transaction_count", hasChanges ? 1U : 0U}}.dump() << '\n';
+    if (hasChanges) {
+        Json events = Json::array();
+        for (std::size_t index = replayBaselineEvents_.size(); index < state_.events.size(); ++index) {
+            events.push_back(worldEventToJson(state_.events[index]));
+        }
+        output << Json{{"kind", "transaction"}, {"base_world_revision", baselineRevision},
+                       {"world_revision", state_.revision}, {"patch", patch}, {"events", events},
+                       {"state_digest", stateDigest(currentFact)}}.dump()
+                << '\n';
+    }
     output.flush();
     if (!output) {
         output.close();
@@ -2979,6 +3017,9 @@ WorldService WorldService::fromContentSnapshot(const WorldContentPack& content, 
                                  std::string{kSimulationVersion});
     }
     service.state_ = deserializeWorldState(snapshot);
+    if (snapshot.value("event_sequence", static_cast<std::size_t>(0)) != service.state_.events.size()) {
+        throw std::runtime_error("snapshot event_sequence does not match its event history");
+    }
     validateEventHistory(service.state_);
     if (!service.state_.activeOverlays.empty()) {
         auto rebuilt = content;
@@ -3031,6 +3072,8 @@ WorldService WorldService::fromContentSnapshot(const WorldContentPack& content, 
                                  " does not match loaded content " + service.content_.contentVersion);
     }
     service.rebuildEntityRegistry();
+    service.replayBaseline_ = service.snapshotJson();
+    service.replayBaselineEvents_ = service.state_.events;
     return service;
 }
 
@@ -3045,14 +3088,56 @@ WorldService WorldService::replay(const std::string& path, std::string contentRo
     std::ifstream input(path);
     if (!input) throw std::runtime_error("cannot read replay: " + path);
     std::string line;
+    Json current;
+    std::size_t expectedTransactions = 0;
+    std::size_t appliedTransactions = 0;
     while (std::getline(input, line)) {
         if (line.empty()) continue;
         const auto json = Json::parse(line);
-        if (json.value("kind", "") == "snapshot") {
-            return fromSnapshot(json.at("state"), std::move(contentRoot), std::move(provider));
+        const auto kind = json.value("kind", "");
+        if (kind == "replay_header") {
+            if (json.value("schema_version", 0) != 2 || !json.contains("state")) {
+                throw std::runtime_error("unsupported replay header");
+            }
+            current = json.at("state");
+            expectedTransactions = json.value("transaction_count", 0U);
+            if (!current.is_object() || !current.contains("events")) {
+                throw std::runtime_error("replay baseline must contain an event history");
+            }
+            continue;
         }
+        if (kind != "transaction") continue;
+        if (current.empty()) throw std::runtime_error("replay transaction precedes its header");
+        if (!json.contains("patch") || !json.at("patch").is_array() ||
+            !json.contains("events") || !json.at("events").is_array()) {
+            throw std::runtime_error("replay transaction is incomplete");
+        }
+        const auto baseRevision = current.at("world_revision").get<std::uint64_t>();
+        if (json.at("base_world_revision").get<std::uint64_t>() != baseRevision) {
+            throw std::runtime_error("replay transaction base revision does not match reconstructed state");
+        }
+        Json fact = current;
+        fact.erase("events");
+        fact = fact.patch(json.at("patch"));
+        if (fact.at("world_revision").get<std::uint64_t>() !=
+            json.at("world_revision").get<std::uint64_t>()) {
+            throw std::runtime_error("replay transaction patch produced the wrong world revision");
+        }
+        if (json.contains("state_digest") &&
+            json.at("state_digest").get<std::string>() != stateDigest(fact)) {
+            throw std::runtime_error("replay transaction state digest mismatch");
+        }
+        auto events = current.at("events");
+        for (const auto& event : json.at("events")) events.push_back(event);
+        fact["events"] = std::move(events);
+        current = std::move(fact);
+        ++appliedTransactions;
     }
-    throw std::runtime_error("replay has no snapshot");
+    if (current.empty()) throw std::runtime_error("replay has no header");
+    if (appliedTransactions != expectedTransactions) {
+        throw std::runtime_error("replay transaction count mismatch");
+    }
+    return fromSnapshot(current, std::move(contentRoot), std::move(provider));
 }
 
 std::string summarize(const WorldState& state) {

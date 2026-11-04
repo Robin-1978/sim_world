@@ -38,7 +38,7 @@
 |---|---|---|
 | Revision 与世界时钟 | 已完成本次修正 | `world_revision` 每个已提交根状态转换只增加一次；无事件的分钟推进会令旧异步提案失效；同事务事件共享 Revision；回滚不推进 Revision |
 | Activity 生命周期不变量 | 已完成本次修正 | `proposed` 只能是空槽；非空 Goal/Process 身份和阶段投影必须一致；Snapshot 遇到非法组合直接拒绝 |
-| 真正的 Event Replay | 未完成 | 从基线状态应用可验证的提交归约记录，重建最终 WorldState，并与 Revision、事件链、内容/模拟版本和最终状态摘要比对；当前 JSONL 只是 Snapshot + 审计事件，禁止称为 Event Sourcing |
+| 提交效果 Replay | 已完成最小闭环 | 显式生成 Replay Package 时保存基线、聚合 JSON Patch、事件范围、Revision 和状态摘要；`replay()` 实际应用 Patch、追加事件并验证最终 Snapshot；仍明确不是 Event Sourcing，逐领域事件 reducer 属于后续 |
 | Persistence Adapter | 未完成 | 冻结 `IWorldPersistence` 边界；在满足 ADR 触发条件时以 SQLite 单事务提交状态、事件、Revision、幂等记录和 Overlay |
 | WorldService 职责拆分 | 未完成 | 先抽 `TransactionManager`、`EventJournal`、`SimulationScheduler`、`IntelligenceCoordinator`，事实写入仍只经统一事务边界；不做微服务 |
 | 事件驱动调度 | 未完成 | 直接跳到下一日程/完成/截止边界；大规模推进不按分钟全量遍历和备份全部 WorldState，同时通过分区等价性回归 |
@@ -52,7 +52,7 @@
 - 实体创建、休眠、激活和销毁经过事务，销毁身份保留在事实层并可从 Snapshot 恢复。
 - Promise、资源、关系、NPC 日程和事件在两日离线推进中可观察。
 - LLM 不可用时，自驱世界推进可走无语言理解的确定性候选回退；玩家对话失败关闭，不猜测语义、不写事实。
-- Snapshot/Replay 不访问 LLM；事件只在事务提交后发布。
+- Snapshot/Replay 不访问 LLM；事件只在事务提交后发布。Snapshot 用于普通读档，Replay 只在显式生成时做一次聚合状态重建和审计校验。
 - 每个事件都有稳定 `event_id`，并冻结提交时的内容与模拟版本；同事务事件共享 `correlation_id` 并以前序 `causation_sequence` 形成直接因果链。嵌套保存点失败时暂存事件与因果位置一起撤销，Snapshot 会拒绝越序、跨链或缺少版本来源的事件。
 - `event_sequence` 与 `world_revision` 已分离：时间推进即使没有业务事件也推进 World Revision；同根事务事件共享同一个 Revision；异步上下文绑定事务即将提交的 Revision，避免边界刚完成就把自身判为过期。
 - Activity Snapshot 不再静默归一化非法 Goal/Process 投影；`proposed` 空槽、身份一致性和阶段投影均有严格校验。

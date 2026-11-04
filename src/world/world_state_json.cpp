@@ -352,6 +352,7 @@ WorldState deserializeWorldState(const Json& json) {
     if (!inventories.is_object()) throw std::runtime_error("snapshot inventories must be an object");
     for (auto entity = inventories.begin(); entity != inventories.end(); ++entity) {
         if (!entity.value().is_object()) throw std::runtime_error("snapshot inventory must be an object");
+        state.inventories.try_emplace(entity.key());
         for (auto quantity = entity.value().begin(); quantity != entity.value().end(); ++quantity) {
             state.inventories[entity.key()][quantity.key()] = quantity.value().get<int>();
         }

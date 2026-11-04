@@ -14,6 +14,7 @@
 #include <cmath>
 #include <condition_variable>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <map>
 #include <memory>
@@ -974,6 +975,20 @@ void snapshot_and_replay_are_deterministic() {
                !std::filesystem::exists(path.string() + ".tmp") &&
                !std::filesystem::exists(snapshotPath.string() + ".tmp"),
            "snapshot and replay writes replace complete files without leaving staging files behind");
+    std::vector<Json> replayLines;
+    {
+        std::ifstream input(path);
+        std::string line;
+        while (std::getline(input, line)) replayLines.push_back(Json::parse(line));
+    }
+    expect(replayLines.size() == 2 && replayLines.at(0).at("kind") == "replay_header" &&
+               replayLines.at(0).at("schema_version") == 2 &&
+               replayLines.at(0).at("transaction_count") == 1 &&
+               replayLines.at(1).at("kind") == "transaction" &&
+               replayLines.at(1).at("patch").is_array() &&
+               replayLines.at(1).at("events").is_array() &&
+               !replayLines.at(1).at("events").empty(),
+           "replay writes one baseline and one aggregate commit frame instead of one record per tick");
     const auto snapshot = service.snapshotJson();
     expect(snapshot.at("save_schema_version").get<int>() == 18 &&
                snapshot.at("world_revision").is_number_unsigned(),
@@ -1031,8 +1046,23 @@ void snapshot_and_replay_are_deterministic() {
     }
     expect(oldSchemaRejected, "an obsolete snapshot schema is rejected instead of guessed");
     const auto replayed = WorldService::replay(path.string());
-    expect(summarize(service.state()) == summarize(replayed.state()), "replay restores identical final state");
+    expect(service.snapshotJson() == replayed.snapshotJson(),
+           "replay applies the commit patch and event range to reconstruct the exact final state");
+    replayLines.at(1)["state_digest"] = "fnv1a64:tampered";
+    const auto tamperedPath = std::filesystem::temp_directory_path() / "tide_marks_test_replay_tampered.jsonl";
+    {
+        std::ofstream output(tamperedPath, std::ios::trunc);
+        for (const auto& line : replayLines) output << line.dump() << '\n';
+    }
+    bool tamperedReplayRejected = false;
+    try {
+        static_cast<void>(WorldService::replay(tamperedPath.string()));
+    } catch (const std::runtime_error&) {
+        tamperedReplayRejected = true;
+    }
+    expect(tamperedReplayRejected, "replay rejects a commit frame whose reconstructed state digest changed");
     std::filesystem::remove(path);
+    std::filesystem::remove(tamperedPath);
     std::filesystem::remove(snapshotPath);
     const auto restored = WorldService::fromSnapshot(service.snapshotJson());
     expect(summarize(service.state()) == summarize(restored.state()), "snapshot restores identical state");

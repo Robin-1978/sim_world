@@ -169,7 +169,9 @@ private:
         std::string correlationId;
         std::uint64_t lastEventSequence{0};
         bool changed{false};
+        bool parentChanged{false};
     };
+
 
     WorldState state_;
     std::unique_ptr<IProvider> provider_;
@@ -184,6 +186,8 @@ private:
     // partial changes without cancelling the enclosing world-time transition.
     std::vector<TransactionFrame> transactionFrames_;
     std::vector<WorldEvent> deferredEvents_;
+    Json replayBaseline_ = Json::object();
+    std::vector<WorldEvent> replayBaselineEvents_;
     std::set<std::string> pendingAsyncTurnIds_;
     SimulationMetrics simulationMetrics_;
     void beginTransaction();
