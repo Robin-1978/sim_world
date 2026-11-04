@@ -124,7 +124,28 @@ Evolution Proposal Schema、提案库、EventLog 来源事实、回放沙箱、�
 
 下一阶段扩展的是内容尺度和校准，不是替换执行模型：更多区域与组织、任务内容、经济与制度规则需要通过同一 Content Pack / Evolution Proposal 契约加入；现实世界实验必须定义对应实体、数据边界、校准数据和失败标准后才能运行。
 
-## 剩余目标总表
+## 目标总表（按状态）
+
+这张表列出项目目标的完整状态。标记“纵向完成”表示契约已经在可运行实例、回放和测试中闭环；它不表示所有产品内容或所有规模问题都已完成。
+
+| 目标 | 当前状态 | 验证或下一步 |
+|---|---|---|
+| Runtime Core：事实、事务、Revision、事件、调度、实体生命周期、快照/回放 | 纵向完成 | 继续保持单一 WorldState 写入边界；数据库 durable commit 属于后续适配器 |
+| Content Pack / Game Instance / World Runtime State 分离 | 纵向完成 | `data/README.md` 固定静态输入与运行存档边界；继续用第二、第三实例验证可替换性 |
+| 内驱：需求衰减、临界、满足、预期适应、多需求排序 | 纵向完成 | `DriveEvaluation` 已进入排序和 LLM 上下文；后续增加成本/风险的通用内容字段 |
+| 外驱与结构：Stimulus、Constraint、权限、异常和安全事实 | 纵向完成 | 继续扩展可声明事实类型，不用文本关键词代替模型理解 |
+| NPC 活动生命周期：Goal / ProcessExecution / FSM / BT 单一活动槽 | 纵向完成 | 保持 `NpcActivity` 为唯一阶段所有者；候选 Goal 集合是后续扩展 |
+| LLM Intelligence：话语理解、权衡、意图、异步队列、截止和重新校验 | 纵向完成 | 继续用真实 Qwen profile 做质量/耗时回放；不让 Provider 写事实 |
+| P0 小村庄因果验证 | 纵向完成 | 资源→需求→意图→行动→关系/记忆→次日选择闭环已覆盖 |
+| P1 社会与通用 operator | 纵向完成 | 合同、交易、生产、移动、安全、知识/经验和资源仲裁已有最小切片 |
+| P2 World Intelligence 演化治理 | 纵向完成 | Proposal→Validate→Sandbox→Approve→Overlay→Observe 已覆盖；Runtime Core 不在线热改 |
+| P3 可替换世界实例 | 纵向完成 | Port 与 Glass Orchard 已证明内容替换；继续增加内容规模而非 C++ 特例 |
+| 持久化生产化 | 原型阶段未完成 | 当前 JSON Snapshot/JSONL Replay 足够 P0-P3；满足 ADR 触发条件后实现 SQLite adapter |
+| 商店、价格、利率、税费、政策和复杂仲裁 | 尚未建模 | 先定义对应事实、主体、规则和校准数据，再接入 Scenario/Evolution |
+| 大规模社会校准、多模型并发、分布式 Runtime | 尚未开始 | 不进入当前小村验证门槛 |
+| Runtime Core 自主修改/任意代码热加载 | 明确禁止 | 只能由开发者通过代码、测试、迁移和发布演化 |
+
+## 后续目标清单
 
 | 优先级 | 剩余目标 | 完成条件 |
 |---|---|---|

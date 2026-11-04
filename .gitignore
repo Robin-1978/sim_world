@@ -9,3 +9,5 @@
 *.log
 *.save
 *.replay
+/var/
+/runs/
