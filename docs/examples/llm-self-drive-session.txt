@@ -1,0 +1,7 @@
+# Real local Qwen self-drive smoke test. The drain command waits only at a
+# world boundary; it does not make the Runtime call the model every tick.
+advance 60
+drain 120000
+look
+events 20
+quit

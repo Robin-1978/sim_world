@@ -217,6 +217,7 @@
       "conversation": false,
       "classify_speech_act": false,
       "default_world_action_allowed": true,
+      "allow_intervening_world_changes": true,
       "default_speech_act": "autonomous",
       "event_type": "world.intent",
       "memory_kind": "intent",

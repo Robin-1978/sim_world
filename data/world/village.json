@@ -22,7 +22,7 @@
   "npc_deliberation": {
     "enabled": true,
     "min_stimulus_salience": 0.65,
-    "min_drive_pressure": 0.75,
+    "min_drive_pressure": 0.12,
     "min_interrupt_salience": 0.85,
     "cooldown_minutes": 360,
     "max_decision_age_minutes": 60,
@@ -800,6 +800,7 @@
       "conversation": false,
       "classify_speech_act": false,
       "default_world_action_allowed": true,
+      "allow_intervening_world_changes": true,
       "default_speech_act": "autonomous",
       "event_type": "npc.intent",
       "memory_kind": "intent",

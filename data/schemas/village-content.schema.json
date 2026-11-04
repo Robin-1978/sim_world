@@ -718,6 +718,9 @@
           "default_world_action_allowed": {
             "type": "boolean"
           },
+          "allow_intervening_world_changes": {
+            "type": "boolean"
+          },
           "default_speech_act": {
             "type": "string"
           },

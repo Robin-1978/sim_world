@@ -194,6 +194,7 @@ ctest --test-dir build --output-on-failure
 ./build/tide_marks_headless --anomalies --days 0
 ./build/tide_marks_headless --content-root tests/fixtures/port-pack --experiment docs/examples/port-morale-scenario.json
 ./build/tide_marks_headless --content-root tests/fixtures/glass-orchard-pack --days 1 --provider mock --dump-events
+./build/tide_marks_text --provider profile --script docs/examples/llm-self-drive-session.txt
 ```
 
 每次工作包完成后记录：内容版本、规则/模拟版本、Provider/模型（如有）、随机种子、命令、WorldEvent、Snapshot 截断点、Replay 摘要和失败原因。不得把 API Key 写入日志或回放工件。
@@ -201,6 +202,7 @@ ctest --test-dir build --output-on-failure
 ## 风险与当前处理
 
 - LLM 延迟或断开：世界时间和已批准规则可继续推进；自驱和玩家对话返回错误且不提交事件或行动，模型不拥有提交权限。离线回归必须显式选择 Mock Provider。
+- 自驱阈值与异步可见性：`min_drive_pressure` 以 `drives[].drive`/`effective_weight` 为单位，必须由每个内容包校准；默认村庄阈值已调到能在开局首个小时触发真实 LLM。World Tick 不阻塞模型，headless 只有显式 `--wait-llm-ms` 才等待有限时间并泵出结果。
 - 内驱过于写死：参数、需求、动作满足关系和阈值来自 JSON；新驱动力必须走提案和沙箱，不在 C++ 添加 NPC 特例。
 - LLM 越权：候选动作、结构化 IntentProposal、版本检查和 ActionValidator。
 - 世界事实分叉：单一 WorldState 写入入口、事务、EventLog 和提交后 EventBus。
