@@ -52,6 +52,11 @@ struct DecisionContext {
     std::string trigger;
     std::string speechAct;
     bool worldActionAllowed{true};
+    // Versions are carried with an asynchronous request. They describe the
+    // content and prompt contract used to produce the proposal, not mutable
+    // world facts.
+    std::string contentVersion;
+    std::string promptVersion;
     GameTime now;
     std::string perception;
     std::string memories;

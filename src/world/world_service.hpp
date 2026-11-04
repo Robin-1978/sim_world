@@ -9,9 +9,11 @@
 #include "npc/goal_selector.hpp"
 #include "navigation/path_planner.hpp"
 #include "provider/provider.hpp"
+#include "provider/turn_queue.hpp"
 #include "world/components.hpp"
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -72,6 +74,10 @@ public:
                           const std::string& turnId);
     DialogueTurn deliberate(const std::string& npcId, const std::string& trigger,
                             const std::string& turnId = {});
+    // Main-thread boundary for decisions produced by the worker. Returns the
+    // number of results consumed; no Provider call is performed here.
+    std::size_t pumpAsyncTurns();
+    [[nodiscard]] std::size_t pendingAsyncTurns() const;
 
     CommandResult createPromise(const std::string& from, const std::string& to,
                                 const std::string& description, int dueInDays,
@@ -106,6 +112,7 @@ private:
 
     WorldState state_;
     std::unique_ptr<IProvider> provider_;
+    std::unique_ptr<TurnQueue> turnQueue_;
     EventBus eventBus_;
     EntityRegistry entities_;
     WorldContentPack content_;
@@ -113,6 +120,7 @@ private:
     // partial changes without cancelling the enclosing world-time transition.
     std::vector<TransactionFrame> transactionFrames_;
     std::vector<WorldEvent> deferredEvents_;
+    std::set<std::string> pendingAsyncTurnIds_;
 
     void beginTransaction();
     void commitTransaction();
@@ -124,6 +132,11 @@ private:
     void projectStimuli(const WorldEvent& event);
     void expireStimuli();
     void processAutonomousTurns();
+    void enqueueAutonomousTurn(const std::string& npcId, const std::string& trigger);
+    [[nodiscard]] TurnRequest makeTurnRequest(const std::string& npcId, const std::string& input,
+                                              const std::string& turnId, const std::string& channelId,
+                                              const std::string& trigger) const;
+    DialogueTurn commitTurn(const TurnRequest& request, ProviderResponse response);
     DialogueTurn executeTurn(const std::string& npcId, const std::string& input,
                              const std::string& turnId, const std::string& channelId,
                              const std::string& trigger);

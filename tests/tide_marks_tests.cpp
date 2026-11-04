@@ -8,6 +8,7 @@
 #endif
 
 #include <cstdlib>
+#include <atomic>
 #include <chrono>
 #include <filesystem>
 #include <iostream>
@@ -15,6 +16,7 @@
 #include <set>
 #include <stdexcept>
 #include <string>
+#include <thread>
 
 using namespace tide_marks;
 
@@ -40,6 +42,22 @@ public:
 
 private:
     int& calls_;
+};
+
+class DelayedProvider final : public IProvider {
+public:
+    explicit DelayedProvider(std::chrono::milliseconds delay) : delay_(delay) {}
+    ProviderResponse decide(const DecisionContext& context, const std::string& input) override {
+        ++calls;
+        std::this_thread::sleep_for(delay_);
+        return MockProvider{}.decide(context, input);
+    }
+    [[nodiscard]] std::string name() const override { return "delayed"; }
+
+    std::atomic<int> calls{0};
+
+private:
+    std::chrono::milliseconds delay_;
 };
 
 void village_has_three_independent_npcs() {
@@ -156,6 +174,32 @@ void autonomous_deliberation_is_triggered_not_per_tick() {
     expect(providerCalls == 3, "a high-pressure hourly boundary triggers one autonomous deliberation per eligible NPC");
     service.advanceMinutes(60);
     expect(providerCalls == 3, "ordinary tick progression does not repeatedly call the model");
+}
+
+void async_turn_queue_does_not_commit_expired_results() {
+    auto content = ContentPackLoader::load(ContentPackLoader::defaultRoot());
+    content.npcDeliberation.minStimulusSalience = 0.0;
+    content.npcDeliberation.minDrivePressure = 0.0;
+    auto provider = std::make_unique<DelayedProvider>(std::chrono::milliseconds(60));
+    auto* providerRaw = provider.get();
+    auto service = WorldService::fromContent(content, std::move(provider));
+
+    service.advanceMinutes(60);
+    expect(service.pendingAsyncTurns() > 0, "autonomous decisions remain pending while the provider works");
+    const auto revisionBeforeMutation = service.state().revision;
+    expect(service.createPromise("player", "mira", "confirm the delayed decision", 1, "async-mutation").accepted,
+           "the main thread can commit a fact while provider work is pending");
+    expect(service.state().revision > revisionBeforeMutation, "the intervening fact advances world revision");
+    std::this_thread::sleep_for(std::chrono::milliseconds(220));
+    const auto consumed = service.pumpAsyncTurns();
+    expect(consumed > 0 && providerRaw->calls.load() > 0, "completed provider results are drained on the main thread");
+    expect(std::any_of(service.state().events.begin(), service.state().events.end(), [](const auto& event) {
+               return event.type == "npc.intent_expired";
+           }),
+           "a result from an obsolete world revision is audited as expired");
+    for (const auto& [id, npc] : service.state().npcs) {
+        expect(!npc.activity.process, "an expired asynchronous proposal cannot start an activity for " + id);
+    }
 }
 
 void high_salience_stimulus_interrupts_and_releases_reservations() {
@@ -724,6 +768,7 @@ int main() {
     run("needs_are_data_driven_and_replayable", needs_are_data_driven_and_replayable);
     run("accepted_intent_runs_without_reasking_llm", accepted_intent_runs_without_reasking_llm);
     run("autonomous_deliberation_is_triggered_not_per_tick", autonomous_deliberation_is_triggered_not_per_tick);
+    run("async_turn_queue_does_not_commit_expired_results", async_turn_queue_does_not_commit_expired_results);
     run("high_salience_stimulus_interrupts_and_releases_reservations", high_salience_stimulus_interrupts_and_releases_reservations);
     run("behavior_tree_supports_sequence_timeout_and_interrupt", behavior_tree_supports_sequence_timeout_and_interrupt);
     run("provider_and_action_validation_are_safe", provider_and_action_validation_are_safe);

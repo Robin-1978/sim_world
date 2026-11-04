@@ -2,6 +2,8 @@ cmake_minimum_required(VERSION 3.20)
 
 project(tide_marks LANGUAGES CXX)
 
+find_package(Threads REQUIRED)
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -74,6 +76,7 @@ add_library(tide_marks_core
     src/physics/physics_world.cpp
     src/provider/provider.cpp
     src/provider/provider_profile.cpp
+    src/provider/turn_queue.cpp
     src/world/meta_actions.cpp
     src/world/world_service.cpp
     src/world/world_state_json.cpp
@@ -81,7 +84,7 @@ add_library(tide_marks_core
 target_include_directories(tide_marks_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_compile_definitions(tide_marks_core PRIVATE
     TIDE_MARKS_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/data")
-target_link_libraries(tide_marks_core PUBLIC nlohmann_json::nlohmann_json)
+target_link_libraries(tide_marks_core PUBLIC nlohmann_json::nlohmann_json Threads::Threads)
 if(TIDE_MARKS_WARNINGS)
     if(MSVC)
         target_compile_options(tide_marks_core PRIVATE /W4 /permissive-)
