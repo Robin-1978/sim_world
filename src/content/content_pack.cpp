@@ -656,6 +656,16 @@ WorldContentPack ContentPackLoader::load(const std::string& rootPath) {
         throw std::runtime_error("npc_deliberation.cooldown_minutes must be non-negative in " + worldPath);
     }
     pack.npcDeliberation.cooldownMinutes = deliberation.at("cooldown_minutes").get<int>();
+    if (!deliberation.contains("max_decision_age_minutes") ||
+        !deliberation.at("max_decision_age_minutes").is_number_integer() ||
+        deliberation.at("max_decision_age_minutes").get<int>() <= 0) {
+        throw std::runtime_error("npc_deliberation.max_decision_age_minutes must be positive in " + worldPath);
+    }
+    pack.npcDeliberation.maxDecisionAgeMinutes = deliberation.at("max_decision_age_minutes").get<int>();
+    if (!deliberation.contains("coalesce_pending") || !deliberation.at("coalesce_pending").is_boolean()) {
+        throw std::runtime_error("npc_deliberation.coalesce_pending must be boolean in " + worldPath);
+    }
+    pack.npcDeliberation.coalescePending = deliberation.at("coalesce_pending").get<bool>();
     if (pack.npcDeliberation.minStimulusSalience < 0.0 || pack.npcDeliberation.minStimulusSalience > 1.0 ||
         pack.npcDeliberation.minDrivePressure < 0.0 || pack.npcDeliberation.minDrivePressure > 1.0 ||
         pack.npcDeliberation.minInterruptSalience < 0.0 || pack.npcDeliberation.minInterruptSalience > 1.0) {

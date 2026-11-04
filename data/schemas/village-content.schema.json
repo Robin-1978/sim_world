@@ -112,7 +112,9 @@
         "min_stimulus_salience",
         "min_drive_pressure",
         "min_interrupt_salience",
-        "cooldown_minutes"
+        "cooldown_minutes",
+        "max_decision_age_minutes",
+        "coalesce_pending"
       ],
       "properties": {
         "enabled": {
@@ -136,6 +138,13 @@
         "cooldown_minutes": {
           "type": "integer",
           "minimum": 0
+        },
+        "max_decision_age_minutes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "coalesce_pending": {
+          "type": "boolean"
         }
       },
       "additionalProperties": false

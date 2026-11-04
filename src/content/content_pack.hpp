@@ -74,6 +74,8 @@ struct NpcDeliberationPolicy {
     double minDrivePressure{0.5};
     double minInterruptSalience{0.85};
     int cooldownMinutes{360};
+    int maxDecisionAgeMinutes{120};
+    bool coalescePending{true};
 };
 
 struct SimulationPolicy {

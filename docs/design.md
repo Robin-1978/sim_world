@@ -193,6 +193,23 @@ P0 只实现个体需求和公共资源，验证“资源变化—行动—他�
 | Institution / rule | 适用范围、角色权限、价格/税率/配额、优先级、有效期、执行者和处罚 | 当前版本、启用状态、例外、执行记录和违规次数 | 发布、生效、许可、拒绝、处罚、废止 |
 | Event / causal record | 事件类型、schema、因果来源、允许参与者和数据契约 | 时间、顺序、规则/内容版本、前置事实、结果、影响范围和回放输入 | 可审计的世界历史 |
 
+核心对象的写入权和生命周期必须只有一个来源。这里的“投影”可以复制状态用于查询，但不能成为第二个事实存储：
+
+| 对象 | 唯一事实/状态所有者 | 生命周期 | 写入入口 | 持久化责任 |
+|---|---|---|---|---|
+| `WorldState` / ComponentStore | `WorldService` 事务边界 | 世界实例全程 | 已校验 `Command` 或规则提交 | Snapshot + EventLog |
+| `WorldEvent` | 提交器的 `EventLog` | 永久追加 | 成功事务自动产生 | EventLog；EventBus 只通知 |
+| `Entity` 生命周期 | `WorldState.entities` | `active -> dormant -> destroyed` | `createEntity` / `setEntityLifecycle` | Snapshot + 生命周期事件 |
+| `Goal` / `NpcActivity` | NPC 活动转换函数 | 目标可持续；同一时刻一个主活动 | 意图接受、过程完成/失败/中断 | NPC activity 聚合 |
+| `ProcessExecution` | `NpcActivity` | 启动、运行、挂起、恢复、完成/失败 | 行为配方启动与时间推进 | activity 聚合 + 过程事件 |
+| FSM / BT | `NpcActivity` 的运行投影 | 活动期间 | 状态转换函数 / 配方 tick | 仅保存恢复所需聚合，不独立改写阶段 |
+| `IntentProposal` | Intelligence/Provider 输出 | 单次决策 | `TurnQueue` 或同步决策 | 通过 `npc.intent*` 事件审计 |
+| `StimulusState` | 感知投影 | 出现、聚合、到期/撤销 | 已提交事件经 `StimulusProjector` | NPC 状态 + 投影事件 |
+| Memory / Knowledge / Experience | NPC 认知投影 | 可修正、可遗忘、保留来源 | 已提交事件驱动的 operator | NPC 状态；不能反写事实 |
+| `EvolutionProposal` / Overlay | `EvolutionManager` 与当前内容视图 | 提案、验证、批准、激活、回滚 | 独立治理策略 | Proposal/EventLog + Snapshot overlay 栈 |
+
+`Goal` 可以在未来扩展为多个候选目标集合，但当前实现只把一个被接受的主目标绑定到唯一 `NpcActivity`；候选目标不是并行事实，也不能绕过活动转换函数直接写 `ProcessExecution`、FSM 或 BT 状态。
+
 生产、创造、交易、消费和聊天是同一套过程语义的不同入口，而不是五套互相独立的逻辑：
 
 - **生产**是一个有输入、输出、设施、能力、持续时间和失败结果的 `ProductionProcess`。输入可按过程的 `reservation_mode` 预留，完成时按过程规则结算；不能由 LLM 直接写“产出 10 个物品”。
@@ -230,7 +247,7 @@ NPC 由身份、物理状态、需求、长期目标、关系、感知、记忆�
 | World Intelligence | 解释复杂情境、权衡社会后果、提出意图、策略和演化提案 | 受约束 LLM |
 | WorldService | 校验并提交事实 | 事务和领域规则 |
 
-NPC 不每帧调用 LLM。日常移动、进食、休息、工作、资源结算和远端生活由规则推进；玩家交互、重大冲突、反思、社会策略和演化提案才进入串行 TurnQueue。NPC 具有 active、dormant、destroyed 生命周期；休眠不删除身份和历史。
+NPC 不每帧调用 LLM。日常移动、进食、休息、工作、资源结算和远端生活由规则推进；玩家交互、重大冲突、反思、社会策略和演化提案才进入串行 TurnQueue。NPC 具有 active、dormant、destroyed 生命周期；休眠不删除身份和历史。后台自主请求使用内容声明的 `max_decision_age_minutes` 截止点；同一 NPC、同一决策通道的尚未开始请求可由 `coalesce_pending` 合并，过期或被合并的结果只产生审计事件，不能启动旧活动。玩家交互仍按通道单独处理，不被后台请求吞掉。
 
 经验与知识不是同一个对象。EventLog 是事实来源；NPC 的 episodic memory 保留“发生了什么”，KnowledgeFact 表示主体对实体/关系/规则的带来源判断，Experience 表示从一次或多次行动结果中抽象出的可复用倾向或技能。直接感知、亲身行动结果、观察他人事件、可信 testimony 和探索结果都可以产生候选经验；Runtime 只接受带来源、时间、范围和置信度的声明，LLM 可以总结或提出归纳但不能把文本直接变成客观事实。通用经验可被多个 NPC 或策略模板复用，个人经验绑定 NPC、关系和视角。决策上下文同时提供已确认知识与经验，但候选行动仍必须经过当前事实校验。
 
@@ -310,7 +327,7 @@ Provider 的 thinking、reasoning budget、max tokens 和 timeout 只从版本�
 
 ## 7. Runtime 核心契约
 
-`WorldService` 是应用入口，`WorldState` 是事实，`EntityRegistry` 是投影，Domain Systems 执行规则。当前 P0 的唯一时间入口是 `WorldService::advanceMinutes`；未来可将同一契约抽出为 `WorldScheduler::advance_to`。`EventLog` 记录提交事实，`EventBus` 只通知已提交事件，View/Renderer 只读。
+`WorldService` 是应用入口，`WorldState` 是事实，`EntityRegistry` 是投影，Domain Systems 执行规则。当前 P0 的唯一时间入口是 `WorldService::advanceMinutes`；未来可将同一契约抽出为 `WorldScheduler::advance_to`。`EventLog` 记录提交事实，`EventBus` 只通知已提交事件，View/Renderer 只读。Snapshot 与 JSONL Replay 先写临时文件、刷新并完成后再替换目标路径，避免进程中断留下半份存档；这保证文件替换的失败可见，但不把普通文件系统伪装成跨数据库事务。若未来采用独立数据库，WorldState、EventLog、Revision 和幂等记录必须迁移到同一 durable commit boundary，投影和 EventBus 仍在提交后执行。
 
 Runtime Core 只保证实体、组件存储、事务、Revision、事件、调度、持久化、回放和权限；Needs、Drive、Perception、Goal、Behavior、Resource 和 Relationship 是可组合的 World Simulation Framework 能力。P0 可以把这组能力编译在同一进程中，但不能把村庄角色或某一套心理模型写进 Core。这样同一 Runtime 才能加载不同内容实例，且 LLM 只能通过已注册能力提出变化。
 
@@ -374,7 +391,7 @@ IntentProposal + BehaviorRecipe
   -> precondition and whole-plan validation
   -> staged atomic effects and reservations
   -> commit all effects or none
-  -> ordered WorldEvents
+  -> ordered WorldEvents (current event sequence; causation/correlation IDs are a planned schema extension)
   -> next facts, stimuli and memories
 ```
 

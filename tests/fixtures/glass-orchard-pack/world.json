@@ -23,7 +23,9 @@
     "min_stimulus_salience": 0.7,
     "min_drive_pressure": 0.8,
     "min_interrupt_salience": 0.9,
-    "cooldown_minutes": 300
+    "cooldown_minutes": 300,
+    "max_decision_age_minutes": 90,
+    "coalesce_pending": true
   },
   "simulation_policy": {
     "near_tick_minutes": 1,

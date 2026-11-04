@@ -16,14 +16,26 @@ TurnQueue::~TurnQueue() {
     if (worker_.joinable()) worker_.join();
 }
 
-bool TurnQueue::submit(TurnRequest request) {
+TurnSubmitResult TurnQueue::submit(TurnRequest request) {
+    TurnSubmitResult result;
     {
         std::lock_guard lock(mutex_);
-        if (stopping_) return false;
+        if (stopping_) return result;
+        if (request.coalescePending) {
+            for (auto item = pending_.begin(); item != pending_.end();) {
+                if (item->npcId == request.npcId && item->channelId == request.channelId) {
+                    result.supersededTurnIds.push_back(item->turnId);
+                    item = pending_.erase(item);
+                } else {
+                    ++item;
+                }
+            }
+        }
         pending_.push_back(std::move(request));
     }
     condition_.notify_one();
-    return true;
+    result.accepted = true;
+    return result;
 }
 
 std::vector<TurnResult> TurnQueue::drain() {

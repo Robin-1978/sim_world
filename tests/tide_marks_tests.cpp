@@ -2,6 +2,7 @@
 #include "npc/drive_system.hpp"
 #include "world/meta_actions.hpp"
 #include "evolution/evolution.hpp"
+#include "provider/turn_queue.hpp"
 
 #if defined(TIDE_MARKS_HAS_BULLET)
 #include "physics/bullet_physics.hpp"
@@ -10,10 +11,12 @@
 #include <cstdlib>
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <filesystem>
 #include <iostream>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -59,6 +62,42 @@ public:
 
 private:
     std::chrono::milliseconds delay_;
+};
+
+class BlockingProvider final : public IProvider {
+public:
+    ProviderResponse decide(const DecisionContext& context, const std::string& input) override {
+        ++calls;
+        {
+            std::unique_lock lock(mutex_);
+            started_ = true;
+            condition_.notify_all();
+            condition_.wait(lock, [this] { return released_; });
+        }
+        return MockProvider{}.decide(context, input);
+    }
+    [[nodiscard]] std::string name() const override { return "blocking"; }
+
+    void waitUntilStarted() {
+        std::unique_lock lock(mutex_);
+        condition_.wait(lock, [this] { return started_; });
+    }
+
+    void release() {
+        {
+            std::lock_guard lock(mutex_);
+            released_ = true;
+        }
+        condition_.notify_all();
+    }
+
+    std::atomic<int> calls{0};
+
+private:
+    std::mutex mutex_;
+    std::condition_variable condition_;
+    bool started_{false};
+    bool released_{false};
 };
 
 class SpeechActProvider final : public IProvider {
@@ -518,6 +557,66 @@ void async_turn_queue_commits_results_with_current_context() {
            "an accepted autonomous proposal creates a persistent NPC activity");
 }
 
+void async_turn_queue_coalesces_pending_requests_per_npc_and_channel() {
+    BlockingProvider provider;
+    TurnQueue queue(provider);
+    const auto makeRequest = [](std::string turnId) {
+        TurnRequest request;
+        request.turnId = std::move(turnId);
+        request.npcId = "mira";
+        request.channelId = "autonomous_reappraisal";
+        request.coalescePending = true;
+        return request;
+    };
+    const auto first = queue.submit(makeRequest("first"));
+    expect(first.accepted && first.supersededTurnIds.empty(), "the first queue request is accepted");
+    provider.waitUntilStarted();
+    const auto second = queue.submit(makeRequest("second"));
+    const auto third = queue.submit(makeRequest("third"));
+    expect(second.accepted && second.supersededTurnIds.empty() &&
+               third.accepted && third.supersededTurnIds == std::vector<std::string>{"second"},
+           "only the latest pending autonomous context for an NPC is retained");
+    provider.release();
+    for (int attempt = 0; attempt < 100 && queue.pending() < 2; ++attempt) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    const auto results = queue.drain();
+    expect(results.size() == 2 && results.front().request.turnId == "first" &&
+               results.back().request.turnId == "third" && provider.calls.load() == 2,
+           "the in-flight request completes and only the newest coalesced request is executed");
+}
+
+void async_turn_queue_rejects_decisions_past_game_deadline() {
+    auto content = ContentPackLoader::load(ContentPackLoader::defaultRoot());
+    content.npcDeliberation.minStimulusSalience = 0.0;
+    content.npcDeliberation.minDrivePressure = 0.0;
+    content.npcDeliberation.maxDecisionAgeMinutes = 1;
+    auto service = WorldService::fromContent(
+        content, std::make_unique<DelayedProvider>(std::chrono::milliseconds(250)));
+    service.advanceMinutes(60);
+    expect(service.pendingAsyncTurns() > 0, "the slow autonomous provider is queued");
+    service.advanceMinutes(2);
+    std::this_thread::sleep_for(std::chrono::milliseconds(350));
+    service.advanceMinutes(1);
+    expect(std::any_of(service.state().events.begin(), service.state().events.end(), [](const auto& event) {
+               return event.type == "npc.intent_expired" &&
+                      event.data.value("error", "") == "decision_expired" &&
+                      event.data.value("current_minute", 0LL) > event.data.value("deadline", 0LL);
+           }),
+           "a result that misses its game-time deadline is rejected at the main-thread commit boundary");
+}
+
+void time_step_partitioning_preserves_deterministic_world_state() {
+    auto content = ContentPackLoader::load(ContentPackLoader::defaultRoot());
+    content.npcDeliberation.enabled = false;
+    auto singleJump = WorldService::fromContent(content, std::make_unique<MockProvider>());
+    auto partitioned = WorldService::fromContent(content, std::make_unique<MockProvider>());
+    singleJump.advanceMinutes(kMinutesPerDay);
+    for (int hour = 0; hour < 24; ++hour) partitioned.advanceMinutes(kMinutesPerHour);
+    expect(singleJump.snapshotJson() == partitioned.snapshotJson(),
+           "without external intervention, one large advance and hourly partitions commit identical facts");
+}
+
 void high_salience_stimulus_interrupts_and_releases_reservations() {
     int providerCalls = 0;
     auto content = ContentPackLoader::load(ContentPackLoader::defaultRoot());
@@ -822,7 +921,14 @@ void snapshot_and_replay_are_deterministic() {
     service.converse("eve", "Tell me about the record", "replay-dialogue");
     service.advanceMinutes(2 * kMinutesPerDay);
     const auto path = std::filesystem::temp_directory_path() / "tide_marks_test_replay.jsonl";
+    const auto snapshotPath = std::filesystem::temp_directory_path() / "tide_marks_test_snapshot.json";
     service.writeReplay(path.string());
+    service.saveSnapshot(snapshotPath.string());
+    service.saveSnapshot(snapshotPath.string());
+    expect(std::filesystem::exists(path) && std::filesystem::exists(snapshotPath) &&
+               !std::filesystem::exists(path.string() + ".tmp") &&
+               !std::filesystem::exists(snapshotPath.string() + ".tmp"),
+           "snapshot and replay writes replace complete files without leaving staging files behind");
     const auto snapshot = service.snapshotJson();
     expect(snapshot.at("save_schema_version").get<int>() == 15, "snapshot declares its schema version");
     expect(snapshot.at("instance_id") == "tide_marks.village.instance",
@@ -880,6 +986,7 @@ void snapshot_and_replay_are_deterministic() {
     const auto replayed = WorldService::replay(path.string());
     expect(summarize(service.state()) == summarize(replayed.state()), "replay restores identical final state");
     std::filesystem::remove(path);
+    std::filesystem::remove(snapshotPath);
     const auto restored = WorldService::fromSnapshot(service.snapshotJson());
     expect(summarize(service.state()) == summarize(restored.state()), "snapshot restores identical state");
 }
@@ -1896,6 +2003,12 @@ int main() {
     run("async_turn_queue_does_not_commit_expired_results", async_turn_queue_does_not_commit_expired_results);
     run("async_turn_queue_commits_results_with_current_context",
         async_turn_queue_commits_results_with_current_context);
+    run("async_turn_queue_coalesces_pending_requests_per_npc_and_channel",
+        async_turn_queue_coalesces_pending_requests_per_npc_and_channel);
+    run("async_turn_queue_rejects_decisions_past_game_deadline",
+        async_turn_queue_rejects_decisions_past_game_deadline);
+    run("time_step_partitioning_preserves_deterministic_world_state",
+        time_step_partitioning_preserves_deterministic_world_state);
     run("high_salience_stimulus_interrupts_and_releases_reservations", high_salience_stimulus_interrupts_and_releases_reservations);
     run("reservation_policy_is_authored_per_process", reservation_policy_is_authored_per_process);
     run("resource_preemption_is_declared_and_atomic", resource_preemption_is_declared_and_atomic);

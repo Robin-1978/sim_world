@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cmath>
 #include <fstream>
+#include <filesystem>
 #include <sstream>
 #include <stdexcept>
 #include <string_view>
@@ -1939,6 +1940,7 @@ TurnRequest WorldService::makeTurnRequest(const std::string& npcId, const std::s
     request.contentVersion = content_.contentVersion;
     request.worldRevision = state_.revision;
     request.npcStateVersion = state_.npcs.at(npcId).stateVersion;
+    request.createdAt = state_.now;
     const auto channel = content_.decisionChannels.find(channelId);
     request.context = decisionContext(npcId);
     request.context.channel = channelId;
@@ -1947,6 +1949,9 @@ TurnRequest WorldService::makeTurnRequest(const std::string& npcId, const std::s
     request.context.promptVersion =
         "tide-marks-intent-v2:" + content_.contentVersion + ":" + content_.id;
     request.promptVersion = request.context.promptVersion;
+    request.coalescePending = !channel->second.conversation &&
+                              content_.npcDeliberation.coalescePending;
+    request.deadline = GameTime{state_.now.minute + content_.npcDeliberation.maxDecisionAgeMinutes};
     if (channel->second.conversation && channel->second.classifySpeechAct) {
         // Semantic interpretation belongs exclusively to the provider. Runtime
         // supplies the content-authored speech-act vocabulary and validates the
@@ -1999,6 +2004,10 @@ DialogueTurn WorldService::commitTurn(const TurnRequest& request, ProviderRespon
     }
     if (!request.turnId.empty() && state_.processedTurnIds.contains(request.turnId)) {
         result.error = "duplicate_turn";
+        return result;
+    }
+    if (request.deadline.minute > 0 && state_.now.minute > request.deadline.minute) {
+        result.error = "decision_expired";
         return result;
     }
     const auto channel = content_.decisionChannels.find(request.channelId);
@@ -2237,7 +2246,9 @@ void WorldService::enqueueAutonomousTurn(const std::string& npcId, const std::st
                                std::to_string(state_.revision);
     if (pendingAsyncTurnIds_.contains(turnId)) return;
     const auto request = makeTurnRequest(npcId, {}, turnId, content_.autonomousChannelId, trigger);
-    if (!turnQueue_->submit(request)) return;
+    const auto submitted = turnQueue_->submit(request);
+    if (!submitted.accepted) return;
+    for (const auto& supersededId : submitted.supersededTurnIds) pendingAsyncTurnIds_.erase(supersededId);
     pendingAsyncTurnIds_.insert(turnId);
     state_.npcs.at(npcId).lastAutonomousTurn = state_.now;
 }
@@ -2255,6 +2266,7 @@ std::size_t WorldService::pumpAsyncTurns() {
         // or fails validation. This is an audit fact, not a world mutation.
         TransactionScope transaction(*this);
         const bool expired = turn.error == "stale_intent_proposal" ||
+                             turn.error == "decision_expired" ||
                              state_.revision != queued.request.worldRevision ||
                              !hasNpc(queued.request.npcId) ||
                              state_.npcs.at(queued.request.npcId).stateVersion != queued.request.npcStateVersion;
@@ -2266,6 +2278,9 @@ std::size_t WorldService::pumpAsyncTurns() {
                       {"request_world_revision", queued.request.worldRevision},
                       {"current_world_revision", state_.revision},
                       {"request_npc_state_version", queued.request.npcStateVersion},
+                      {"created_at", queued.request.createdAt.minute},
+                      {"deadline", queued.request.deadline.minute},
+                      {"current_minute", state_.now.minute},
                       {"provider", queued.provider}});
     }
     return consumed;
@@ -2803,16 +2818,48 @@ WorldEvent WorldService::addEvent(std::string type, std::string actor, std::stri
 Json WorldService::snapshotJson() const { return worldStateToJson(state_); }
 
 void WorldService::saveSnapshot(const std::string& path) const {
-    std::ofstream output(path);
+    const std::string temporaryPath = path + ".tmp";
+    std::ofstream output(temporaryPath, std::ios::trunc);
     if (!output) throw std::runtime_error("cannot write snapshot: " + path);
     output << snapshotJson().dump(2) << '\n';
+    output.flush();
+    if (!output) {
+        output.close();
+        std::error_code ignored;
+        std::filesystem::remove(temporaryPath, ignored);
+        throw std::runtime_error("cannot flush snapshot: " + path);
+    }
+    output.close();
+    std::error_code error;
+    std::filesystem::rename(temporaryPath, path, error);
+    if (error) {
+        std::error_code ignored;
+        std::filesystem::remove(temporaryPath, ignored);
+        throw std::runtime_error("cannot replace snapshot: " + path + ": " + error.message());
+    }
 }
 
 void WorldService::writeReplay(const std::string& path) const {
-    std::ofstream output(path);
+    const std::string temporaryPath = path + ".tmp";
+    std::ofstream output(temporaryPath, std::ios::trunc);
     if (!output) throw std::runtime_error("cannot write replay: " + path);
     output << Json{{"kind", "snapshot"}, {"state", snapshotJson()}}.dump() << '\n';
     for (const auto& event : state_.events) output << Json{{"kind", "event"}, {"event", worldEventToJson(event)}}.dump() << '\n';
+    output.flush();
+    if (!output) {
+        output.close();
+        std::error_code ignored;
+        std::filesystem::remove(temporaryPath, ignored);
+        throw std::runtime_error("cannot flush replay: " + path);
+    }
+    output.close();
+    std::error_code error;
+    std::filesystem::rename(temporaryPath, path, error);
+    if (error) {
+        std::error_code ignored;
+        std::filesystem::remove(temporaryPath, ignored);
+        throw std::runtime_error("cannot replace replay: " + path + ": " + error.message());
+    }
 }
 
 WorldService WorldService::fromContentSnapshot(const WorldContentPack& content, const Json& json,

@@ -25,7 +25,15 @@ struct TurnRequest {
     std::string promptVersion;
     std::uint64_t worldRevision{0};
     std::uint64_t npcStateVersion{0};
+    GameTime createdAt;
+    GameTime deadline;
+    bool coalescePending{false};
     DecisionContext context;
+};
+
+struct TurnSubmitResult {
+    bool accepted{false};
+    std::vector<std::string> supersededTurnIds;
 };
 
 struct TurnResult {
@@ -46,7 +54,7 @@ public:
     TurnQueue(const TurnQueue&) = delete;
     TurnQueue& operator=(const TurnQueue&) = delete;
 
-    [[nodiscard]] bool submit(TurnRequest request);
+    [[nodiscard]] TurnSubmitResult submit(TurnRequest request);
     [[nodiscard]] std::vector<TurnResult> drain();
     [[nodiscard]] std::size_t pending() const;
 
