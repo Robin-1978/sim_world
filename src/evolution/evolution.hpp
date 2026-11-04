@@ -34,6 +34,7 @@ struct EvolutionSandboxResult {
     std::string message;
     std::string proposalId;
     std::string overlayVersion;
+    std::string baseContentVersion;
     std::uint64_t baseRevision{0};
     std::uint64_t finalRevision{0};
     Json metrics = Json::object();

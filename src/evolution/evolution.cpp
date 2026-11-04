@@ -95,6 +95,9 @@ EvolutionProposalStatus evolutionProposalStatusFromString(const std::string& val
 }
 
 EvolutionProposal EvolutionManager::fromJson(const Json& value) {
+    if (value.value("schema_version", 0) != 1) {
+        throw std::runtime_error("unsupported evolution proposal schema_version");
+    }
     EvolutionProposal proposal;
     proposal.id = requiredString(value, "id");
     proposal.kind = requiredString(value, "kind");
@@ -108,7 +111,7 @@ EvolutionProposal EvolutionManager::fromJson(const Json& value) {
 }
 
 Json EvolutionManager::toJson(const EvolutionProposal& proposal) {
-    return Json{{"kind", proposal.kind}, {"id", proposal.id}, {"source", proposal.source},
+    return Json{{"kind", proposal.kind}, {"schema_version", 1}, {"id", proposal.id}, {"source", proposal.source},
                 {"base_content_version", proposal.baseContentVersion},
                 {"base_world_revision", proposal.baseWorldRevision},
                 {"operations", proposal.operations}, {"status", toString(proposal.status)}};
@@ -138,15 +141,14 @@ EvolutionValidation EvolutionManager::validate(const EvolutionProposal& proposal
     if (proposal.baseContentVersion != content.contentVersion) {
         return {false, "content_version_conflict", "Proposal was created against a different content version."};
     }
-    if (proposal.baseWorldRevision > currentRevision) {
-        return {false, "future_revision", "Proposal references a world revision that does not exist."};
+    if (proposal.baseWorldRevision != currentRevision) {
+        return {false, "revision_conflict", "Proposal must reference the current world revision."};
     }
     if (!proposal.operations.is_array() || proposal.operations.empty()) {
         return {false, "empty_operations", "A proposal must contain at least one operation."};
     }
     static const std::set<std::string> allowed{
-        "create_entity_archetype", "register_behavior_recipe", "overlay_strategy",
-        "add_relationship", "schedule_event"};
+        "create_entity_archetype", "register_behavior_recipe", "overlay_strategy"};
     static const std::set<std::string> forbidden{
         "runtime_core_mutation", "load_script", "inject_code", "json_patch",
         "change_event_schema", "change_transaction_rules"};
@@ -182,6 +184,9 @@ EvolutionValidation EvolutionManager::validate(const EvolutionProposal& proposal
 EvolutionValidation EvolutionManager::approve(EvolutionProposal& proposal,
                                                const std::string& approver,
                                                bool sandboxPassed) {
+    if (proposal.status != EvolutionProposalStatus::Validated) {
+        return {false, "validation_required", "A proposal must pass validation before approval."};
+    }
     if (approver != "developer" && approver != "world_designer") {
         proposal.status = EvolutionProposalStatus::Rejected;
         return {false, "approval_forbidden", "Only an independent developer or world designer may approve evolution."};
@@ -202,7 +207,12 @@ EvolutionValidation EvolutionManager::applyOverlay(WorldContentPack& content,
     if (proposal.baseContentVersion != content.contentVersion) {
         return {false, "content_version_conflict", "Overlay base content does not match the active content."};
     }
-    const auto applied = applyOperations(content, proposal);
+    EvolutionValidation applied;
+    try {
+        applied = applyOperations(content, proposal);
+    } catch (const std::exception& error) {
+        return {false, "invalid_overlay_operation", error.what()};
+    }
     if (!applied.valid) return applied;
     content.contentVersion = content.contentVersion + "+overlay:" + proposal.id;
     content.version = content.version + "+overlay:" + proposal.id;
@@ -215,6 +225,7 @@ EvolutionSandboxResult EvolutionManager::sandbox(const EvolutionProposal& propos
                                                  std::int64_t advanceMinutes) {
     EvolutionSandboxResult result;
     result.proposalId = proposal.id;
+    result.baseContentVersion = base.content().contentVersion;
     result.baseRevision = base.state().revision;
     const auto validation = validate(proposal, base.content(), base.state().revision);
     if (!validation.valid) {

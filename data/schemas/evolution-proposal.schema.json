@@ -16,7 +16,7 @@
         "type": "object",
         "required": ["operation", "id"],
         "properties": {
-          "operation": {"type": "string", "enum": ["create_entity_archetype", "register_behavior_recipe", "overlay_strategy", "add_relationship", "schedule_event"]},
+          "operation": {"type": "string", "enum": ["create_entity_archetype", "register_behavior_recipe", "overlay_strategy"]},
           "id": {"type": "string", "minLength": 1},
           "kind": {"type": "string"},
           "meta_actions": {"type": "array", "items": {"type": "string"}}

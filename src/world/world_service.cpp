@@ -1300,6 +1300,11 @@ CommandResult WorldService::activateOverlay(const EvolutionProposal& proposal,
     if (!sandbox.passed || sandbox.proposalId != proposal.id || sandbox.overlayVersion.empty()) {
         return reject("overlay_sandbox_required", "A passing sandbox result for this proposal is required.");
     }
+    if (sandbox.baseContentVersion != proposal.baseContentVersion ||
+        sandbox.baseRevision != state_.revision || proposal.baseWorldRevision != state_.revision) {
+        return reject("overlay_sandbox_stale",
+                      "The sandbox and proposal must target the current content version and world revision.");
+    }
     if (std::any_of(state_.activeOverlays.begin(), state_.activeOverlays.end(),
                     [&proposal](const auto& active) { return active.proposalId == proposal.id; })) {
         return reject("overlay_already_active", "That evolution overlay is already active.");
@@ -1990,8 +1995,13 @@ bool WorldService::applyMetaAction(const std::string& npcId, const std::string& 
         const auto target = args.value("target", "world");
         const auto resource = args.value("resource", "");
         const int amount = args.value("amount", 0);
-        const auto resolvedSource = source == "self" ? npcEntityId(npcId) : source;
-        const auto resolvedTarget = target == "self" ? npcEntityId(npcId) : target;
+        // Keep actor-facing NPC ids at the command boundary.  The transfer
+        // operator resolves them to entity ids internally; passing the
+        // canonical id here preserves the authored `self` party for
+        // authorization instead of accidentally turning it into an
+        // unrelated inventory identifier.
+        const auto resolvedSource = source == "self" ? npcId : source;
+        const auto resolvedTarget = target == "self" ? npcId : target;
         const auto transfer = transferResource(resolvedSource, resolvedTarget, resource, amount, npcId,
                                                "recipe:" + npcId + ":" + actionId);
         return transfer.accepted;

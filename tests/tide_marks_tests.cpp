@@ -779,6 +779,84 @@ void successful_actions_automatically_create_experience() {
            "automatic experience derivation is itself audited");
 }
 
+void extended_meta_actions_execute_from_content_recipes() {
+    auto content = ContentPackLoader::load(ContentPackLoader::defaultRoot());
+    const auto addAction = [&content](const std::string& actionId, const std::string& operation,
+                                      Json args, const std::string& keyword) {
+        content.metaActions[actionId] = MetaActionDefinition{actionId, "test", actionId, operation, {}};
+        BehaviorRecipeContent recipe;
+        recipe.id = actionId;
+        recipe.planId = actionId;
+        recipe.durationMinutes = 0;
+        recipe.root = BehaviorNodeContent{"meta_action", actionId + ".node", actionId, args, 0, {}};
+        content.behaviorRecipes.push_back(std::move(recipe));
+        for (auto& npc : content.npcs) {
+            if (npc.definition.id != "mira") continue;
+            npc.actions.push_back(ActionCandidate{actionId, actionId, actionId, 0, true, 1.0, "none",
+                                                  {keyword}, actionId, {}});
+        }
+    };
+    addAction("test_transfer", "resource.transfer",
+              Json{{"source", "world"}, {"target", "self"}, {"resource", "grain"}, {"amount", 2}},
+              "test transfer");
+    addAction("test_move", "movement.traverse", Json{{"destination", "village_square"}}, "test move");
+    addAction("test_attack", "conflict.attack", Json{{"target", "lorn"}, {"damage", 0.2}}, "test attack");
+    addAction("test_promise", "promise.create",
+              Json{{"from", "self"}, {"to", "player"}, {"description", "test promise"}, {"due_days", 1}},
+              "test promise");
+    addAction("test_promise_accept", "promise.transition",
+              Json{{"promise_id", "promise-1"}, {"status", "accepted"}, {"detail", "accepted by recipe"}},
+              "test accept promise");
+    addAction("test_knowledge", "knowledge.assert",
+              Json{{"subject", "harbor"}, {"predicate", "status"}, {"value", "inspected"},
+                   {"source_sequence", 1}, {"scope", "witness"}, {"confidence", 0.8}},
+              "test knowledge");
+    addAction("test_experience", "experience.record",
+              Json{{"domain", "trade"}, {"trigger", "inspection"}, {"outcome", "verified"},
+                   {"source_sequence", 1}, {"confidence", 0.8}, {"personal", true}},
+              "test experience");
+    addAction("test_production", "production.execute",
+              Json{{"inputs", Json{{"grain", 5}}}, {"outputs", Json{{"boat_integrity", 3}}}},
+              "test production");
+
+    auto service = WorldService::fromContent(content);
+    expect(service.converse("mira", "please test transfer", "meta-transfer").accepted &&
+               service.state().inventories.at("npc:mira").at("grain") == 2,
+           "a content recipe can invoke the resource-transfer operator");
+    expect(service.converse("mira", "please test move", "meta-move").accepted &&
+               service.state().npcs.at("mira").location == "village_square",
+           "a content recipe can invoke the authored-topology movement operator");
+    expect(service.converse("mira", "please test attack", "meta-attack").accepted &&
+               service.state().security.at("npc:lorn").integrity < 1.0,
+           "a content recipe can invoke the conflict operator");
+    expect(service.converse("mira", "please test promise", "meta-promise").accepted &&
+               service.state().promises.contains("promise-1"),
+           "a content recipe can create a promise through the selected operator");
+    expect(service.converse("mira", "please test accept promise", "meta-promise-accept").accepted &&
+               service.state().promises.at("promise-1").status == PromiseStatus::Accepted,
+           "a content recipe can transition a promise through the selected operator");
+    expect(service.converse("mira", "please test knowledge", "meta-knowledge").accepted &&
+               service.state().npcs.at("mira").knowledge.size() == 1,
+           "a content recipe can assert sourced NPC knowledge");
+    expect(service.converse("mira", "please test experience", "meta-experience").accepted &&
+               !service.state().npcs.at("mira").experiences.empty(),
+           "a content recipe can record sourced experience");
+    const auto grainBefore = service.state().resources.at("grain").amount;
+    const auto integrityBefore = service.state().resources.at("boat_integrity").amount;
+    expect(service.converse("mira", "please test production", "meta-production").accepted &&
+               service.state().resources.at("grain").amount == grainBefore - 5 &&
+               service.state().resources.at("boat_integrity").amount == integrityBefore + 3,
+           "a content recipe can execute a production input/output transition atomically");
+    for (const auto& type : {"resource.transferred", "entity.moved", "conflict.attack", "promise.created",
+                             "promise.accepted", "knowledge.asserted", "experience.recorded",
+                             "production.executed"}) {
+        expect(std::any_of(service.state().events.begin(), service.state().events.end(), [&type](const auto& event) {
+                   return event.type == type;
+               }),
+               std::string("the content recipe emits its auditable event: ") + type);
+    }
+}
+
 void runtime_loads_a_world_without_village_identifiers() {
     const std::filesystem::path fixtureRoot = std::filesystem::path(TIDE_MARKS_TEST_DATA_DIR) / "minimal-pack";
     auto service = WorldService::load(fixtureRoot.string());
@@ -1012,6 +1090,7 @@ void evolution_proposals_are_governed() {
                          {"meta_actions", Json::array({"relieve_need"})}}})};
     const auto valid = EvolutionManager::validate(proposal, service.content(), service.state().revision);
     expect(valid.valid, "declarative evolution proposal passes structural validation");
+    proposal.status = EvolutionProposalStatus::Validated;
     const auto approved = EvolutionManager::approve(proposal, "developer", true);
     expect(approved.valid && proposal.status == EvolutionProposalStatus::Approved,
            "only an approved sandbox result activates a proposal");
@@ -1022,6 +1101,11 @@ void evolution_proposals_are_governed() {
            "Runtime Core mutation is rejected before approval");
     expect(!EvolutionManager::approve(forbidden, "llm", true).valid,
            "LLM cannot approve its own evolution proposal");
+    auto stale = proposal;
+    stale.baseWorldRevision = service.state().revision + 1;
+    expect(EvolutionManager::validate(stale, service.content(), service.state().revision).code ==
+               "revision_conflict",
+           "evolution proposals cannot silently bind to a different world revision");
 }
 
 void evolution_sandbox_isolated_and_versioned() {
@@ -1036,6 +1120,8 @@ void evolution_sandbox_isolated_and_versioned() {
            "an evolution proposal runs in an isolated versioned sandbox");
     expect(sandbox.baseRevision == base.state().revision,
            "sandbox records the source world revision");
+    expect(sandbox.baseContentVersion == base.content().contentVersion,
+           "sandbox records the source content version");
     expect(!base.content().entityArchetypes.empty() &&
                std::none_of(base.content().entityArchetypes.begin(), base.content().entityArchetypes.end(),
                             [](const auto& item) { return item.id == "market_stall"; }),
@@ -1043,6 +1129,7 @@ void evolution_sandbox_isolated_and_versioned() {
     expect(sandbox.metrics.at("events_added").is_number(), "sandbox returns measurable event differences");
 
     EvolutionProposal approved = proposal;
+    approved.status = EvolutionProposalStatus::Validated;
     expect(EvolutionManager::approve(approved, "developer", sandbox.passed).valid,
            "an independently approved sandbox result can activate");
     const auto sourceVersion = base.content().contentVersion;
@@ -1095,6 +1182,7 @@ void overlay_stack_restores_and_rolls_back_in_order() {
         Json::array({Json{{"operation", "create_entity_archetype"}, {"id", "market_stall"},
                          {"kind", "facility"}}})};
     const auto firstSandbox = EvolutionManager::sandbox(first, base);
+    first.status = EvolutionProposalStatus::Validated;
     expect(firstSandbox.passed && EvolutionManager::approve(first, "developer", true).valid &&
                base.activateOverlay(first, firstSandbox).accepted,
            "the first versioned overlay activates");
@@ -1104,6 +1192,7 @@ void overlay_stack_restores_and_rolls_back_in_order() {
         Json::array({Json{{"operation", "create_entity_archetype"}, {"id", "market_awning"},
                          {"kind", "facility"}}})};
     const auto secondSandbox = EvolutionManager::sandbox(second, base);
+    second.status = EvolutionProposalStatus::Validated;
     expect(secondSandbox.passed && EvolutionManager::approve(second, "developer", true).valid &&
                base.activateOverlay(second, secondSandbox).accepted && base.state().activeOverlays.size() == 2,
            "a proposal binds to the exact active content view and can be layered");
@@ -1173,6 +1262,7 @@ int main() {
     run("conflict_and_security_operators_change_facts_then_stimuli", conflict_and_security_operators_change_facts_then_stimuli);
     run("knowledge_and_experience_keep_provenance", knowledge_and_experience_keep_provenance);
     run("successful_actions_automatically_create_experience", successful_actions_automatically_create_experience);
+    run("extended_meta_actions_execute_from_content_recipes", extended_meta_actions_execute_from_content_recipes);
     run("runtime_loads_a_world_without_village_identifiers", runtime_loads_a_world_without_village_identifiers);
     run("social_groups_trade_and_relationships_are_shared_facts", social_groups_trade_and_relationships_are_shared_facts);
     run("port_slice_is_a_replaceable_social_instance", port_slice_is_a_replaceable_social_instance);
