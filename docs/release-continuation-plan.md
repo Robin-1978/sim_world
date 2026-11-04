@@ -216,7 +216,7 @@ ctest --test-dir build --output-on-failure
 
 当前基准的推荐档位是：话语理解使用 `reasoning_budget_tokens=128`，普通回答关闭 thinking；有社会权衡的自驱决策使用 `reasoning_budget_tokens=128`；低置信度才升级到 256；512 以上留给演化分析。该分档基于同一模型的三类村庄提示实测，而不是单看生成长度。
 
-Provider、模型和三档预算现在由 `data/intelligence-profile.json` 配置，并通过 `--profile` 加载。真实自驱验证中，玩家对白使用 `utterance_understanding` + `player_dialogue` 两阶段；当 Lorn 的 crossing safety 越过临界阈值后，`high_salience_context` 自动进入 `autonomous_reappraisal` 档，模型选择 `repair_ferry` 并提交了资源变化和过程完成事件。
+Provider、模型和三档预算现在由 `data/intelligence-profile.json` 配置，并通过 `--profile` 加载。真实自驱验证中，玩家对白使用 `utterance_understanding` + `player_dialogue` 两阶段；当 Lorn 的 crossing safety 越过临界阈值后，`high_salience_context` 自动进入 `autonomous_reappraisal` 档，模型选择 `repair_ferry` 并提交了资源变化和过程完成事件。最新三 NPC 回归使用 `docs/examples/llm-self-drive-session.txt`：一次 `advance 60` 后，Eve、Lorn、Mira 各收到一次真实 Qwen 请求，均在安全边界进入内容声明的 `ProcessExecution`，未由 Provider 直接写入事实；运行耗时和结果记录在 [`qwen35-4b-llama-cpp.json`](evidence/qwen35-4b-llama-cpp.json)。
 
 ## 恢复工作入口
 

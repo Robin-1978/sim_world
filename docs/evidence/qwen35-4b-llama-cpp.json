@@ -249,6 +249,26 @@
     "runtime_metadata_boundary": "world/instance/content/prompt/revision identity is carried in runtime_metadata and excluded from worldSnapshot",
     "result": "passed"
   },
+  "latest_self_drive_smoke": {
+    "command": "./build/tide_marks_text --script docs/examples/llm-self-drive-session.txt --provider profile",
+    "provider": "llama.cpp",
+    "world_boundary": "day 1 7:00 after advance 60",
+    "queued_npcs": ["eve", "lorn", "mira"],
+    "consumed_turns": 3,
+    "runtime_result": "all three model proposals were accepted at the safe boundary; each NPC entered an authored ProcessExecution and no world fact was committed directly by the provider",
+    "observed_intent_events": [
+      "npc.intent eve",
+      "npc.intent lorn",
+      "npc.intent mira"
+    ],
+    "observed_processes": [
+      "share a missing archive record",
+      "repair the ferry for crossing safety",
+      "distribute grain and keep the granary stocked"
+    ],
+    "elapsed_seconds": 35.29,
+    "result": "passed"
+  },
   "latest_evolution_smoke": {
     "level1": {
       "command": "./build/tide_marks_headless --profile data/intelligence-profile.json --provider profile --days 0 --evolve level1",
