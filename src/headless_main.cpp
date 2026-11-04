@@ -1,6 +1,7 @@
 #include "tide_marks.hpp"
 #include "evolution/evolution.hpp"
 
+#include <algorithm>
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
@@ -15,7 +16,8 @@ void usage(const char* program) {
     std::cout << "Usage: " << program
               << " [--content-root PATH] [--days N] [--profile PATH]"
                  " [--provider mock|profile|llama_cpp] [--replay PATH] [--dump-events]"
-                 " [--anomalies] [--experiment PATH] [--evolve level1|level2]\n";
+                 " [--anomalies] [--experiment PATH] [--evolve level1|level2]"
+                 " [--wait-llm-ms N]\n";
 }
 
 }  // namespace
@@ -28,6 +30,7 @@ int main(int argc, char** argv) {
     std::string evolutionLevel;
     std::string providerName = "profile";
     std::string profilePath = defaultIntelligenceProfilePath();
+    std::int64_t waitLlmMilliseconds = 0;
     bool dumpEvents = false;
     bool dumpAnomalies = false;
     for (int i = 1; i < argc; ++i) {
@@ -52,6 +55,8 @@ int main(int argc, char** argv) {
             providerName = argv[++i];
         } else if (argument == "--profile" && i + 1 < argc) {
             profilePath = argv[++i];
+        } else if (argument == "--wait-llm-ms" && i + 1 < argc) {
+            waitLlmMilliseconds = std::max<std::int64_t>(0, std::atoll(argv[++i]));
         } else if (argument == "--dump-events") {
             dumpEvents = true;
         }
@@ -113,7 +118,28 @@ int main(int argc, char** argv) {
                   << " provider=" << dialogue.provider
                   << (dialogue.error.empty() ? "" : " error=" + dialogue.error) << '\n';
     }
-    service.advanceMinutes(static_cast<std::int64_t>(days) * kMinutesPerDay);
+    const auto totalMinutes = static_cast<std::int64_t>(days) * kMinutesPerDay;
+    std::size_t drainedTurns = 0;
+    if (waitLlmMilliseconds > 0) {
+        // A large offline jump would make every asynchronous decision older
+        // than its authored game-time deadline before the worker can answer.
+        // Advance one scheduler hour at a time when the caller explicitly
+        // requests an LLM drain, preserving the same boundary semantics as an
+        // interactive loop without blocking the normal runtime path.
+        std::int64_t remaining = totalMinutes;
+        while (remaining > 0) {
+            const auto step = std::min<std::int64_t>(kMinutesPerHour, remaining);
+            service.advanceMinutes(step);
+            drainedTurns += service.waitForAsyncTurns(waitLlmMilliseconds);
+            remaining -= step;
+        }
+    } else {
+        service.advanceMinutes(totalMinutes);
+    }
+    if (waitLlmMilliseconds > 0) {
+        std::cout << "llm-drain: consumed=" << drainedTurns
+                  << " pending=" << service.pendingAsyncTurns() << '\n';
+    }
     std::cout << "after " << days << " day(s): " << summarize(service.state()) << '\n';
     if (!replayPath.empty()) {
         service.writeReplay(replayPath);

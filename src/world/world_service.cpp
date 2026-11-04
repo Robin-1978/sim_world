@@ -11,6 +11,7 @@
 #include "provider/decision_context_projector.hpp"
 #include "evolution/evolution.hpp"
 #include <algorithm>
+#include <chrono>
 #include <cstddef>
 #include <cmath>
 #include <fstream>
@@ -22,6 +23,7 @@
 #include <exception>
 #include <limits>
 #include <set>
+#include <thread>
 
 namespace tide_marks {
 
@@ -2016,9 +2018,11 @@ DialogueTurn WorldService::commitTurn(const TurnRequest& request, ProviderRespon
         return result;
     }
     const auto& npc = state_.npcs.at(request.npcId);
+    const bool worldRevisionChanged = state_.revision != request.worldRevision;
     if (request.contentVersion != content_.contentVersion ||
         request.promptVersion != request.context.promptVersion ||
-        state_.revision != request.worldRevision || npc.stateVersion != request.npcStateVersion) {
+        (worldRevisionChanged && !channel->second.allowInterveningWorldChanges) ||
+        npc.stateVersion != request.npcStateVersion) {
         result.error = "stale_intent_proposal";
         return result;
     }
@@ -2270,8 +2274,13 @@ std::size_t WorldService::pumpAsyncTurns() {
                    code == "invalid_action_parameter_type" || code == "unexpected_action_parameters" ||
                    code == "invalid_action_parameters" || code == "invalid_action_parameter_value";
         };
+        const auto queuedChannel = content_.decisionChannels.find(queued.request.channelId);
+        const bool allowInterveningWorldChanges =
+            queuedChannel != content_.decisionChannels.end() &&
+            queuedChannel->second.allowInterveningWorldChanges;
         if (queued.provider == "llama.cpp" && queued.request.validationFeedback.empty() && retryable(turn.error) &&
-            state_.revision == queued.request.worldRevision && hasNpc(queued.request.npcId) &&
+            (!allowInterveningWorldChanges || state_.revision >= queued.request.worldRevision) &&
+            hasNpc(queued.request.npcId) &&
             state_.npcs.at(queued.request.npcId).stateVersion == queued.request.npcStateVersion) {
             auto repair = queued.request;
             repair.validationFeedback = Json{
@@ -2290,7 +2299,8 @@ std::size_t WorldService::pumpAsyncTurns() {
         TransactionScope transaction(*this);
         const bool expired = turn.error == "stale_intent_proposal" ||
                              turn.error == "decision_expired" ||
-                             state_.revision != queued.request.worldRevision ||
+                             (!allowInterveningWorldChanges &&
+                              state_.revision != queued.request.worldRevision) ||
                              !hasNpc(queued.request.npcId) ||
                              state_.npcs.at(queued.request.npcId).stateVersion != queued.request.npcStateVersion;
         addEvent(expired ? "npc.intent_expired" : "npc.intent_rejected", queued.request.npcId, "self",
@@ -2311,6 +2321,20 @@ std::size_t WorldService::pumpAsyncTurns() {
 
 std::size_t WorldService::pendingAsyncTurns() const {
     return intelligence_ ? intelligence_->pending() : 0;
+}
+
+std::size_t WorldService::waitForAsyncTurns(std::int64_t timeoutMilliseconds) {
+    if (timeoutMilliseconds <= 0 || !intelligence_) return pumpAsyncTurns();
+    const auto deadline = std::chrono::steady_clock::now() +
+                          std::chrono::milliseconds(timeoutMilliseconds);
+    std::size_t consumed = 0;
+    while (intelligence_->pending() > 0 && std::chrono::steady_clock::now() < deadline) {
+        consumed += pumpAsyncTurns();
+        if (intelligence_->pending() == 0) break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    consumed += pumpAsyncTurns();
+    return consumed;
 }
 
 int WorldService::resourceValue(const std::string& resource) const {

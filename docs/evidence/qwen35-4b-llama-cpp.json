@@ -183,6 +183,18 @@
         "trigger": "high_salience_context",
         "selected_action": "repair_ferry",
         "runtime_result": "accepted; resource effects and process completion were committed"
+      },
+      "multi_npc_boundary": {
+        "command": "./build/tide_marks_text --provider profile (advance 60; drain 120000)",
+        "provider": "llama.cpp",
+        "queued_npcs": ["eve", "lorn", "mira"],
+        "consumed_turns": 3,
+        "selected_actions": {
+          "eve": "reveal_clue",
+          "lorn": "repair_ferry",
+          "mira": "offer_ration"
+        },
+        "runtime_result": "all three independent proposals committed at the same world boundary; each started its authored ProcessExecution and no intent_expired event was emitted"
       }
     }
   },

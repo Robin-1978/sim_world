@@ -407,7 +407,13 @@ void offline_progression_changes_village() {
 }
 
 void needs_are_data_driven_and_replayable() {
-    auto service = WorldService::load(ContentPackLoader::defaultRoot(), std::make_unique<MockProvider>());
+    // This test isolates deterministic need decay and the explicit player
+    // action. Autonomous LLM turns are covered separately; leaving them
+    // enabled here would let a mock decision relieve the very deficit this
+    // assertion is measuring.
+    auto content = ContentPackLoader::load(ContentPackLoader::defaultRoot());
+    content.npcDeliberation.enabled = false;
+    auto service = WorldService::fromContent(content, std::make_unique<MockProvider>());
     const auto before = service.state().npcs.at("mira").needs.at("food_security").deficit;
     service.advanceMinutes(60);
     const auto after = service.state().npcs.at("mira").needs.at("food_security").deficit;
@@ -679,6 +685,7 @@ void autonomous_deliberation_is_triggered_not_per_tick() {
     auto content = ContentPackLoader::load(ContentPackLoader::defaultRoot());
     content.npcDeliberation.minStimulusSalience = 0.0;
     content.npcDeliberation.minDrivePressure = 0.0;
+    content.decisionChannels.at(content.autonomousChannelId).allowInterveningWorldChanges = false;
     content.npcDeliberation.cooldownMinutes = 360;
     auto service = WorldService::fromContent(content, std::make_unique<CountingProvider>(providerCalls));
     service.advanceMinutes(60);
@@ -691,6 +698,7 @@ void async_turn_queue_does_not_commit_expired_results() {
     auto content = ContentPackLoader::load(ContentPackLoader::defaultRoot());
     content.npcDeliberation.minStimulusSalience = 0.0;
     content.npcDeliberation.minDrivePressure = 0.0;
+    content.decisionChannels.at(content.autonomousChannelId).allowInterveningWorldChanges = false;
     auto provider = std::make_unique<DelayedProvider>(std::chrono::milliseconds(60));
     auto* providerRaw = provider.get();
     auto service = WorldService::fromContent(content, std::move(provider));
@@ -736,6 +744,30 @@ void async_turn_queue_commits_results_with_current_context() {
            "an accepted autonomous proposal creates a persistent NPC activity");
 }
 
+void independent_autonomous_turns_survive_unrelated_commits() {
+    auto content = ContentPackLoader::load(ContentPackLoader::defaultRoot());
+    content.npcDeliberation.minStimulusSalience = 0.0;
+    content.npcDeliberation.minDrivePressure = 0.0;
+    content.npcDeliberation.cooldownMinutes = 360;
+    auto service = WorldService::fromContent(
+        content, std::make_unique<DelayedProvider>(std::chrono::milliseconds(20)));
+
+    service.advanceMinutes(60);
+    expect(service.pendingAsyncTurns() > 0,
+           "one autonomous boundary leaves independent NPC decisions queued or ready");
+    service.waitForAsyncTurns(1000);
+    const auto committed = std::count_if(
+        service.state().events.begin(), service.state().events.end(), [](const auto& event) {
+            return event.type == "npc.intent";
+        });
+    expect(committed >= 2,
+           "unrelated NPC decisions can commit after another actor advances world revision");
+    expect(std::none_of(service.state().events.begin(), service.state().events.end(), [](const auto& event) {
+               return event.type == "npc.intent_expired";
+           }),
+           "independent autonomous decisions are not misclassified as stale");
+}
+
 void async_llm_action_validation_retries_without_blocking_world_tick() {
     auto content = ContentPackLoader::load(ContentPackLoader::defaultRoot());
     content.npcDeliberation.minStimulusSalience = 0.0;
@@ -779,10 +811,14 @@ void async_turn_queue_coalesces_pending_requests_per_npc_and_channel() {
                third.accepted && third.supersededTurnIds == std::vector<std::string>{"second"},
            "only the latest pending autonomous context for an NPC is retained");
     provider.release();
-    for (int attempt = 0; attempt < 100 && queue.pending() < 2; ++attempt) {
+    std::vector<TurnResult> results;
+    for (int attempt = 0; attempt < 100 && results.size() < 2; ++attempt) {
+        auto ready = queue.drain();
+        results.insert(results.end(), std::make_move_iterator(ready.begin()),
+                       std::make_move_iterator(ready.end()));
+        if (results.size() >= 2) break;
         std::this_thread::sleep_for(std::chrono::milliseconds(2));
     }
-    const auto results = queue.drain();
     expect(results.size() == 2 && results.front().request.turnId == "first" &&
                results.back().request.turnId == "third" && provider.calls.load() == 2,
            "the in-flight request completes and only the newest coalesced request is executed");
@@ -2594,6 +2630,8 @@ int main() {
     run("async_turn_queue_does_not_commit_expired_results", async_turn_queue_does_not_commit_expired_results);
     run("async_turn_queue_commits_results_with_current_context",
         async_turn_queue_commits_results_with_current_context);
+    run("independent_autonomous_turns_survive_unrelated_commits",
+        independent_autonomous_turns_survive_unrelated_commits);
     run("async_llm_action_validation_retries_without_blocking_world_tick",
         async_llm_action_validation_retries_without_blocking_world_tick);
     run("async_turn_queue_coalesces_pending_requests_per_npc_and_channel",

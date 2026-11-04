@@ -768,6 +768,7 @@ WorldContentPack ContentPackLoader::load(const std::string& rootPath) {
         channel.conversation = item.at("conversation").get<bool>();
         channel.classifySpeechAct = item.at("classify_speech_act").get<bool>();
         channel.defaultWorldActionAllowed = item.at("default_world_action_allowed").get<bool>();
+        channel.allowInterveningWorldChanges = item.value("allow_intervening_world_changes", false);
         channel.defaultSpeechAct = item.value("default_speech_act", channel.defaultSpeechAct);
         channel.eventType = item.value("event_type", channel.eventType);
         channel.memoryKind = item.value("memory_kind", channel.memoryKind);

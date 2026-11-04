@@ -49,7 +49,7 @@ std::vector<TurnResult> TurnQueue::drain() {
 
 std::size_t TurnQueue::pending() const {
     std::lock_guard lock(mutex_);
-    return pending_.size() + ready_.size();
+    return pending_.size() + ready_.size() + inFlight_;
 }
 
 void TurnQueue::run() {
@@ -61,6 +61,7 @@ void TurnQueue::run() {
             if (stopping_ && pending_.empty()) return;
             request = std::move(pending_.front());
             pending_.pop_front();
+            ++inFlight_;
         }
 
         ProviderResponse response;
@@ -74,6 +75,7 @@ void TurnQueue::run() {
         TurnResult result{std::move(request), std::move(response), provider_.name()};
         {
             std::lock_guard lock(mutex_);
+            --inFlight_;
             ready_.push_back(std::move(result));
         }
     }

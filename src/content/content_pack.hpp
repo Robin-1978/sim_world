@@ -92,6 +92,10 @@ struct DecisionChannelPolicy {
     bool conversation{false};
     bool classifySpeechAct{false};
     bool defaultWorldActionAllowed{true};
+    // Allows an asynchronous proposal to survive unrelated commits by other
+    // actors. NPC state, deadline, permissions and current facts are still
+    // revalidated at the commit boundary.
+    bool allowInterveningWorldChanges{false};
     std::string defaultSpeechAct{"autonomous"};
     std::string eventType{"intent"};
     std::string memoryKind{"intent"};

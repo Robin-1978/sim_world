@@ -70,6 +70,10 @@ private:
     std::condition_variable condition_;
     std::deque<TurnRequest> pending_;
     std::deque<TurnResult> ready_;
+    // A request removed from pending_ is still part of the queue contract
+    // until its Provider call has produced a ready result.  Counting it here
+    // keeps bounded drains from returning while the worker is still active.
+    std::size_t inFlight_{0};
     bool stopping_{false};
     std::thread worker_;
 };

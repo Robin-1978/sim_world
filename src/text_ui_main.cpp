@@ -32,6 +32,7 @@ void printHelp(const WorldService& service) {
               << "  entity-activate|entity-dormant|entity-destroy <id>\n"
               << "  talk <npc> <text>            talk to a loaded NPC: " << npcIds << "\n"
               << "  advance <minutes>            advance all NPC life\n"
+              << "  drain <milliseconds>        wait for queued LLM turns at a safe boundary\n"
               << "  day                          advance one day\n"
               << "  events [count]               show recent committed events\n"
               << "  promise <from> <to> <days> <text>\n"
@@ -177,6 +178,12 @@ bool execute(WorldService& service, const std::string& line) {
         input >> minutes;
         service.advanceMinutes(command == "wait" ? minutes * kMinutesPerHour : minutes);
         printLook(service);
+    } else if (command == "drain") {
+        std::int64_t milliseconds = 0;
+        input >> milliseconds;
+        const auto consumed = service.waitForAsyncTurns(milliseconds);
+        std::cout << "llm-drain consumed=" << consumed
+                  << " pending=" << service.pendingAsyncTurns() << "\n";
     } else if (command == "day") {
         service.advanceMinutes(kMinutesPerDay);
         printLook(service);

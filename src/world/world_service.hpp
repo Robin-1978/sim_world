@@ -112,6 +112,10 @@ public:
     // Main-thread boundary for decisions produced by the worker. Returns the
     // number of results consumed; no Provider call is performed here.
     std::size_t pumpAsyncTurns();
+    // Explicit bounded drain for headless tools and deterministic smoke tests.
+    // The normal interactive loop should call pumpAsyncTurns() at each world
+    // boundary instead of blocking on the provider.
+    std::size_t waitForAsyncTurns(std::int64_t timeoutMilliseconds);
     [[nodiscard]] std::size_t pendingAsyncTurns() const;
     [[nodiscard]] const SimulationMetrics& simulationMetrics() const { return simulationMetrics_; }
 

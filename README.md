@@ -72,6 +72,17 @@ The client, text UI, and headless runner use the checked-in intelligence profile
 
 Pass `--provider mock` only for deterministic offline tests. Conversation with the mock provider is an explicit test mode and does not represent the production LLM path.
 
+To observe the real local model making three independent self-drive decisions at one world
+boundary, run:
+
+```bash
+./build/tide_marks_text --provider profile --script docs/examples/llm-self-drive-session.txt
+```
+
+The `drain` command is an explicit bounded wait for queued Provider work. It is useful for a
+headless smoke test; an interactive loop should keep calling `pumpAsyncTurns()` at world
+boundaries instead of blocking the simulation.
+
 The scene inspector derives NPC markers and resource HUD values from the selected content pack. Another instance therefore does not inherit village actors or named resource fields:
 
 ```bash
