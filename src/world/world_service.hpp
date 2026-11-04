@@ -28,6 +28,7 @@
 namespace tide_marks {
 struct EvolutionProposal;
 struct EvolutionSandboxResult;
+class ContractSystem;
 struct Command {
     std::string turnId;
     std::string kind;
@@ -191,7 +192,23 @@ public:
                                std::unique_ptr<IProvider> provider = nullptr);
 
 private:
-    class TransactionScope;
+    friend class ContractSystem;
+    class TransactionScope {
+    public:
+        explicit TransactionScope(WorldService& service);
+        ~TransactionScope();
+
+        void rollback();
+        void markChanged();
+
+        TransactionScope(const TransactionScope&) = delete;
+        TransactionScope& operator=(const TransactionScope&) = delete;
+
+    private:
+        WorldService& service_;
+        int uncaughtAtConstruction_{0};
+        bool active_{true};
+    };
 
     WorldState state_;
     std::unique_ptr<IProvider> provider_;
