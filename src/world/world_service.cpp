@@ -3235,30 +3235,9 @@ void WorldService::expireStimuli() {
 
 WorldEvent WorldService::addEvent(std::string type, std::string actor, std::string target,
                                   std::string detail, Json data) {
-    // A root transaction already owns the new world revision. Direct event
-    // creation (bootstrap and other non-transactional paths) gets its own
-    // generation here.
-    const bool inTransaction = transactionManager_.active();
-    if (!inTransaction) ++state_.revision;
-    else markTransactionChanged();
-    const auto committedRevision = state_.revision + (inTransaction ? 1 : 0);
-    const auto sequence = state_.events.size() + 1;
-    const auto correlationId = inTransaction ? transactionManager_.currentCorrelation()
-                                             : "correlation:" + std::to_string(sequence);
-    const auto causationSequence = inTransaction ? transactionManager_.currentCausationSequence() : 0;
-    const WorldEvent committed{kWorldEventSchemaVersion, sequence, state_.now, std::move(type), std::move(actor),
-                               std::move(target), std::move(detail), committedRevision, std::move(data),
-                               "event:" + std::to_string(sequence), correlationId, causationSequence,
-                               state_.contentVersion, kSimulationVersion};
-    transactionManager_.recordEvent(state_, committed);
-    if (inTransaction) {
-        projectStimuli(committed);
-    } else {
-        projectStimuli(committed);
-        eventBus_.publish(committed);
-        eventBus_.dispatch();
-    }
-    return committed;
+    return eventJournal_.append(state_, transactionManager_, eventBus_, content_.contentVersion,
+                                std::move(type), std::move(actor), std::move(target), std::move(detail),
+                                std::move(data), [this](const WorldEvent& event) { projectStimuli(event); });
 }
 
 Json WorldService::snapshotJson() const { return worldStateToJson(state_); }

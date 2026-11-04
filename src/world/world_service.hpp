@@ -12,6 +12,7 @@
 #include "provider/turn_queue.hpp"
 #include "world/components.hpp"
 #include "world/persistence.hpp"
+#include "world/event_journal.hpp"
 #include "world/transaction_manager.hpp"
 #include "world/ids.hpp"
 #include <memory>
@@ -184,6 +185,7 @@ private:
     WorldContentPack baseContent_;
     WorldContentPack content_;
     TransactionManager transactionManager_;
+    EventJournal eventJournal_;
     // Each nested scope is a savepoint. A failed recipe can roll back its own
     // partial changes without cancelling the enclosing world-time transition.
     Json replayBaseline_ = Json::object();
