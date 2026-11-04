@@ -111,7 +111,9 @@ int main(int argc, char** argv) {
         for (const auto& event : service.state().events) {
             std::cout << "event " << event.sequence << ' ' << event.at.toString() << ' '
                       << event.type << ' ' << event.actor << " -> " << event.target
-                      << " | " << event.detail << '\n';
+                      << " | " << event.detail << " | id=" << event.eventId
+                      << " correlation=" << event.correlationId
+                      << " causation=" << event.causationSequence << '\n';
         }
     }
     return 0;

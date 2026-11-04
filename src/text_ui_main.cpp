@@ -133,7 +133,9 @@ void printEvents(const WorldService& service, std::size_t count) {
     for (std::size_t i = start; i < events.size(); ++i) {
         const auto& event = events[i];
         std::cout << event.sequence << " " << event.at.toString() << " " << event.type << " "
-                  << event.actor << " -> " << event.target << " | " << event.detail << "\n";
+                  << event.actor << " -> " << event.target << " | " << event.detail
+                  << " | id=" << event.eventId << " correlation=" << event.correlationId
+                  << " causation=" << event.causationSequence << "\n";
     }
 }
 

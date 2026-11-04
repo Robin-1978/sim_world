@@ -93,6 +93,28 @@ void restoreTransactionalBackup(WorldState& state, WorldState backup,
     state = std::move(backup);
     state.events = std::move(committed);
 }
+
+void validateEventHistory(const WorldState& state) {
+    for (std::size_t index = 0; index < state.events.size(); ++index) {
+        const auto& event = state.events[index];
+        if (event.schemaVersion != 2 || event.sequence != index + 1 ||
+            event.eventId != "event:" + std::to_string(event.sequence)) {
+            throw std::runtime_error("snapshot contains an invalid event identity");
+        }
+        const std::string prefix = "correlation:";
+        if (!event.correlationId.starts_with(prefix) || event.correlationId.size() == prefix.size()) {
+            throw std::runtime_error("snapshot event has an invalid correlation id");
+        }
+        if (event.causationSequence == 0) continue;
+        if (event.causationSequence >= event.sequence) {
+            throw std::runtime_error("snapshot event causation does not precede its effect");
+        }
+        const auto& cause = state.events.at(static_cast<std::size_t>(event.causationSequence - 1));
+        if (cause.correlationId != event.correlationId) {
+            throw std::runtime_error("snapshot event causation crosses correlation chains");
+        }
+    }
+}
 }
 
 class WorldService::TransactionScope {
@@ -129,13 +151,27 @@ void WorldService::beginTransaction() {
     TransactionFrame frame;
     frame.backup = transactionalBackup(state_, frame.backupEventCount);
     frame.backupDeferredEventCount = deferredEvents_.size();
+    if (transactionFrames_.empty()) {
+        frame.correlationId = "correlation:" + std::to_string(state_.events.size() + 1);
+        frame.lastEventSequence = 0;
+    } else {
+        const auto& parent = transactionFrames_.back();
+        frame.correlationId = parent.correlationId;
+        frame.lastEventSequence = parent.lastEventSequence;
+    }
     transactionFrames_.push_back(std::move(frame));
 }
 
 void WorldService::commitTransaction() {
     if (transactionFrames_.empty()) throw std::logic_error("transaction commit without an active scope");
+    const auto completedLastEventSequence = transactionFrames_.back().lastEventSequence;
     transactionFrames_.pop_back();
-    if (!transactionFrames_.empty()) return;
+    if (!transactionFrames_.empty()) {
+        // A nested savepoint is part of the enclosing causal chain only after
+        // it commits. A rolled-back child never advances its parent's link.
+        transactionFrames_.back().lastEventSequence = completedLastEventSequence;
+        return;
+    }
     rebuildEntityRegistry();
     auto events = std::move(deferredEvents_);
     deferredEvents_.clear();
@@ -2801,8 +2837,21 @@ void WorldService::expireStimuli() {
 WorldEvent WorldService::addEvent(std::string type, std::string actor, std::string target,
                                   std::string detail, Json data) {
     ++state_.revision;
-    state_.events.push_back(WorldEvent{1, state_.events.size() + 1, state_.now, std::move(type), std::move(actor),
-                                       std::move(target), std::move(detail), state_.revision, std::move(data)});
+    const auto sequence = state_.events.size() + 1;
+    std::string correlationId;
+    std::uint64_t causationSequence = 0;
+    if (!transactionFrames_.empty()) {
+        auto& frame = transactionFrames_.back();
+        correlationId = frame.correlationId;
+        causationSequence = frame.lastEventSequence;
+    } else {
+        correlationId = "correlation:" + std::to_string(sequence);
+    }
+    state_.events.push_back(WorldEvent{2, sequence, state_.now, std::move(type), std::move(actor),
+                                       std::move(target), std::move(detail), state_.revision, std::move(data),
+                                       "event:" + std::to_string(sequence), std::move(correlationId),
+                                       causationSequence});
+    if (!transactionFrames_.empty()) transactionFrames_.back().lastEventSequence = sequence;
     const WorldEvent committed = state_.events.back();
     if (!transactionFrames_.empty()) {
         deferredEvents_.push_back(committed);
@@ -2870,14 +2919,15 @@ WorldService WorldService::fromContentSnapshot(const WorldContentPack& content, 
     const auto& snapshot = json.contains("state") ? json.at("state") : json;
     if (!snapshot.is_object() || !snapshot.contains("save_schema_version") ||
         !snapshot.at("save_schema_version").is_number_integer() ||
-        snapshot.at("save_schema_version").get<int>() != 15) {
-        throw std::runtime_error("unsupported snapshot schema; expected save_schema_version=15");
+        snapshot.at("save_schema_version").get<int>() != 16) {
+        throw std::runtime_error("unsupported snapshot schema; expected save_schema_version=16");
     }
     if (!snapshot.contains("simulation_version") || !snapshot.at("simulation_version").is_string() ||
-        snapshot.at("simulation_version") != "adaptive-runtime-p1.15") {
-        throw std::runtime_error("unsupported snapshot simulation version; expected adaptive-runtime-p1.15");
+        snapshot.at("simulation_version") != "adaptive-runtime-p1.16") {
+        throw std::runtime_error("unsupported snapshot simulation version; expected adaptive-runtime-p1.16");
     }
     service.state_ = deserializeWorldState(snapshot);
+    validateEventHistory(service.state_);
     if (!service.state_.activeOverlays.empty()) {
         auto rebuilt = content;
         for (const auto& overlay : service.state_.activeOverlays) {

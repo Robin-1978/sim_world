@@ -198,7 +198,7 @@ P0 只实现个体需求和公共资源，验证“资源变化—行动—他�
 | 对象 | 唯一事实/状态所有者 | 生命周期 | 写入入口 | 持久化责任 |
 |---|---|---|---|---|
 | `WorldState` / ComponentStore | `WorldService` 事务边界 | 世界实例全程 | 已校验 `Command` 或规则提交 | Snapshot + EventLog |
-| `WorldEvent` | 提交器的 `EventLog` | 永久追加 | 成功事务自动产生 | EventLog；EventBus 只通知 |
+| `WorldEvent` | 提交器的 `EventLog` | 永久追加；`event:<sequence>` 稳定标识 | 成功事务自动产生 | EventLog；EventBus 只通知 |
 | `Entity` 生命周期 | `WorldState.entities` | `active -> dormant -> destroyed` | `createEntity` / `setEntityLifecycle` | Snapshot + 生命周期事件 |
 | `Goal` / `NpcActivity` | NPC 活动转换函数 | 目标可持续；同一时刻一个主活动 | 意图接受、过程完成/失败/中断 | NPC activity 聚合 |
 | `ProcessExecution` | `NpcActivity` | 启动、运行、挂起、恢复、完成/失败 | 行为配方启动与时间推进 | activity 聚合 + 过程事件 |
@@ -391,9 +391,11 @@ IntentProposal + BehaviorRecipe
   -> precondition and whole-plan validation
   -> staged atomic effects and reservations
   -> commit all effects or none
-  -> ordered WorldEvents (current event sequence; causation/correlation IDs are a planned schema extension)
+  -> ordered WorldEvents with event/correlation/causation identity
   -> next facts, stimuli and memories
 ```
+
+每个 `WorldEvent` 由 Runtime 生成稳定 `event_id=event:<sequence>`。同一根事务产生的事件共享 `correlation_id=correlation:<first_event_sequence>`；事务中的第一个事件 `causation_sequence=0`，后续事件指向前一个同事务事件，因此能区分“同一决策链中的直接因果”和仅按时间相邻的外围事件。嵌套保存点继承外层 correlation；只有成功提交才推进外层直接前因，失败保存点会同时截断其暂存事件、Revision 和因果位置。Snapshot 恢复会校验事件序号、身份、correlation 前缀和 causation 必须指向同链的前序事件，损坏的因果历史会被拒绝。该标识描述可审计的提交链，不把时间相关性伪装成因果解释。
 
 这种分层把“判断条件、执行计划、改写事实”拆开：条件属于规则和上下文，执行属于受控计划，事实改写只发生在事务提交点。LLM 获得组合和创造空间，Runtime 保留幂等、原子性、权限、回放和回滚。
 
@@ -405,7 +407,7 @@ IntentProposal + BehaviorRecipe
 
 ## 8. JSON 内容、行为和提案契约
 
-Content Pack、Game Instance、Intelligence Profile、Behavior DSL、Exchange Contract、Evolution/Scenario Proposal、Snapshot、EventLog 和 LLM 结构化输出统一使用 JSON，并带 `kind`、`schema_version`、版本身份和稳定 ID。当前 NPC 需求使用 `data/schemas/npc-content.schema.json`，LLM 意图使用 `data/schemas/intent-proposal.schema.json`，行为配方、节点、优先级和抢占策略使用 `data/schemas/behavior-pack.schema.json`，合同状态使用 `data/schemas/exchange-contract.schema.json`；世界拓扑、实体和可选 `scene_asset/camera` 表现配置使用 `data/schemas/village-content.schema.json`。`scene_asset` 相对于 Content Pack 根目录解析，客户端当前支持 `slanted_top_down` 与 `top_down` 两种相机模式。加载器检查重复 ID、缺失引用、连接端点、需求 satisfier 和 schema 版本；内容规则只能调用 Runtime 已注册的能力，不能加载任意脚本。客户端从当前内容包投影空间实体、连接、NPC 标记、资源 HUD 和可选场景资产，不按 `world_id` 或角色 ID 选择渲染代码。
+Content Pack、Game Instance、Intelligence Profile、Behavior DSL、Exchange Contract、Evolution/Scenario Proposal、Snapshot、EventLog 和 LLM 结构化输出统一使用 JSON，并带 `kind`、`schema_version`、版本身份和稳定 ID。当前 NPC 需求使用 `data/schemas/npc-content.schema.json`，LLM 意图使用 `data/schemas/intent-proposal.schema.json`，行为配方、节点、优先级和抢占策略使用 `data/schemas/behavior-pack.schema.json`，合同状态使用 `data/schemas/exchange-contract.schema.json`；WorldEvent 使用事件 schema 2，除时间、参与者、Revision 和数据载荷外还包含 `event_id`、`correlation_id` 与 `causation_sequence`，契约位于 `data/schemas/world-event.schema.json`；世界拓扑、实体和可选 `scene_asset/camera` 表现配置使用 `data/schemas/village-content.schema.json`。`scene_asset` 相对于 Content Pack 根目录解析，客户端当前支持 `slanted_top_down` 与 `top_down` 两种相机模式。加载器检查重复 ID、缺失引用、连接端点、需求 satisfier 和 schema 版本；内容规则只能调用 Runtime 已注册的能力，不能加载任意脚本。客户端从当前内容包投影空间实体、连接、NPC 标记、资源 HUD 和可选场景资产，不按 `world_id` 或角色 ID 选择渲染代码。
 
 Behavior DSL 只组合注册节点、条件和元动作，例如：
 
@@ -496,7 +498,7 @@ Behavior DSL 只组合注册节点、条件和元动作，例如：
 
 ## 9. 存档、回放和调试
 
-Snapshot 包含 `save_schema_version`、`simulation_version`、`content_version/hash`、`world_id`、`instance_id`、`world_revision`、`event_sequence`、游戏时间、实体生命周期、需求状态、社会关系、组织成员与指标、承诺、交换合同、进行中的 `ProcessExecution`、NPC 的 `lastSimulationTick/lastDriveTick`、幂等键和需要的 RNG 状态。运行态 NPC 只保存 `definition_id`，不复制内容包里的角色定义；角色名、角色、公开/隐藏目标等静态数据在加载时从当前内容包解析。`instance_id` 与 `content_version` 共同锁定这次运行所使用的 Game Instance 和 Content Pack，任何一个不匹配都直接拒绝恢复。`event_sequence` 是快照截断点，后续 EventLog 从其后追加。加载时校验 `definition_id` 可解析且 `content_version`、`instance_id` 与当前内容一致，任一不满足直接拒绝并报出差异，不回退到旧字段或静默重置。当前未发布，不保留旧存档兼容路径；schema 改变时同步更新存档读写、测试和文档。当前快照 schema 为 15，模拟版本为 `adaptive-runtime-p1.15`；实体库存与公共资源池分开保存，资源转移只能通过注册 operator 改变两者。激活中的 overlay 以有序记录保存 proposal ID、基线内容版本、激活版本和类型化操作；恢复时从基线 Content Pack 重放这些已批准操作，回滚也由同一版本栈重建。已经提交的世界事实和 EventLog 不随 overlay 回退。
+Snapshot 包含 `save_schema_version`、`simulation_version`、`content_version/hash`、`world_id`、`instance_id`、`world_revision`、`event_sequence`、游戏时间、实体生命周期、需求状态、社会关系、组织成员与指标、承诺、交换合同、进行中的 `ProcessExecution`、NPC 的 `lastSimulationTick/lastDriveTick`、幂等键和需要的 RNG 状态。运行态 NPC 只保存 `definition_id`，不复制内容包里的角色定义；角色名、角色、公开/隐藏目标等静态数据在加载时从当前内容包解析。`instance_id` 与 `content_version` 共同锁定这次运行所使用的 Game Instance 和 Content Pack，任何一个不匹配都直接拒绝恢复。`event_sequence` 是快照截断点，后续 EventLog 从其后追加。加载时校验 `definition_id` 可解析且 `content_version`、`instance_id` 与当前内容一致，并验证事件序号和因果链结构，任一不满足直接拒绝并报出差异，不回退到旧字段或静默重置。当前未发布，不保留旧存档兼容路径；schema 改变时同步更新存档读写、测试和文档。当前快照 schema 为 16，模拟版本为 `adaptive-runtime-p1.16`；实体库存与公共资源池分开保存，资源转移只能通过注册 operator 改变两者。激活中的 overlay 以有序记录保存 proposal ID、基线内容版本、激活版本和类型化操作；恢复时从基线 Content Pack 重放这些已批准操作，回滚也由同一版本栈重建。已经提交的世界事实和 EventLog 不随 overlay 回退。
 
 P0 承诺检查点恢复：读取已提交 Snapshot 和记录的结构化响应，不调用 LLM。未来确定性模拟回放还要重跑命令、Provider 响应、上下文版本、RNG 和规则版本；不能把检查点恢复宣传成完整确定性重算。Bullet 只承诺固定环境下尽量复现，规则层和远端 LifeEvent 才是跨平台确定性目标。
 

@@ -296,7 +296,7 @@ std::string toString(EntityLifecycle lifecycle);
 EntityLifecycle entityLifecycleFromString(const std::string& value);
 
 struct WorldEvent {
-    int schemaVersion{1};
+    int schemaVersion{2};
     std::uint64_t sequence{0};
     GameTime at;
     std::string type;
@@ -305,6 +305,12 @@ struct WorldEvent {
     std::string detail;
     std::uint64_t worldRevision{0};
     Json data = Json::object();
+    // Event identity and causal context are runtime generated. Callers do not
+    // supply these fields; addEvent() derives them at the commit boundary so
+    // every fact has one auditable position in the event history.
+    std::string eventId;
+    std::string correlationId;
+    std::uint64_t causationSequence{0};
 };
 
 // Active declarative overlays are runtime state. Their operations must travel

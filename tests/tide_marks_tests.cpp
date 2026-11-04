@@ -930,7 +930,7 @@ void snapshot_and_replay_are_deterministic() {
                !std::filesystem::exists(snapshotPath.string() + ".tmp"),
            "snapshot and replay writes replace complete files without leaving staging files behind");
     const auto snapshot = service.snapshotJson();
-    expect(snapshot.at("save_schema_version").get<int>() == 15, "snapshot declares its schema version");
+    expect(snapshot.at("save_schema_version").get<int>() == 16, "snapshot declares its schema version");
     expect(snapshot.at("instance_id") == "tide_marks.village.instance",
            "snapshot records the concrete game instance identity");
     expect(snapshot.at("event_sequence").get<std::size_t>() == service.state().events.size(),
@@ -989,6 +989,52 @@ void snapshot_and_replay_are_deterministic() {
     std::filesystem::remove(snapshotPath);
     const auto restored = WorldService::fromSnapshot(service.snapshotJson());
     expect(summarize(service.state()) == summarize(restored.state()), "snapshot restores identical state");
+}
+
+void event_history_has_causal_identity() {
+    auto service = WorldService::load();
+    service.converse("mira", "please offer a ration", "causal-ration");
+    service.advanceMinutes(30);
+    const auto& events = service.state().events;
+    expect(!events.empty(), "causal test produced committed events");
+    bool sawChain = false;
+    for (std::size_t index = 0; index < events.size(); ++index) {
+        const auto& event = events[index];
+        expect(event.schemaVersion == 2, "runtime events use the current event schema");
+        expect(event.eventId == "event:" + std::to_string(event.sequence),
+               "every event has a stable event id");
+        expect(event.sequence == index + 1, "event sequence remains contiguous");
+        expect(!event.correlationId.empty(), "every event has a correlation id");
+        if (event.causationSequence == 0) continue;
+        const auto previous = std::find_if(events.begin(), events.end(), [&event](const auto& candidate) {
+            return candidate.sequence == event.causationSequence;
+        });
+        expect(previous != events.end(), "event causation points to an existing event");
+        if (previous != events.end()) {
+            expect(previous->correlationId == event.correlationId,
+                   "causation and child event share a transaction correlation");
+            sawChain = true;
+        }
+    }
+    expect(sawChain, "a multi-effect process records a causal event chain");
+    const auto snapshot = service.snapshotJson();
+    const auto restored = WorldService::fromSnapshot(snapshot);
+    expect(restored.state().events.size() == events.size(), "snapshot preserves event history length");
+    for (std::size_t index = 0; index < events.size() && index < restored.state().events.size(); ++index) {
+        expect(restored.state().events[index].eventId == events[index].eventId &&
+                   restored.state().events[index].correlationId == events[index].correlationId &&
+                   restored.state().events[index].causationSequence == events[index].causationSequence,
+               "snapshot preserves event causal identity");
+    }
+    auto broken = service.snapshotJson();
+    broken["events"].back()["causation_sequence"] = 999999;
+    bool rejected = false;
+    try {
+        static_cast<void>(WorldService::fromSnapshot(broken));
+    } catch (const std::runtime_error&) {
+        rejected = true;
+    }
+    expect(rejected, "snapshot rejects event causation that does not precede its effect");
 }
 
 void physics_events_are_deterministic_and_drained() {
@@ -2022,6 +2068,7 @@ int main() {
     run("promise_policy_comes_from_content", promise_policy_comes_from_content);
     run("promises_cover_accept_renegotiate_refuse_and_break", promises_cover_accept_renegotiate_refuse_and_break);
     run("snapshot_and_replay_are_deterministic", snapshot_and_replay_are_deterministic);
+    run("event_history_has_causal_identity", event_history_has_causal_identity);
     run("physics_events_are_deterministic_and_drained", physics_events_are_deterministic_and_drained);
     run("event_bus_is_ordered_and_filterable", event_bus_is_ordered_and_filterable);
     run("world_service_publishes_committed_events", world_service_publishes_committed_events);

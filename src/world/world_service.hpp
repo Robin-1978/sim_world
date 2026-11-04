@@ -166,6 +166,8 @@ private:
         WorldState backup;
         std::size_t backupEventCount{0};
         std::size_t backupDeferredEventCount{0};
+        std::string correlationId;
+        std::uint64_t lastEventSequence{0};
     };
 
     WorldState state_;

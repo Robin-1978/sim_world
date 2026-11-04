@@ -190,7 +190,9 @@ WorldEvent worldEventFromJson(const Json& json) {
                       GameTime{jsonValue<std::int64_t>(json, "minute", 0)}, jsonValue<std::string>(json, "type", "unknown"),
                       jsonValue<std::string>(json, "actor", ""), jsonValue<std::string>(json, "target", ""),
                       jsonValue<std::string>(json, "detail", ""), jsonValue<std::uint64_t>(json, "world_revision", 0),
-                      json.value("data", Json::object())};
+                      json.value("data", Json::object()), jsonValue<std::string>(json, "event_id", ""),
+                      jsonValue<std::string>(json, "correlation_id", ""),
+                      jsonValue<std::uint64_t>(json, "causation_sequence", 0)};
 }
 
 }  // namespace
@@ -199,7 +201,9 @@ Json worldEventToJson(const WorldEvent& event) {
     return Json{{"schema_version", event.schemaVersion}, {"sequence", event.sequence},
                 {"minute", event.at.minute}, {"type", event.type}, {"actor", event.actor},
                 {"target", event.target}, {"detail", event.detail},
-                {"world_revision", event.worldRevision}, {"data", event.data}};
+                {"world_revision", event.worldRevision}, {"data", event.data},
+                {"event_id", event.eventId}, {"correlation_id", event.correlationId},
+                {"causation_sequence", event.causationSequence}};
 }
 
 Json worldStateToJson(const WorldState& state) {
@@ -311,7 +315,7 @@ Json worldStateToJson(const WorldState& state) {
                                 {"overlay_version", overlay.overlayVersion},
                                 {"operations", overlay.operations}});
     }
-    return Json{{"save_schema_version", 15}, {"simulation_version", "adaptive-runtime-p1.15"},
+    return Json{{"save_schema_version", 16}, {"simulation_version", "adaptive-runtime-p1.16"},
                 {"event_sequence", state.events.size()}, {"world_id", state.worldId},
                 {"instance_id", state.instanceId},
                 {"content_version", state.contentVersion}, {"now", state.now.minute},

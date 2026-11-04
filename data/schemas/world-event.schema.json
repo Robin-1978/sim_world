@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Adaptive world committed event",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "sequence",
+    "minute",
+    "type",
+    "actor",
+    "target",
+    "detail",
+    "world_revision",
+    "data",
+    "event_id",
+    "correlation_id",
+    "causation_sequence"
+  ],
+  "properties": {
+    "schema_version": {"const": 2},
+    "sequence": {"type": "integer", "minimum": 1},
+    "minute": {"type": "integer"},
+    "type": {"type": "string", "minLength": 1},
+    "actor": {"type": "string"},
+    "target": {"type": "string"},
+    "detail": {"type": "string"},
+    "world_revision": {"type": "integer", "minimum": 1},
+    "data": {"type": "object"},
+    "event_id": {"type": "string", "pattern": "^event:[1-9][0-9]*$"},
+    "correlation_id": {"type": "string", "pattern": "^correlation:[1-9][0-9]*$"},
+    "causation_sequence": {"type": "integer", "minimum": 0}
+  },
+  "additionalProperties": false
+}

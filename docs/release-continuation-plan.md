@@ -7,7 +7,7 @@
 
 维护三 NPC 小村庄、可替换港区和第三个独立小说实例，并在同一契约上补齐 World Intelligence 的可审计闭环：需求/内驱随游戏时间变化，外部事件和结构约束进入决策上下文，规则或 LLM 产生意图，C++ 校验并提交事实，结果进入 EventLog、Snapshot、Replay 和文本调试界面；异常规则做确定性检测，Scenario Proposal 从同一 Snapshot 对照运行且不污染源世界。P3 的可替换性纵向切片已经完成；后续工作是把同一模型扩展到更多内容与真实领域，不把尚未建模的商店、利率或政策伪装成可计算结果。
 
-当前 P0、P1、P2 与 P3 的“最小纵向检查点”均已完成。这里的完成表示对应契约已有可运行、可回放、可测试的闭环，不表示完整产品愿景已经做完。P1 增加了异步决策队列、游戏时间截止、同 NPC 请求合并、已注册 operator、港区社会切片、声明式跨主体资源抢占和近远场调度基准；P2 增加了内容声明异常检测、反事实场景实验、结果 JSON 审计与 CLI 复现入口；P3 增加了跨区域、双阵营、制度协定、自定义需求域和长期承诺余波的第三个内容实例。抵押/价格/复杂仲裁、声明式长过程补偿、商店/利率/政策模型、大规模社会校准、事件因果 ID 与运行时 Schema 热演化仍属于后续扩展。
+当前 P0、P1、P2 与 P3 的“最小纵向检查点”均已完成。这里的完成表示对应契约已有可运行、可回放、可测试的闭环，不表示完整产品愿景已经做完。P1 增加了异步决策队列、游戏时间截止、同 NPC 请求合并、已注册 operator、港区社会切片、声明式跨主体资源抢占和近远场调度基准；P2 增加了内容声明异常检测、反事实场景实验、结果 JSON 审计与 CLI 复现入口；P3 增加了跨区域、双阵营、制度协定、自定义需求域和长期承诺余波的第三个内容实例。抵押/价格/复杂仲裁、声明式长过程补偿、商店/利率/政策模型、大规模社会校准与运行时 Schema 热演化仍属于后续扩展。
 
 ## 当前检查点
 
@@ -19,7 +19,7 @@
 | NPC 状态机、行为树、全局/局部规划 | 已完成 | `src/npc/state_machine.*`, `src/npc/behavior_tree.*`, `src/navigation/*` |
 | 文本调试界面和 headless 回放 | 已完成 | `src/text_ui_main.cpp`, `src/headless_main.cpp` |
 | 内容包加载 | 已完成 | `WorldService::load/fromContent`, `data/`, `tests/fixtures/minimal-pack` |
-| 存档 schema 与事件截断点 | 已完成 | `world_state_json.*`, `save_schema_version=15`, `simulation_version=adaptive-runtime-p1.15`, `event_sequence`, `instance_id`, `inventories`, `relationships`, `social_groups`, `exchange_contracts`, `NpcActivity` 聚合、`lastSimulationTick/lastDriveTick`、`definition_id` 引用、实例/内容版本校验与可重放 overlay 栈；运行态不复制角色定义 |
+| 存档 schema 与事件因果链 | 已完成 | `world_state_json.*`, `save_schema_version=16`, `simulation_version=adaptive-runtime-p1.16`, 事件 schema 2、稳定 `event_id`、事务 `correlation_id`、直接 `causation_sequence`、Snapshot 因果完整性校验、`event_sequence`, `instance_id`, `inventories`, `relationships`, `social_groups`, `exchange_contracts`, `NpcActivity` 聚合、`lastSimulationTick/lastDriveTick`、`definition_id` 引用、实例/内容版本校验与可重放 overlay 栈；运行态不复制角色定义 |
 | 内驱/需求模型 | 需求域是内容定义的标签，村庄默认四域、Glass Orchard 使用 stewardship/ecological；显式满足配方和有界预期适应已实现，安全事实已支持冲突/威胁/防守/撤离/修复并通过 Stimulus 投射 | `src/npc/drive_system.*`, `NeedContent`, `NeedState`, `need.*` events, `tests/fixtures/glass-orchard-pack` |
 | 外驱/结构上下文 | 已实现结构化 Stimulus/Constraint、到期、习惯化和快照；结构演化治理、沙箱和版本化激活均已接入 | `DecisionContext.stimuli`, `constraints`, `WorldService::projectStimuli`, `src/evolution/evolution.*` |
 | LLM 解释与权衡 | 同步对话/自驱提案、channel 策略、Qwen JSON Schema、两阶段话语理解、失败关闭和异步 TurnQueue 已完成；有效上下文由主线程提交，过期结果只写审计事件 | `IntentProposal`, `IProvider`, `TurnQueue`, `decision_channels`, `WorldService::converse/deliberate/pumpAsyncTurns` |
@@ -37,6 +37,7 @@
 - Promise、资源、关系、NPC 日程和事件在两日离线推进中可观察。
 - LLM 不可用时，自驱世界推进可走无语言理解的确定性候选回退；玩家对话失败关闭，不猜测语义、不写事实。
 - Snapshot/Replay 不访问 LLM；事件只在事务提交后发布。
+- 每个事件都有稳定 `event_id`；同事务事件共享 `correlation_id` 并以前序 `causation_sequence` 形成直接因果链。嵌套保存点失败时暂存事件与因果位置一起撤销，Snapshot 会拒绝越序或跨链 causation。
 - 需求缺口会随游戏时间增加，已提交动作会产生 `need.relieved`，跨阈值会产生 `need.critical`，需求状态可保存和恢复。
 - 运行态 NPC 只保存 `definition_id`；快照引用已删除的内容或不同 `content_version` 时会明确拒绝加载。
 - 第二个最小内容实例（`tests/fixtures/minimal-pack`，NPC `sable`）可以独立加载、保存和查询实体投影，证明 Runtime 不依赖村庄角色。
