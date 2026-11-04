@@ -1,6 +1,7 @@
 #include "world/world_service.hpp"
 #include "world/resource_system.hpp"
 #include "world/social_system.hpp"
+#include "world/meta_action_executor.hpp"
 #include "world/world_state_json.hpp"
 #include "npc/drive_system.hpp"
 #include "npc/state_machine.hpp"
@@ -34,12 +35,6 @@ void applyRelationshipDelta(RelationshipAxes& axes, const RelationshipDelta& del
 
 void applyNpcSignal(NpcState& npc, NpcSignal signal) {
     npc.mode = toString(transition(npcModeFromString(npc.mode), signal));
-}
-
-Json mergedBehaviorArgs(const MetaActionDefinition& definition, const BehaviorNodeContent& node) {
-    Json result = definition.defaultArgs;
-    for (auto it = node.args.begin(); it != node.args.end(); ++it) result[it.key()] = it.value();
-    return result;
 }
 
 Json quantityMapJson(const std::map<std::string, int>& quantities) {
@@ -2393,258 +2388,89 @@ bool WorldService::applyMetaAction(const std::string& npcId, const std::string& 
                                    const Json* parameters) {
     const auto definition = content_.metaActions.find(node.name);
     if (definition == content_.metaActions.end()) return false;
-    Json args = mergedBehaviorArgs(definition->second, node);
-    // A content recipe may leave an input slot bound to the accepted
-    // decision parameters. Bindings are data, but their resolved values still
-    // pass the operator's normal Runtime validation below.
-    if (parameters != nullptr && parameters->is_object()) {
-        for (auto it = args.begin(); it != args.end(); ++it) {
-            if (!it.value().is_object() || !it.value().contains("bind")) continue;
-            const auto binding = it.value().at("bind");
-            if (!binding.is_string() || !parameters->contains(binding.get<std::string>())) return false;
-            it.value() = parameters->at(binding.get<std::string>());
-        }
-    }
-    const auto& operation = definition->second.operation;
-    if (operation == "resource.consume") {
-        const auto resource = args.value("resource", "");
-        const int amount = args.value("amount", 0);
-        const bool reserved = reservedResources != nullptr && reservedResources->contains(resource);
-        if (reserved && reservedResources->at(resource) < amount) return false;
-        const int before = resourceValue(resource);
-        if (!ResourceSystem::consume(state_, content_, resource, amount, reserved)) return false;
-        addEvent("action.resource", npcId, resource, "A behavior recipe consumed a resource",
-                 Json{{"action_id", actionId}, {"resource", resource}, {"before", before},
-                      {"after", resourceValue(resource)}, {"amount", amount}});
-        return true;
-    }
-    if (operation == "resource.produce") {
-        const auto resource = args.value("resource", "");
-        const int amount = args.value("amount", 0);
-        const int before = resourceValue(resource);
-        if (!ResourceSystem::produce(state_, content_, resource, amount)) return false;
-        addEvent("action.resource", npcId, resource, "A behavior recipe produced a resource",
-                 Json{{"action_id", actionId}, {"resource", resource}, {"before", before},
-                      {"after", resourceValue(resource)}, {"amount", amount}});
-        return true;
-    }
-    if (operation == "resource.reserve") {
-        const auto resource = args.value("resource", "");
-        const int amount = args.value("amount", 0);
-        if (!ResourceSystem::reserve(state_, content_, resource, amount)) return false;
-        addEvent("action.reservation", npcId, resource, "A behavior recipe reserved a resource",
-                 Json{{"action_id", actionId}, {"resource", resource}, {"amount", amount}});
-        return true;
-    }
-    if (operation == "resource.release") {
-        const auto resource = args.value("resource", "");
-        const int amount = args.value("amount", 0);
-        if (!ResourceSystem::release(state_, content_, resource, amount)) return false;
-        addEvent("action.reservation", npcId, resource, "A behavior recipe released a resource reservation",
-                 Json{{"action_id", actionId}, {"resource", resource}, {"amount", amount}});
-        return true;
-    }
-    if (operation == "resource.transfer") {
-        const auto source = args.value("source", "self");
-        const auto target = args.value("target", "world");
-        const auto resource = args.value("resource", "");
-        const int amount = args.value("amount", 0);
-        // Keep actor-facing NPC ids at the command boundary.  The transfer
-        // operator resolves them to entity ids internally; passing the
-        // canonical id here preserves the authored `self` party for
-        // authorization instead of accidentally turning it into an
-        // unrelated inventory identifier.
-        const auto resolvedSource = source == "self" ? npcId : source;
-        const auto resolvedTarget = target == "self" ? npcId : target;
-        const auto transfer = transferResource(resolvedSource, resolvedTarget, resource, amount, npcId,
-                                               "recipe:" + npcId + ":" + actionId);
-        return transfer.accepted;
-    }
-    if (operation == "movement.traverse" || operation == "movement.arrive") {
-        const auto destination = args.value("destination", args.value("location", ""));
-        if (destination.empty()) return false;
-        const auto moved = moveNpc(npcId, destination, npcId,
-                                   "recipe:" + npcId + ":" + actionId + ":movement");
-        return moved.accepted;
-    }
-    if (MetaActionRegistry::securityOperatorKind(operation) !=
-        MetaActionRegistry::SecurityOperatorKind::Unknown) {
-        const auto target = args.value("target", "self");
-        const auto security = applySecurityOperator(operation, npcId, target, args,
-                                                    "recipe:" + npcId + ":" + actionId + ":security");
-        return security.accepted;
-    }
-    if (operation == "memory.append") {
-        auto npc = state_.npcs.find(npcId);
-        if (npc == state_.npcs.end()) return false;
-        const auto text = args.value("text", "");
-        if (text.empty()) return false;
-        const auto sourceSequence = args.value("source_sequence", 0ULL);
-        if (sourceSequence != 0 && std::none_of(state_.events.begin(), state_.events.end(),
-                                                [sourceSequence](const auto& event) { return event.sequence == sourceSequence; })) {
-            return false;
-        }
-        npc->second.memories.push_back(Memory{args.value("kind", "episode"), text, state_.now,
-                                              args.value("confidence", 1.0)});
-        addEvent("memory.appended", npcId, args.value("target", "self"), text,
-                 Json{{"action_id", actionId}, {"kind", args.value("kind", "episode")},
-                      {"source_sequence", sourceSequence}});
-        return true;
-    }
-    if (operation == "knowledge.assert") {
-        const auto result = assertKnownFact(
-            npcId, args.value("subject", ""), args.value("predicate", ""), args.value("value", ""),
-            args.value("source_sequence", 0ULL), args.value("scope", "direct"),
-            args.value("confidence", 0.0), npcId,
-            "recipe:" + npcId + ":" + actionId + ":knowledge");
-        return result.accepted;
-    }
-    if (operation == "experience.record") {
-        const auto result = recordExperience(
-            npcId, args.value("domain", ""), args.value("trigger", ""), args.value("action", actionId),
-            args.value("outcome", ""), args.value("source_sequence", 0ULL),
-            args.value("confidence", 0.0), args.value("personal", true), npcId,
-            "recipe:" + npcId + ":" + actionId + ":experience");
-        return result.accepted;
-    }
-    if (operation == "promise.create") {
-        const auto resolveParty = [&npcId](const std::string& value) {
-            return value == "self" ? npcId : value;
-        };
-        const auto created = createPromise(resolveParty(args.value("from", "self")),
-                                           resolveParty(args.value("to", "")),
-                                           args.value("description", ""), args.value("due_days", 1),
-                                           "recipe:" + npcId + ":" + actionId + ":promise");
-        return created.accepted;
-    }
-    if (operation == "promise.transition") {
-        const auto status = promiseStatusFromString(args.value("status", "proposed"));
-        const auto transitioned = decidePromise(args.value("promise_id", ""), status, npcId,
-                                                "recipe:" + npcId + ":" + actionId + ":promise",
-                                                args.value("detail", ""));
-        return transitioned.accepted;
-    }
-    if (operation == "production.execute") {
-        const auto inputs = args.value("inputs", Json::object());
-        const auto outputs = args.value("outputs", Json::object());
-        if (!inputs.is_object() || !outputs.is_object() || (inputs.empty() && outputs.empty())) return false;
-        for (auto it = inputs.begin(); it != inputs.end(); ++it) {
-            if (!it.value().is_number_integer() || it.value().get<int>() <= 0 ||
-                availableResourceValue(it.key()) < it.value().get<int>()) return false;
-        }
-        for (auto it = outputs.begin(); it != outputs.end(); ++it) {
-            if (!it.value().is_number_integer() || it.value().get<int>() <= 0 || !content_.resources.contains(it.key()) ||
-                resourceValue(it.key()) + it.value().get<int>() > content_.resources.at(it.key()).maximum) return false;
-        }
-        Json consumed = Json::object();
-        Json produced = Json::object();
-        for (auto it = inputs.begin(); it != inputs.end(); ++it) {
-            const int amount = it.value().get<int>();
-            state_.resources[it.key()].amount -= amount;
-            consumed[it.key()] = amount;
-        }
-        for (auto it = outputs.begin(); it != outputs.end(); ++it) {
-            const int amount = it.value().get<int>();
-            state_.resources[it.key()].amount += amount;
-            produced[it.key()] = amount;
-        }
-        addEvent("production.executed", npcId, "world", "A registered production process exchanged inputs and outputs",
-                 Json{{"action_id", actionId}, {"inputs", consumed}, {"outputs", produced}});
-        return true;
-    }
-    if (operation == "trade.execute") {
-        const auto seller = args.value("seller", "self") == "self" ? npcId : args.value("seller", npcId);
-        const auto buyer = args.value("buyer", "");
-        const auto result = tradeResources(
-            seller, buyer, args.value("seller_resource", ""), args.value("seller_amount", 0),
-            args.value("buyer_resource", ""), args.value("buyer_amount", 0), npcId,
-            "recipe:" + npcId + ":" + actionId);
-        return result.accepted;
-    }
-    if (operation == "exchange.create") {
-        const auto parseTerms = [](const Json& value, std::map<std::string, int>& terms) {
-            if (!value.is_object()) return false;
-            for (auto it = value.begin(); it != value.end(); ++it) {
-                if (!it.value().is_number_integer()) return false;
-                terms[it.key()] = it.value().get<int>();
-            }
-            return true;
-        };
-        std::map<std::string, int> offered;
-        std::map<std::string, int> requested;
-        if (!parseTerms(args.value("offered", Json::object()), offered) ||
-            !parseTerms(args.value("requested", Json::object()), requested)) {
-            return false;
-        }
-        const auto resolveParty = [&npcId](const std::string& value) {
-            return value == "self" ? npcId : value;
-        };
-        const auto result = proposeExchange(
-            resolveParty(args.value("proposer", "self")),
-            resolveParty(args.value("counterparty", "")), std::move(offered), std::move(requested),
-            args.value("due_minutes", 0), npcId,
-            "recipe:" + npcId + ":" + actionId + ":exchange");
-        return result.accepted;
-    }
-    if (operation == "exchange.transition") {
-        const auto status = exchangeContractStatusFromString(args.value("status", ""));
-        if (status == ExchangeContractStatus::Proposed || status == ExchangeContractStatus::Settled ||
-            status == ExchangeContractStatus::Expired) {
-            return false;
-        }
-        const auto result = decideExchange(
-            args.value("contract_id", ""), status, npcId,
-            "recipe:" + npcId + ":" + actionId + ":exchange", args.value("reason", ""));
-        return result.accepted;
-    }
-    if (operation == "exchange.settle") {
-        const auto result = settleExchange(
-            args.value("contract_id", ""), npcId,
-            "recipe:" + npcId + ":" + actionId + ":exchange");
-        return result.accepted;
-    }
-    if (operation == "group.metric_adjust") {
-        const auto result = adjustGroupMetric(
-            args.value("group", ""), args.value("metric", ""), args.value("delta", 0.0), npcId,
-            "recipe:" + npcId + ":" + actionId, args.value("reason", ""));
-        return result.accepted;
-    }
-    if (operation == "group.membership_adjust") {
-        const auto member = args.value("npc", "self") == "self" ? npcId : args.value("npc", npcId);
-        const auto result = setGroupMembership(
-            args.value("group", ""), member, args.value("role", "member"), args.value("active", true),
-            npcId, "recipe:" + npcId + ":" + actionId);
-        return result.accepted;
-    }
-    if (operation == "need.relieve") {
-        const auto sourceAction = args.value("action", actionId);
+
+    MetaActionExecutor::Callbacks callbacks;
+    callbacks.emit = [this](const std::string& type, const std::string& actor,
+                            const std::string& target, const std::string& detail, Json data) {
+        addEvent(type, actor, target, detail, std::move(data));
+    };
+    callbacks.transfer = [this, &npcId, &actionId](const Json& args) {
+        return transferResource(args.value("source", npcId), args.value("target", kWorldActor),
+                                args.value("resource", ""), args.value("amount", 0), npcId,
+                                "recipe:" + npcId + ":" + actionId).accepted;
+    };
+    callbacks.move = [this, &npcId, &actionId](const Json& args) {
+        return moveNpc(npcId, args.value("destination", ""), npcId,
+                       "recipe:" + npcId + ":" + actionId + ":movement").accepted;
+    };
+    callbacks.security = [this, &npcId, &actionId](const Json& args) {
+        return applySecurityOperator(args.value("operation", ""), npcId,
+                                     args.value("target", "self"), args.value("args", Json::object()),
+                                     "recipe:" + npcId + ":" + actionId + ":security").accepted;
+    };
+    callbacks.knownFact = [this, &npcId, &actionId](const Json& args) {
+        return assertKnownFact(npcId, args.value("subject", ""), args.value("predicate", ""),
+                               args.value("value", ""), args.value("source_sequence", 0ULL),
+                               args.value("scope", "direct"), args.value("confidence", 0.0), npcId,
+                               "recipe:" + npcId + ":" + actionId + ":knowledge").accepted;
+    };
+    callbacks.experience = [this, &npcId, &actionId](const Json& args) {
+        return recordExperience(npcId, args.value("domain", ""), args.value("trigger", ""),
+                                args.value("action", actionId), args.value("outcome", ""),
+                                args.value("source_sequence", 0ULL), args.value("confidence", 0.0),
+                                args.value("personal", true), npcId,
+                                "recipe:" + npcId + ":" + actionId + ":experience").accepted;
+    };
+    callbacks.promiseCreate = [this, &npcId, &actionId](const Json& args) {
+        return createPromise(args.value("from", npcId), args.value("to", ""),
+                             args.value("description", ""), args.value("due_days", 1),
+                             "recipe:" + npcId + ":" + actionId + ":promise").accepted;
+    };
+    callbacks.promiseTransition = [this, &npcId, &actionId](const Json& args) {
+        return decidePromise(args.value("promise_id", ""),
+                             promiseStatusFromString(args.value("status", "proposed")), npcId,
+                             "recipe:" + npcId + ":" + actionId + ":promise",
+                             args.value("detail", "")).accepted;
+    };
+    callbacks.trade = [this, &npcId, &actionId](const Json& args) {
+        return tradeResources(args.value("seller", npcId), args.value("buyer", ""),
+                              args.value("seller_resource", ""), args.value("seller_amount", 0),
+                              args.value("buyer_resource", ""), args.value("buyer_amount", 0), npcId,
+                              "recipe:" + npcId + ":" + actionId).accepted;
+    };
+    callbacks.exchangeCreate = [this, &npcId, &actionId](const Json& args) {
+        return proposeExchange(args.value("proposer", npcId), args.value("counterparty", ""),
+                                args.value("offered", std::map<std::string, int>{}),
+                                args.value("requested", std::map<std::string, int>{}),
+                                args.value("due_minutes", 0), npcId,
+                                "recipe:" + npcId + ":" + actionId + ":exchange").accepted;
+    };
+    callbacks.exchangeTransition = [this, &npcId, &actionId](const Json& args) {
+        return decideExchange(args.value("contract_id", ""),
+                              exchangeContractStatusFromString(args.value("status", "")), npcId,
+                              "recipe:" + npcId + ":" + actionId + ":exchange",
+                              args.value("reason", "")).accepted;
+    };
+    callbacks.exchangeSettle = [this, &npcId, &actionId](const Json& args) {
+        return settleExchange(args.value("contract_id", ""), npcId,
+                              "recipe:" + npcId + ":" + actionId + ":exchange").accepted;
+    };
+    callbacks.groupMetric = [this, &npcId, &actionId](const Json& args) {
+        return adjustGroupMetric(args.value("group", ""), args.value("metric", ""),
+                                 args.value("delta", 0.0), npcId,
+                                 "recipe:" + npcId + ":" + actionId,
+                                 args.value("reason", "")).accepted;
+    };
+    callbacks.groupMembership = [this, &npcId, &actionId](const Json& args) {
+        return setGroupMembership(args.value("group", ""), args.value("npc", npcId),
+                                  args.value("role", "member"), args.value("active", true), npcId,
+                                  "recipe:" + npcId + ":" + actionId).accepted;
+    };
+    callbacks.needRelief = [this, &npcId](const std::string& sourceAction) {
         applyNeedRelief(npcId, sourceAction);
-        return true;
-    }
-    if (operation == "link.set_state") {
-        const auto link = args.value("link", "");
-        if (!state_.entities.contains(linkEntityId(link))) return false;
-        state_.links[link] = RuntimeLinkState{args.value("traversable", true), args.value("locked", false)};
-        addEvent("action.structure", npcId, link, "A behavior recipe changed a traversal link",
-                 Json{{"action_id", actionId}, {"link_id", link},
-                      {"traversable", args.value("traversable", true)}, {"locked", args.value("locked", false)}});
-        return true;
-    }
-    if (operation == "relationship.adjust") {
-        const auto target = args.value("target", "player");
-        RelationshipAxes delta;
-        delta.trust = args.value("trust", 0.0);
-        delta.respect = args.value("respect", 0.0);
-        delta.fear = args.value("fear", 0.0);
-        delta.owed = args.value("owed", 0.0);
-        const auto result = SocialSystem::adjustRelationship(state_, npcId, target, delta);
-        if (!result.accepted) return false;
-        addEvent("action.relationship", npcId, target, "A behavior recipe changed a relationship",
-                 Json{{"action_id", actionId}, {"target", target}, {"trust", delta.trust}, {"respect", delta.respect},
-                      {"fear", delta.fear}, {"owed", delta.owed}});
-        return true;
-    }
-    return false;
+    };
+    return MetaActionExecutor::execute(content_, state_, npcId, actionId, definition->second, node,
+                                       reservedResources, parameters, callbacks);
 }
 
 bool WorldService::applyActionEffects(const std::string& npcId, const std::string& actionId) {
