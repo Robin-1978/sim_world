@@ -105,6 +105,20 @@
       },
       "additionalProperties": false
     },
+    "decision_context": {
+      "type": "object",
+      "description": "Visibility-safe per-subject context budgets; this never changes the authoritative WorldState.",
+      "properties": {
+        "max_stimuli": {"type": "integer", "minimum": 1, "maximum": 1024},
+        "max_memories": {"type": "integer", "minimum": 1, "maximum": 1024},
+        "max_knowledge": {"type": "integer", "minimum": 1, "maximum": 1024},
+        "max_experiences": {"type": "integer", "minimum": 1, "maximum": 1024},
+        "max_visible_entities": {"type": "integer", "minimum": 1, "maximum": 1024},
+        "max_visible_links": {"type": "integer", "minimum": 1, "maximum": 1024},
+        "max_relationships": {"type": "integer", "minimum": 1, "maximum": 1024}
+      },
+      "additionalProperties": false
+    },
     "npc_deliberation": {
       "type": "object",
       "required": [

@@ -104,12 +104,13 @@ DialogueTurn WorldIntelligenceSystem::executeTurn(const std::string& npcId, cons
     const auto retryable = [](const std::string& code) {
         return code == "missing_action_parameter" || code == "unknown_action_parameter" ||
                code == "invalid_action_parameter_type" || code == "unexpected_action_parameters" ||
-               code == "invalid_action_parameters" || code == "invalid_action_parameter_value";
+               code == "invalid_action_parameters" || code == "invalid_action_parameter_value" ||
+               code == "invalid_expected_relief";
     };
     if (!turnResult.accepted && response.ok && world_.provider_->name() == "llama.cpp" && retryable(turnResult.error)) {
         const Json feedback{{"attempt", 1},
                             {"code", turnResult.error},
-                            {"message", "Runtime rejected the proposed action parameters; repair only the declared plan input."},
+                            {"message", "Runtime rejected a structured proposal field; repair only the declared plan input or expected relief keys."},
                             {"previous_action_id", response.proposal.actionId},
                             {"previous_parameters", response.proposal.parameters}};
         auto repaired = world_.provider_->decide(request.context, input, feedback);
@@ -395,7 +396,8 @@ std::size_t WorldIntelligenceSystem::pumpAsyncTurns() {
         const auto retryable = [](const std::string& code) {
             return code == "missing_action_parameter" || code == "unknown_action_parameter" ||
                    code == "invalid_action_parameter_type" || code == "unexpected_action_parameters" ||
-                   code == "invalid_action_parameters" || code == "invalid_action_parameter_value";
+                   code == "invalid_action_parameters" || code == "invalid_action_parameter_value" ||
+                   code == "invalid_expected_relief";
         };
         const auto queuedChannel = world_.content_.decisionChannels.find(queued.request.channelId);
         const bool allowInterveningWorldChanges =
@@ -409,7 +411,7 @@ std::size_t WorldIntelligenceSystem::pumpAsyncTurns() {
             repair.validationFeedback = Json{
                 {"attempt", 1},
                 {"code", turn.error},
-                {"message", "Runtime rejected the proposed action parameters; repair only the declared plan input."},
+                {"message", "Runtime rejected a structured proposal field; repair only the declared plan input or expected relief keys."},
                 {"previous_turn_id", queued.request.turnId}};
             const auto submitted = world_.intelligence_->submit(std::move(repair));
             if (submitted.accepted) {

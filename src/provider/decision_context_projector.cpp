@@ -22,6 +22,16 @@ std::string join(const std::vector<std::string>& values, std::string_view separa
     return output.str();
 }
 
+std::string joinRecent(const std::vector<std::string>& values, std::size_t limit,
+                       std::string_view separator) {
+    if (values.empty()) return {};
+    const auto first = values.size() > limit ? values.size() - limit : 0;
+    std::vector<std::string> recent;
+    recent.reserve(values.size() - first);
+    for (std::size_t index = first; index < values.size(); ++index) recent.push_back(values[index]);
+    return join(recent, separator);
+}
+
 Json quantityMapJson(const std::map<std::string, int>& quantities) {
     Json result = Json::object();
     for (const auto& [resource, amount] : quantities) result[resource] = amount;
@@ -116,6 +126,9 @@ DecisionContext DecisionContextProjector::build(const WorldState& state,
         if (left.effectiveSalience == right.effectiveSalience) return left.id < right.id;
         return left.effectiveSalience > right.effectiveSalience;
     });
+    if (context.stimuli.size() > content.decisionContextPolicy.maxStimuli) {
+        context.stimuli.resize(content.decisionContextPolicy.maxStimuli);
+    }
     std::ostringstream stimuli;
     for (const auto& stimulus : context.stimuli) {
         stimuli << stimulus.category << " from " << stimulus.sourceEvent << " by " << stimulus.actor
@@ -152,20 +165,20 @@ DecisionContext DecisionContextProjector::build(const WorldState& state,
 
     std::vector<std::string> memories;
     for (const auto& memory : npc.memories) memories.push_back(memory.text);
-    context.memories = join(memories, " | ");
+    context.memories = joinRecent(memories, content.decisionContextPolicy.maxMemories, " | ");
     std::vector<std::string> knowledge;
     for (const auto& fact : npc.knowledge) {
         knowledge.push_back(fact.subject + " " + fact.predicate + " " + fact.value +
                            " [confidence=" + std::to_string(fact.confidence) + ", scope=" + fact.scope + "]");
     }
-    context.knowledge = join(knowledge, " | ");
+    context.knowledge = joinRecent(knowledge, content.decisionContextPolicy.maxKnowledge, " | ");
     std::vector<std::string> experiences;
     for (const auto& experience : npc.experiences) {
         experiences.push_back(experience.domain + ": when " + experience.trigger + ", " +
                               experience.action + " -> " + experience.outcome +
                               " [confidence=" + std::to_string(experience.confidence) + "]");
     }
-    context.experiences = join(experiences, " | ");
+    context.experiences = joinRecent(experiences, content.decisionContextPolicy.maxExperiences, " | ");
     context.character = authoredDefinition.name + ": " + authoredDefinition.role + "; public goal=" +
                         authoredDefinition.publicGoal;
     context.privateCharacter = "hidden goal=" + authoredDefinition.hiddenGoal +
@@ -174,7 +187,9 @@ DecisionContext DecisionContextProjector::build(const WorldState& state,
     for (const auto& [needId, need] : npc.needs) {
         context.character += "; need(" + needId + ")=" + std::to_string(need.deficit);
     }
+    std::size_t relationshipCount = 0;
     for (const auto& [peer, relation] : npc.relationships) {
+        if (relationshipCount++ >= content.decisionContextPolicy.maxRelationships) break;
         context.character += "; relationship(" + peer + ")=trust:" + std::to_string(relation.trust) +
                              ",respect:" + std::to_string(relation.respect) +
                              ",fear:" + std::to_string(relation.fear) +
@@ -289,15 +304,19 @@ DecisionContext DecisionContextProjector::build(const WorldState& state,
                  {"location", authoredResource.location}, {"unit", authoredResource.unit},
                  {"kind", authoredResource.kind}};
     }
+    std::size_t visibleEntityCount = 0;
     for (const auto& [peerId, peer] : state.npcs) {
         if (peerId == npcId || peer.location != npc.location) continue;
+        if (visibleEntityCount++ >= content.decisionContextPolicy.maxVisibleEntities) break;
         context.worldSnapshot["visible_entities"].push_back(
             Json{{"id", peerId}, {"kind", "npc"}, {"location", peer.location}, {"mode", peer.mode}});
     }
+    std::size_t visibleLinkCount = 0;
     for (const auto& link : content.links) {
         if (std::find(link.link.endpoints.begin(), link.link.endpoints.end(), npc.location) == link.link.endpoints.end()) {
             continue;
         }
+        if (visibleLinkCount++ >= content.decisionContextPolicy.maxVisibleLinks) break;
         const auto runtime = state.links.find(link.id);
         const RuntimeLinkState linkState = runtime == state.links.end() ? RuntimeLinkState{} : runtime->second;
         context.worldSnapshot["visible_links"].push_back(
@@ -330,7 +349,9 @@ DecisionContext DecisionContextProjector::build(const WorldState& state,
                                                     {"sensitivity", need.sensitivity},
                                                     {"confidence", need.evidenceConfidence}};
     }
+    std::size_t selfRelationshipCount = 0;
     for (const auto& [peerId, relation] : npc.relationships) {
+        if (selfRelationshipCount++ >= content.decisionContextPolicy.maxRelationships) break;
         context.selfState["relationships"][peerId] =
             Json{{"trust", relation.trust}, {"respect", relation.respect},
                  {"fear", relation.fear}, {"owed", relation.owed}};

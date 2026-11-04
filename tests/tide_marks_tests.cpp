@@ -239,6 +239,44 @@ private:
     }
 };
 
+class RepairingExpectedReliefProvider final : public IProvider {
+public:
+    ProviderResponse decide(const DecisionContext& context, const std::string&) override {
+        ++calls;
+        return makeProposal(context, {"resource_cost", 0.2});
+    }
+
+    ProviderResponse decide(const DecisionContext& context, const std::string&,
+                            const Json& validationFeedback) override {
+        ++calls;
+        sawFeedback = sawFeedback || !validationFeedback.empty();
+        return validationFeedback.empty() ? makeProposal(context, {"resource_cost", 0.2})
+                                          : makeProposal(context, {});
+    }
+
+    [[nodiscard]] std::string name() const override { return "llama.cpp"; }
+
+    int calls{0};
+    bool sawFeedback{false};
+
+private:
+    static ProviderResponse makeProposal(const DecisionContext& context,
+                                         std::pair<std::string, double> relief) {
+        IntentProposal proposal;
+        proposal.actionId = "offer_ration";
+        proposal.speechAct = context.speechAct;
+        proposal.intent = "offer_ration";
+        proposal.rationale = "A test LLM repaired its expected relief contract.";
+        proposal.expectedOutcome = "Runtime executes the repaired authored plan.";
+        proposal.confidence = 1.0;
+        proposal.worldRevision = context.worldRevision;
+        proposal.npcStateVersion = context.npcStateVersion;
+        proposal.worldActionRequested = true;
+        if (!relief.first.empty()) proposal.expectedRelief[relief.first] = relief.second;
+        return ProviderResponse{true, std::move(proposal), "The model selected a repaired plan.", {}};
+    }
+};
+
 class NpcActionProvider final : public IProvider {
 public:
     explicit NpcActionProvider(std::map<std::string, std::string> actions)
@@ -1021,6 +1059,27 @@ void decision_context_projects_location_relevant_resources() {
            "locationless collective resources remain visible and resource provenance stays explicit");
 }
 
+void decision_context_obeys_authored_visibility_budgets() {
+    auto content = ContentPackLoader::load(ContentPackLoader::defaultRoot());
+    content.decisionContextPolicy.maxVisibleEntities = 1;
+    content.decisionContextPolicy.maxVisibleLinks = 1;
+    content.decisionContextPolicy.maxRelationships = 1;
+    auto observer = content.npcs.front();
+    observer.definition.id = "observer";
+    observer.definition.name = "Observer";
+    observer.initialLocation = content.npcs.front().initialLocation;
+    observer.initialScheduleLabel = observer.initialLocation;
+    content.npcs.push_back(std::move(observer));
+    auto service = WorldService::fromContent(content, std::make_unique<MockProvider>());
+    const auto context = service.decisionContext(content.npcs.front().definition.id);
+    expect(context.worldSnapshot.at("visible_entities").size() == 1,
+           "the subject-specific context budget limits visible co-located entities");
+    expect(context.worldSnapshot.at("visible_links").size() == 1,
+           "the subject-specific context budget limits adjacent topology");
+    expect(context.selfState.at("relationships").size() <= 1,
+           "relationship projection obeys the same authored context budget");
+}
+
 void action_validator_rejects_malformed_nested_schema_without_throwing() {
     DecisionContext context;
     ActionCandidate candidate;
@@ -1045,6 +1104,15 @@ void llm_action_validation_returns_bounded_repair_feedback() {
            "a real LLM action validation error is returned once for a bounded repair");
     expect(service.state().events.back().data.at("action_id") == turn.actionId,
            "the repaired proposal is the only action committed to the event log");
+}
+
+void llm_expected_relief_validation_returns_bounded_repair_feedback() {
+    auto provider = std::make_unique<RepairingExpectedReliefProvider>();
+    auto* raw = provider.get();
+    auto service = WorldService::load(ContentPackLoader::defaultRoot(), std::move(provider));
+    const auto turn = service.deliberate("mira", "test_invalid_expected_relief", "llm-relief-repair");
+    expect(turn.accepted && !turn.actionId.empty() && raw->calls == 2 && raw->sawFeedback,
+           "an invalid expected-relief key receives one bounded structured repair");
 }
 
 void meta_actions_are_loaded_from_content() {
@@ -2724,10 +2792,14 @@ int main() {
     run("provider_and_action_validation_are_safe", provider_and_action_validation_are_safe);
     run("decision_context_projects_location_relevant_resources",
         decision_context_projects_location_relevant_resources);
+    run("decision_context_obeys_authored_visibility_budgets",
+        decision_context_obeys_authored_visibility_budgets);
     run("action_validator_rejects_malformed_nested_schema_without_throwing",
         action_validator_rejects_malformed_nested_schema_without_throwing);
     run("llm_action_validation_returns_bounded_repair_feedback",
         llm_action_validation_returns_bounded_repair_feedback);
+    run("llm_expected_relief_validation_returns_bounded_repair_feedback",
+        llm_expected_relief_validation_returns_bounded_repair_feedback);
     run("meta_actions_are_loaded_from_content", meta_actions_are_loaded_from_content);
     run("needs_cover_domains_and_explicit_execution_paths", needs_cover_domains_and_explicit_execution_paths);
     run("bounded_drive_expectation_adapts_from_outcomes", bounded_drive_expectation_adapts_from_outcomes);

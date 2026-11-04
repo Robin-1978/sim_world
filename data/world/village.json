@@ -19,6 +19,15 @@
     "max_sensitivity": 1.2,
     "repeat_window_minutes": 720
   },
+  "decision_context": {
+    "max_stimuli": 8,
+    "max_memories": 12,
+    "max_knowledge": 12,
+    "max_experiences": 12,
+    "max_visible_entities": 16,
+    "max_visible_links": 16,
+    "max_relationships": 16
+  },
   "npc_deliberation": {
     "enabled": true,
     "min_stimulus_salience": 0.65,

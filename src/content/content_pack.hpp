@@ -55,6 +55,20 @@ struct StimulusPolicy {
     int repeatWindowMinutes{720};
 };
 
+// Bounds for the subject-specific DecisionContext projection. These are
+// visibility-safe context budgets, not a second world-state store: the
+// Runtime still owns the complete facts, while the Provider sees only the
+// most recent/locally relevant entries that fit the authored budget.
+struct DecisionContextPolicy {
+    std::size_t maxStimuli{8};
+    std::size_t maxMemories{12};
+    std::size_t maxKnowledge{12};
+    std::size_t maxExperiences{12};
+    std::size_t maxVisibleEntities{16};
+    std::size_t maxVisibleLinks{16};
+    std::size_t maxRelationships{16};
+};
+
 struct StimulusRule {
     std::string id;
     std::string eventPrefix;
@@ -274,6 +288,7 @@ struct WorldContentPack {
     GameTime startTime;
     DriveAdaptationPolicy driveAdaptation;
     StimulusPolicy stimulusPolicy;
+    DecisionContextPolicy decisionContextPolicy;
     NpcDeliberationPolicy npcDeliberation;
     SimulationPolicy simulationPolicy;
     EvolutionPolicy evolutionPolicy;

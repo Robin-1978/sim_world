@@ -336,7 +336,7 @@ ProviderResponse LlamaCppProvider::decide(const DecisionContext& context, const 
         Json(needIds).dump() + ". Use empty arrays/objects when none are supplied, and expected_relief MUST be empty when action_id is empty. "
         "confidence and expected_relief values must be numbers from 0 to 1. dialogue must be one or two natural first-person sentences spoken by the NPC, never a dump of context fields. "
         "knowledge and experiences are NPC-scoped, sourced context; they may guide a proposal but never authorize bypassing current facts or constraints. "
-        "If validation_feedback is non-empty, repair only the reported action or parameter problem in one response. "
+        "If validation_feedback is non-empty, repair only the reported action, parameter, or expected relief field problem in one response. "
         "Do not repeat an invalid action or parameter, and do not invent a candidate outside plan_catalog. "
         "motivation and tradeoffs explain the decision; they are not actions. Do not use markdown or add explanation outside the JSON object.";
     Json messages = Json::array();

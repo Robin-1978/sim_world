@@ -187,7 +187,11 @@
       "multi_npc_boundary": {
         "command": "./build/tide_marks_text --provider profile (advance 60; drain 120000)",
         "provider": "llama.cpp",
-        "queued_npcs": ["eve", "lorn", "mira"],
+        "queued_npcs": [
+          "eve",
+          "lorn",
+          "mira"
+        ],
         "consumed_turns": 3,
         "selected_actions": {
           "eve": "reveal_clue",
@@ -253,7 +257,11 @@
     "command": "./build/tide_marks_text --script docs/examples/llm-self-drive-session.txt --provider profile",
     "provider": "llama.cpp",
     "world_boundary": "day 1 7:00 after advance 60",
-    "queued_npcs": ["eve", "lorn", "mira"],
+    "queued_npcs": [
+      "eve",
+      "lorn",
+      "mira"
+    ],
     "consumed_turns": 3,
     "runtime_result": "all three model proposals were accepted at the safe boundary; each NPC entered an authored ProcessExecution and no world fact was committed directly by the provider",
     "observed_intent_events": [
@@ -327,5 +335,51 @@
       "status": "proposed",
       "runtime_result": "first tool payload repaired once with structured validation feedback, then validated; no source world mutation"
     }
+  },
+  "latest_context_budget_self_drive": {
+    "command": "./build/tide_marks_text --provider profile --script docs/examples/llm-self-drive-session.txt",
+    "provider": "llama.cpp",
+    "content_context_policy": {
+      "max_stimuli": 8,
+      "max_memories": 12,
+      "max_knowledge": 12,
+      "max_experiences": 12,
+      "max_visible_entities": 16,
+      "max_visible_links": 16,
+      "max_relationships": 16
+    },
+    "prompt_tokens_observed": [
+      3542,
+      3609,
+      3694,
+      3654
+    ],
+    "consumed_turns": 4,
+    "repair": {
+      "initial_runtime_error": "invalid_expected_relief",
+      "invalid_keys": [
+        "resource_cost",
+        "risk",
+        "future_value",
+        "relationship_effect",
+        "constraint_penalty"
+      ],
+      "repair_feedback": "structured validation feedback was sent once; repaired proposal used expected_relief={}"
+    },
+    "intent_events": [
+      "npc.intent eve",
+      "npc.intent mira",
+      "npc.intent lorn"
+    ],
+    "npc_modes_after_drain": {
+      "eve": "executing",
+      "lorn": "executing",
+      "mira": "executing"
+    },
+    "pending_turns": 0,
+    "provider_failures": 0,
+    "elapsed_seconds": 75.1,
+    "runtime_result": "all three real Qwen proposals committed through the authored ProcessExecution path; one invalid expected_relief field was repaired once and no Provider wrote WorldState directly",
+    "result": "passed"
   }
 }

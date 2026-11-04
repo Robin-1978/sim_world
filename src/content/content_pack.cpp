@@ -671,6 +671,30 @@ WorldContentPack ContentPackLoader::load(const std::string& rootPath) {
         throw std::runtime_error("stimulus_policy.repeat_window_minutes must be non-negative in " + worldPath);
     }
     pack.stimulusPolicy.repeatWindowMinutes = stimulusPolicy.at("repeat_window_minutes").get<int>();
+    const auto contextPolicy = world.value("decision_context", Json::object());
+    if (!contextPolicy.is_object()) {
+        throw std::runtime_error("decision_context must be an object in " + worldPath);
+    }
+    const auto readContextLimit = [&contextPolicy, &worldPath](const char* key, std::size_t fallback) {
+        if (!contextPolicy.contains(key)) return fallback;
+        const auto& value = contextPolicy.at(key);
+        if (!value.is_number_integer() || value.get<int>() <= 0 || value.get<int>() > 1024) {
+            throw std::runtime_error(std::string("decision_context.") + key +
+                                     " must be between 1 and 1024 in " + worldPath);
+        }
+        return static_cast<std::size_t>(value.get<int>());
+    };
+    pack.decisionContextPolicy.maxStimuli = readContextLimit("max_stimuli", pack.decisionContextPolicy.maxStimuli);
+    pack.decisionContextPolicy.maxMemories = readContextLimit("max_memories", pack.decisionContextPolicy.maxMemories);
+    pack.decisionContextPolicy.maxKnowledge = readContextLimit("max_knowledge", pack.decisionContextPolicy.maxKnowledge);
+    pack.decisionContextPolicy.maxExperiences =
+        readContextLimit("max_experiences", pack.decisionContextPolicy.maxExperiences);
+    pack.decisionContextPolicy.maxVisibleEntities =
+        readContextLimit("max_visible_entities", pack.decisionContextPolicy.maxVisibleEntities);
+    pack.decisionContextPolicy.maxVisibleLinks =
+        readContextLimit("max_visible_links", pack.decisionContextPolicy.maxVisibleLinks);
+    pack.decisionContextPolicy.maxRelationships =
+        readContextLimit("max_relationships", pack.decisionContextPolicy.maxRelationships);
     const auto deliberation = world.value("npc_deliberation", Json::object());
     if (!deliberation.is_object()) {
         throw std::runtime_error("npc_deliberation must be an object in " + worldPath);

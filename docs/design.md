@@ -285,6 +285,8 @@ Level 1 是主体行为演化：LLM 在现有 Runtime 能力内泛化 NPC 的经
 
 同一机制可以承载场景实验：例如“在周边小区开一个小店”“提高利率”“发布一个政策”。LLM 把自然语言转成 `ScenarioProposal`，Validator 检查实体、参数和已注册机制，Sandbox 从同一快照克隆并运行 baseline/scenario，Runtime 输出资源、库存、组织指标、需求、位置、关系、承诺、异常和两侧事件序列；LLM 只把这些已计算结果整理为假设、因果链、敏感参数和不确定性说明。缺少经济或社会机制时必须报告“无法评估”，不能用语言补造数值。当前 P2 已实现资源、组织指标和 NPC 需求三类有界 intervention，以及面向不必填用的 CLI；小店、利率和政策只有在对应事实模型落地后才能增加专用 intervention。
 
+`DecisionContext` 的窗口由内容包的 `decision_context` 配置约束：刺激按显著性保留前 N 条，记忆/知识/经验按时间保留最近 N 条，同地点实体和相邻连接按稳定顺序截断，关系按主体可见范围截断。截断只影响模型观察窗口，不删除事实、事件或 NPC 的长期认知；上下文预算应随 Intelligence Profile 校准，而不能通过扩大快照把所有世界状态塞给模型。
+
 Provider 使用一个共享模型槽位和串行队列；本地 llama.cpp 是产品入口的默认语义 Provider，服务失败时玩家对话和 NPC 自驱提案都明确失败且不提交事实。Runtime 可以继续推进时间、衰减和已批准的过程，但不会用确定性候选冒充 LLM 的主体决策。若 LLM 返回的计划结构通过 JSON Schema 却不满足 Runtime 的参数契约，在线同步请求和异步请求都最多获得一次结构化 validator feedback；资源不足、权限、拓扑、Revision 或过期错误不重复调用模型。Mock Provider 只由测试、沙箱重放和离线可重复回归显式注入；它不是产品默认行为。云 Provider 可用于调试或高质量表达，但不改变事实接口。API Key 不写入内容包、存档、日志、Prompt、崩溃报告或版本库。
 
 P0 的结构化 `IntentProposal` 是短输出任务；玩家对白拆成独立的 `utterance_understanding` 和 `player_dialogue` 两次结构化调用。前者需要理解自然语言和歧义，默认使用约 128 token 的 thinking；后者只根据已解析的通信意图和当前事实生成简短回答，默认关闭 thinking。自驱审议没有玩家给出的明确目标，需要依据内驱、外驱和结构约束进行短权衡，因此默认开启约 128 token 的 thinking。Provider 通过顶层 `reasoning_budget_tokens` 限制思考段预算；该预算不等于最终 JSON 的总输出预算。无论是否开启 thinking，Runtime 只解析最终 JSON，`reasoning_content` 永远不进入对白、记忆或世界事实。
