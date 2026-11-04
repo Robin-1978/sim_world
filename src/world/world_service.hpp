@@ -66,6 +66,14 @@ struct SimulationMetrics {
     std::int64_t simulatedMinutes{0};
 };
 
+enum class DurableCheckpointMode { Disabled, PeriodicMinutes, DayBoundary };
+
+struct DurableCheckpointPolicy {
+    DurableCheckpointMode mode{DurableCheckpointMode::Disabled};
+    std::string path;
+    std::int64_t intervalMinutes{0};
+};
+
 class WorldService {
 public:
     explicit WorldService(std::unique_ptr<IProvider> provider = nullptr,
@@ -170,6 +178,10 @@ public:
     void saveSnapshot(const std::string& path) const;
     void writeReplay(const std::string& path) const;
     void saveDurableCommit(const std::string& path) const;
+    // Automatic durable writes are opt-in. The policy observes committed
+    // scheduler boundaries and never runs while a WorldState transaction is
+    // open; Disabled is the default for tests and in-memory simulation.
+    void configureDurableCheckpoint(DurableCheckpointPolicy policy);
     static WorldService replay(const std::string& path,
                                std::string contentRoot = ContentPackLoader::defaultRoot(),
                                std::unique_ptr<IProvider> provider = nullptr);
@@ -195,6 +207,9 @@ private:
     std::vector<WorldEvent> replayBaselineEvents_;
     std::vector<std::tuple<std::string, std::string, std::string>> pendingDecisionTriggers_;
     SimulationMetrics simulationMetrics_;
+    DurableCheckpointPolicy durableCheckpointPolicy_;
+    std::int64_t nextDurableCheckpointMinute_{0};
+    std::uint64_t lastDurableCheckpointRevision_{0};
     void beginTransaction();
     void commitTransaction();
     void rollbackTransaction();
@@ -250,6 +265,7 @@ private:
     [[nodiscard]] int availableResourceValue(const std::string& resource) const;
     void setResource(const std::string& resource, int value);
     void processDayBoundary(int day, const std::set<std::string>& dueNpcIds);
+    void maybeSaveDurableCheckpoint();
     void reviseNpcStrategies(int day);
     void applyPromiseDeadline();
     void applyExchangeDeadlines();

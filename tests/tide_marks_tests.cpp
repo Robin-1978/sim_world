@@ -62,6 +62,7 @@ public:
     }
     void saveDurableCommit(const std::string& path, const Json& snapshot,
                            const std::vector<Json>& lines) const override {
+        ++durableCommitCount;
         durableCommitPath = path;
         durableCommitSnapshot = snapshot;
         durableCommitReplay = lines;
@@ -74,6 +75,7 @@ public:
     mutable std::string durableCommitPath;
     mutable Json durableCommitSnapshot;
     mutable std::vector<Json> durableCommitReplay;
+    mutable int durableCommitCount{0};
 };
 
 class DelayedProvider final : public IProvider {
@@ -1302,6 +1304,26 @@ void persistence_adapter_receives_committed_representations() {
                persistenceRaw->durableCommitSnapshot.at("world_revision") == service.state().revision &&
                persistenceRaw->durableCommitReplay.size() == 1,
            "WorldService can export a committed Snapshot and Replay as one durable checkpoint");
+}
+
+void durable_checkpoint_policy_is_boundary_driven_and_opt_in() {
+    auto persistence = std::make_unique<RecordingPersistence>();
+    auto* persistenceRaw = persistence.get();
+    auto service = WorldService(std::make_unique<MockProvider>(), std::move(persistence));
+    service.configureDurableCheckpoint(DurableCheckpointPolicy{
+        DurableCheckpointMode::PeriodicMinutes, "memory://automatic", 60});
+    service.advanceMinutes(30);
+    expect(persistenceRaw->durableCommitCount == 0,
+           "a periodic durable checkpoint does not write before its configured interval");
+    service.advanceMinutes(30);
+    expect(persistenceRaw->durableCommitCount == 1 &&
+               persistenceRaw->durableCommitPath == "memory://automatic" &&
+               persistenceRaw->durableCommitSnapshot.at("world_revision") == service.state().revision,
+           "a periodic durable checkpoint writes after a committed scheduler boundary");
+    service.configureDurableCheckpoint(DurableCheckpointPolicy{});
+    service.advanceMinutes(60);
+    expect(persistenceRaw->durableCommitCount == 1,
+           "disabling the policy stops automatic durable writes while simulation continues");
 }
 
 #ifdef TIDE_MARKS_HAS_SQLITE
@@ -2601,6 +2623,8 @@ int main() {
     run("snapshot_and_replay_are_deterministic", snapshot_and_replay_are_deterministic);
     run("persistence_adapter_receives_committed_representations",
         persistence_adapter_receives_committed_representations);
+    run("durable_checkpoint_policy_is_boundary_driven_and_opt_in",
+        durable_checkpoint_policy_is_boundary_driven_and_opt_in);
 #ifdef TIDE_MARKS_HAS_SQLITE
     run("sqlite_persistence_roundtrips_versioned_artifacts",
         sqlite_persistence_roundtrips_versioned_artifacts);

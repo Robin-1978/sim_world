@@ -415,6 +415,7 @@ void WorldService::advanceMinutes(std::int64_t minutes) {
         pendingDecisionTriggers_.clear();
         if (autonomousBoundary) processAutonomousTurns(dueNpcIds);
         pumpAsyncTurns();
+        maybeSaveDurableCheckpoint();
     }
     pumpAsyncTurns();
     syncNpcEntityState();
@@ -2705,6 +2706,44 @@ void WorldService::saveDurableCommit(const std::string& path) const {
                              {"state_digest", stateDigest(currentFact)}});
     }
     persistence_->saveDurableCommit(path, snapshotJson(), lines);
+}
+
+void WorldService::configureDurableCheckpoint(DurableCheckpointPolicy policy) {
+    if (policy.mode == DurableCheckpointMode::Disabled) {
+        durableCheckpointPolicy_ = std::move(policy);
+        nextDurableCheckpointMinute_ = 0;
+        return;
+    }
+    if (policy.path.empty()) throw std::invalid_argument("durable checkpoint policy requires a path");
+    if (policy.mode == DurableCheckpointMode::PeriodicMinutes && policy.intervalMinutes <= 0) {
+        throw std::invalid_argument("periodic durable checkpoint interval must be positive");
+    }
+    durableCheckpointPolicy_ = std::move(policy);
+    if (durableCheckpointPolicy_.mode == DurableCheckpointMode::PeriodicMinutes) {
+        nextDurableCheckpointMinute_ = state_.now.minute + durableCheckpointPolicy_.intervalMinutes;
+    } else {
+        nextDurableCheckpointMinute_ = 0;
+    }
+}
+
+void WorldService::maybeSaveDurableCheckpoint() {
+    if (durableCheckpointPolicy_.mode == DurableCheckpointMode::Disabled ||
+        durableCheckpointPolicy_.path.empty()) return;
+    bool due = false;
+    if (durableCheckpointPolicy_.mode == DurableCheckpointMode::PeriodicMinutes) {
+        due = state_.now.minute >= nextDurableCheckpointMinute_;
+    } else if (durableCheckpointPolicy_.mode == DurableCheckpointMode::DayBoundary) {
+        due = state_.now.minute > 0 && state_.now.minute % kMinutesPerDay == 0 &&
+              state_.revision != lastDurableCheckpointRevision_;
+    }
+    if (!due) return;
+    saveDurableCommit(durableCheckpointPolicy_.path);
+    lastDurableCheckpointRevision_ = state_.revision;
+    if (durableCheckpointPolicy_.mode == DurableCheckpointMode::PeriodicMinutes) {
+        do {
+            nextDurableCheckpointMinute_ += durableCheckpointPolicy_.intervalMinutes;
+        } while (nextDurableCheckpointMinute_ <= state_.now.minute);
+    }
 }
 
 WorldService WorldService::fromContentSnapshot(const WorldContentPack& content, const Json& json,

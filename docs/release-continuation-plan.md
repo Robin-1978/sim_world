@@ -41,7 +41,7 @@
 | Revision 与世界时钟 | 已完成本次修正 | `world_revision` 每个已提交根状态转换只增加一次；无事件的分钟推进会令旧异步提案失效；同事务事件共享 Revision；回滚不推进 Revision |
 | Activity 生命周期不变量 | 已完成本次修正 | `proposed` 只能是空槽；非空 Goal/Process 身份和阶段投影必须一致；Snapshot 遇到非法组合直接拒绝 |
 | 提交效果 Replay | 已完成最小闭环 | 显式生成 Replay Package 时保存基线、聚合 JSON Patch、事件范围、Revision 和状态摘要；`replay()` 实际应用 Patch、追加事件并验证最终 Snapshot，也能读取显式 durable checkpoint 中嵌入的 Replay；仍明确不是 Event Sourcing，逐领域事件 reducer 属于后续 |
-| Persistence Adapter | 显式 durable checkpoint 已完成，自动提交未完成 | `IWorldPersistence` 同时支持默认 `JsonFilePersistence` 与构建可选的 `SqlitePersistence`；`WorldService::saveDurableCommit` 以单个检查点保存 Snapshot、Replay、Revision、事件、幂等和 Overlay 投影并有读回回归，但每个内存事务自动 durable commit 仍按 ADR 作为后续阶段 |
+| Persistence Adapter | 显式 durable checkpoint 与 opt-in 周期/日边界策略已完成 | `IWorldPersistence` 同时支持默认 `JsonFilePersistence` 与构建可选的 `SqlitePersistence`；`WorldService::saveDurableCommit` 以单个检查点保存 Snapshot、Replay、Revision、事件、幂等和 Overlay 投影；`DurableCheckpointPolicy` 默认关闭，只在已提交调度边界写盘，每个内存事务自动 durable commit 仍不启用 |
 | WorldService 职责拆分 | 进行中：事务、事件、调度、异步协调器、只读决策投影、通用资源/社会系统和元动作执行器已抽出 | `TransactionManager`、`EventJournal`、`SimulationScheduler`、`IntelligenceCoordinator`、`DecisionContextProjector`、`ResourceSystem`、`SocialSystem`、`MetaActionExecutor` 已独立；执行器只使用注入的高层命令回调，不拥有事务或事实提交边界；下一步继续治理过程/合同协调，不做微服务 |
 | 事件驱动调度 | 已完成原型闭环 | `advanceMinutes` 选择下一个小时/日程、NPC 唤醒、过程完成、刺激到期或合同截止边界；安静分钟合并推进但保留逐分钟 Revision 语义，远场回归验证边界数显著低于模拟分钟数 |
 | ECS 定位 | 已冻结为投影模型 | `WorldState` 是事实权威，`EntityRegistry` 是当前已知类型的查询投影；自定义 Component 进入权威持久化前，不宣称支持通用动态 ECS |
