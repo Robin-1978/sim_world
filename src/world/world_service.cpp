@@ -10,12 +10,12 @@
 #include "world/stimulus_system.hpp"
 #include "world/entity_projection_system.hpp"
 #include "world/simulation_coordinator.hpp"
+#include "world/schedule_system.hpp"
 #include "world/resource_system.hpp"
 #include "world/social_system.hpp"
 #include "world/meta_action_executor.hpp"
 #include "world/world_state_json.hpp"
 #include "npc/drive_system.hpp"
-#include "npc/state_machine.hpp"
 #include "world/ids.hpp"
 #include "world/meta_actions.hpp"
 #include "provider/provider_profile.hpp"
@@ -37,13 +37,6 @@
 #include <thread>
 
 namespace tide_marks {
-
-namespace {
-void applyNpcSignal(NpcState& npc, NpcSignal signal) {
-    npc.mode = toString(transition(npcModeFromString(npc.mode), signal));
-}
-
-}
 
 WorldService::TransactionScope::TransactionScope(WorldService& service)
     : service_(service), uncaughtAtConstruction_(std::uncaught_exceptions()) {
@@ -208,67 +201,7 @@ void WorldService::advanceTo(GameTime target) {
 }
 
 void WorldService::processHourBoundary(int day, int hour, const std::set<std::string>& dueNpcIds) {
-    (void)day;
-    const int minuteOfDay = hour * static_cast<int>(kMinutesPerHour);
-    for (auto& [id, npc] : state_.npcs) {
-        if (!dueNpcIds.contains(id)) continue;
-        const auto* authored = authoredNpc(id);
-        if (authored != nullptr) {
-            const GameTime previous = npc.lastDriveTick.minute >= 0
-                                           ? npc.lastDriveTick
-                                           : GameTime{state_.now.minute - kMinutesPerHour};
-            const auto changes = DriveSystem::advance(npc, authored->needs, previous, state_.now);
-            Json changed = Json::array();
-            for (const auto& change : changes) {
-                changed.push_back(Json{{"need_id", change.needId}, {"before", change.before}, {"after", change.after}});
-                if (change.becameCritical) {
-                    addEvent("need.critical", id, change.needId, "A need crossed its critical threshold",
-                             Json{{"need_id", change.needId}, {"before", change.before},
-                                  {"deficit", change.after}, {"rule", "drive.time_decay"},
-                                  {"from_minute", previous.minute}, {"to_minute", state_.now.minute}});
-                }
-            }
-            if (!changed.empty()) {
-                addEvent("need.deprived", id, "self", "Need deficits advanced with world time",
-                         Json{{"changes", changed}, {"rule", "drive.time_decay"},
-                              {"from_minute", previous.minute}, {"to_minute", state_.now.minute}});
-            }
-            npc.lastDriveTick = state_.now;
-        }
-        const auto entity = state_.entities.find(npcEntityId(id));
-        if (entity != state_.entities.end() && entity->second.lifecycle != EntityLifecycle::Active) continue;
-        std::string scheduledLocation = authored != nullptr ? authored->definition.home : npc.location;
-        if (authored != nullptr) {
-            for (const auto& slot : authored->schedule) {
-                const bool within = slot.startMinute < slot.endMinute
-                                        ? minuteOfDay >= slot.startMinute && minuteOfDay < slot.endMinute
-                                        : (slot.startMinute == slot.endMinute || minuteOfDay >= slot.startMinute || minuteOfDay < slot.endMinute);
-                if (within) {
-                    scheduledLocation = slot.location;
-                    break;
-                }
-            }
-        }
-        const auto previousLocation = npc.location;
-        if (npc.location != scheduledLocation) {
-            ++npc.stateVersion;
-            addEvent("npc.schedule_applied", id, scheduledLocation,
-                     "The authored baseline schedule placed the NPC at its scheduled location",
-                     Json{{"from", previousLocation}, {"to", scheduledLocation},
-                          {"rule", "content.schedule"}, {"minute_of_day", minuteOfDay}});
-        }
-        npc.location = scheduledLocation;
-        npc.scheduleLabel = scheduledLocation;
-        if (!npc.activity.process || npc.activity.process->status != ProcessStatus::Running) {
-            const bool atHome = authored != nullptr && npc.location == authored->definition.home;
-            applyNpcSignal(npc, atHome ? NpcSignal::AtHome : NpcSignal::AtWork);
-        }
-    }
-    for (const auto& activity : content_.activities) {
-        if (activity.trigger != "hour" || activity.hour != hour) continue;
-        if (!activity.conditionResource.empty() && resourceValue(activity.conditionResource) >= activity.conditionBelow) continue;
-        processActivity(activity);
-    }
+    ScheduleSystem(*this).processHourBoundary(day, hour, dueNpcIds);
 }
 
 void WorldService::processActivity(const ActivityContent& activity) {
