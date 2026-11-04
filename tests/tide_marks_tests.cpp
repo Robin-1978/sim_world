@@ -2610,6 +2610,19 @@ void automatic_evolution_uses_async_llm_and_audits_sandbox() {
     expect(std::none_of(service.state().events.begin(), service.state().events.end(),
                         [](const auto& event) { return event.type == "evolution.overlay_activated"; }),
            "automatic evolution never self-approves or activates an overlay");
+
+    auto level2Provider = std::make_unique<EvolutionProposalProvider>();
+    auto* level2ProviderRaw = level2Provider.get();
+    content.evolutionPolicy.level1IntervalDays = 0;
+    content.evolutionPolicy.level2IntervalDays = 1;
+    auto level2Service = WorldService::fromContent(content, std::move(level2Provider));
+    level2Service.advanceMinutes(kMinutesPerDay - (level2Service.state().now.minute % kMinutesPerDay));
+    level2Service.waitForAsyncTurns(1000);
+    expect(level2ProviderRaw->observedLevel == "level2" &&
+               std::any_of(level2Service.state().events.begin(), level2Service.state().events.end(),
+                           [](const auto& event) { return event.type == "evolution.proposal_ready" &&
+                                                          event.target == "level2"; }),
+           "the same configured queue also drives Level 2 world-foundation proposals through the LLM");
 }
 
 void intelligence_profile_configures_decision_budgets() {
