@@ -71,6 +71,12 @@ public:
                                                        bool sandboxPassed);
     [[nodiscard]] static EvolutionProposal fromJson(const Json& value);
     [[nodiscard]] static Json toJson(const EvolutionProposal& proposal);
+    // Converts one provider payload into the governed proposal envelope. It
+    // does not validate, approve, sandbox, or mutate the world.
+    [[nodiscard]] static EvolutionProposal normalizeProviderProposal(const Json& value,
+                                                                       const WorldService& world,
+                                                                       const std::string& evolutionLevel,
+                                                                       const std::string& provider);
     // Calls the configured LLM explicitly. The returned proposal is still
     // Proposed and must pass validate -> sandbox -> independent approval.
     [[nodiscard]] static EvolutionProposalRequestResult propose(const WorldService& world,

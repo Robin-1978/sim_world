@@ -723,6 +723,42 @@ WorldContentPack ContentPackLoader::load(const std::string& rootPath) {
     if (pack.simulationPolicy.farTickMinutes < pack.simulationPolicy.nearTickMinutes) {
         throw std::runtime_error("simulation_policy.far_tick_minutes must not be smaller than near_tick_minutes");
     }
+    const auto evolutionPolicy = world.value("evolution_policy", Json::object());
+    if (!evolutionPolicy.is_object()) throw std::runtime_error("evolution_policy must be an object in " + worldPath);
+    if (evolutionPolicy.contains("enabled")) {
+        if (!evolutionPolicy.at("enabled").is_boolean()) {
+            throw std::runtime_error("evolution_policy.enabled must be boolean in " + worldPath);
+        }
+        pack.evolutionPolicy.enabled = evolutionPolicy.at("enabled").get<bool>();
+    }
+    const auto readEvolutionDays = [&evolutionPolicy, &worldPath](const char* key) {
+        if (!evolutionPolicy.contains(key)) return 0;
+        const auto& value = evolutionPolicy.at(key);
+        if (!value.is_number_integer() || value.get<int>() < 0 || value.get<int>() > 3650) {
+            throw std::runtime_error(std::string("evolution_policy.") + key +
+                                     " must be between 0 and 3650 in " + worldPath);
+        }
+        return value.get<int>();
+    };
+    pack.evolutionPolicy.level1IntervalDays = readEvolutionDays("level1_interval_days");
+    pack.evolutionPolicy.level2IntervalDays = readEvolutionDays("level2_interval_days");
+    if (evolutionPolicy.contains("max_proposal_age_minutes")) {
+        const auto& value = evolutionPolicy.at("max_proposal_age_minutes");
+        if (!value.is_number_integer() || value.get<int>() <= 0 || value.get<int>() > 525600) {
+            throw std::runtime_error("evolution_policy.max_proposal_age_minutes must be between 1 and 525600 in " + worldPath);
+        }
+        pack.evolutionPolicy.maxProposalAgeMinutes = value.get<int>();
+    }
+    if (evolutionPolicy.contains("coalesce_pending")) {
+        if (!evolutionPolicy.at("coalesce_pending").is_boolean()) {
+            throw std::runtime_error("evolution_policy.coalesce_pending must be boolean in " + worldPath);
+        }
+        pack.evolutionPolicy.coalescePending = evolutionPolicy.at("coalesce_pending").get<bool>();
+    }
+    if (!pack.evolutionPolicy.enabled) {
+        pack.evolutionPolicy.level1IntervalDays = 0;
+        pack.evolutionPolicy.level2IntervalDays = 0;
+    }
     if (!world.contains("conversation_policy") || !world.at("conversation_policy").is_object()) {
         throw std::runtime_error("world must define a conversation_policy: " + worldPath);
     }

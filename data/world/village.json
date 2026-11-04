@@ -28,6 +28,13 @@
     "max_decision_age_minutes": 60,
     "coalesce_pending": true
   },
+  "evolution_policy": {
+    "enabled": true,
+    "level1_interval_days": 1,
+    "level2_interval_days": 3,
+    "max_proposal_age_minutes": 180,
+    "coalesce_pending": true
+  },
   "promise_policy": {
     "renegotiation_extension_minutes": 1440,
     "broken": {

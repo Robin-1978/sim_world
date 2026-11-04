@@ -2589,6 +2589,29 @@ void llm_proposes_level_one_and_level_two_evolution() {
            "an LLM proposal still requires isolated sandbox execution before activation");
 }
 
+void automatic_evolution_uses_async_llm_and_audits_sandbox() {
+    auto provider = std::make_unique<EvolutionProposalProvider>();
+    auto* providerRaw = provider.get();
+    auto content = ContentPackLoader::load(ContentPackLoader::defaultRoot());
+    content.evolutionPolicy.enabled = true;
+    content.evolutionPolicy.level1IntervalDays = 1;
+    content.evolutionPolicy.level2IntervalDays = 0;
+    content.evolutionPolicy.maxProposalAgeMinutes = 180;
+    content.npcDeliberation.enabled = false;
+    auto service = WorldService::fromContent(content, std::move(provider));
+    const auto toBoundary = kMinutesPerDay - (service.state().now.minute % kMinutesPerDay);
+    service.advanceMinutes(toBoundary);
+    service.waitForAsyncTurns(1000);
+    expect(providerRaw->observedLevel == "level1",
+           "a configured day boundary enqueues a Level 1 request on the real provider queue");
+    expect(std::any_of(service.state().events.begin(), service.state().events.end(),
+                       [](const auto& event) { return event.type == "evolution.proposal_ready"; }),
+           "an asynchronous LLM evolution proposal is validated, sandboxed, and audited");
+    expect(std::none_of(service.state().events.begin(), service.state().events.end(),
+                        [](const auto& event) { return event.type == "evolution.overlay_activated"; }),
+           "automatic evolution never self-approves or activates an overlay");
+}
+
 void intelligence_profile_configures_decision_budgets() {
     const auto profile = loadIntelligenceProfile(defaultIntelligenceProfilePath());
     expect(profile.id == "village-qwen35-4b-v1", "village runs from an explicit intelligence profile");
@@ -2708,6 +2731,8 @@ int main() {
     run("overlay_stack_restores_and_rolls_back_in_order", overlay_stack_restores_and_rolls_back_in_order);
     run("llm_proposes_level_one_and_level_two_evolution",
         llm_proposes_level_one_and_level_two_evolution);
+    run("automatic_evolution_uses_async_llm_and_audits_sandbox",
+        automatic_evolution_uses_async_llm_and_audits_sandbox);
     run("intelligence_profile_configures_decision_budgets", intelligence_profile_configures_decision_budgets);
     if (failures != 0) {
         std::cerr << failures << " test assertion(s) failed\n";

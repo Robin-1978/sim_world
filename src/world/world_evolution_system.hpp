@@ -23,6 +23,11 @@ public:
                                                            const std::string& evolutionLevel,
                                                            const std::string& trigger,
                                                            const Json& validationFeedback);
+    [[nodiscard]] static Json proposalContext(const WorldService& world,
+                                              const std::string& evolutionLevel,
+                                              const std::string& trigger,
+                                              const Json& validationFeedback);
+    std::size_t pumpAsyncProposals();
     CommandResult activateOverlay(const EvolutionProposal& proposal,
                                   const EvolutionSandboxResult& sandbox);
     CommandResult rollbackOverlay(const std::string& proposalId);

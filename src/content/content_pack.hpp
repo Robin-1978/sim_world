@@ -83,6 +83,17 @@ struct SimulationPolicy {
     int farTickMinutes{15};
 };
 
+// Evolution is an infrequent, content-configured wakeup. It controls when
+// the Runtime may ask the real Provider for a Level 1/2 proposal; it never
+// grants approval or overlay activation authority.
+struct EvolutionPolicy {
+    bool enabled{false};
+    int level1IntervalDays{0};
+    int level2IntervalDays{0};
+    int maxProposalAgeMinutes{1440};
+    bool coalescePending{true};
+};
+
 // A decision channel is a content-defined interaction contract. It tells the
 // runtime how to project an input into the provider, how to record the result,
 // and which world-action default applies. The channel id is data; the runtime
@@ -265,6 +276,7 @@ struct WorldContentPack {
     StimulusPolicy stimulusPolicy;
     NpcDeliberationPolicy npcDeliberation;
     SimulationPolicy simulationPolicy;
+    EvolutionPolicy evolutionPolicy;
     ConversationPolicy conversationPolicy;
     std::map<std::string, DecisionChannelPolicy> decisionChannels;
     std::string conversationChannelId;

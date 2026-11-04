@@ -140,6 +140,7 @@ WorldService::WorldService(std::unique_ptr<IProvider> provider,
                            std::unique_ptr<IWorldPersistence> persistence)
     : provider_(provider ? std::move(provider) : makeDefaultRuntimeProvider()),
       intelligence_(std::make_unique<IntelligenceCoordinator>(*provider_)),
+      evolution_(std::make_unique<EvolutionQueue>(*provider_)),
       persistence_(persistence ? std::move(persistence) : std::make_unique<JsonFilePersistence>()) {}
 
 WorldService WorldService::load(std::string contentRoot, std::unique_ptr<IProvider> provider) {
@@ -703,16 +704,65 @@ void WorldService::enqueueAutonomousTurn(const std::string& npcId, const std::st
     WorldIntelligenceSystem(*this).enqueueAutonomousTurn(npcId, trigger, channelId);
 }
 
+void WorldService::scheduleAutomaticEvolution() {
+    // MockProvider is an explicit deterministic test adapter and has no
+    // evolution implementation. Do not enqueue failed mock work into a
+    // partitioned offline simulation; product providers remain fail-closed
+    // and are scheduled from the configured policy below.
+    if (!evolution_ || provider_->name() == "mock" || !content_.evolutionPolicy.enabled || state_.now.minute <= 0 ||
+        state_.now.minute % kMinutesPerDay != 0) {
+        return;
+    }
+    const int day = state_.now.day();
+    const auto schedule = [this, day](const std::string& level, int intervalDays) {
+        if (intervalDays <= 0 || day % intervalDays != 0) return;
+        const std::string key = "day:" + std::to_string(day) + ":" + level;
+        if (content_.evolutionPolicy.coalescePending && pendingEvolutionKeys_.contains(key)) return;
+        const std::string trigger = "day_boundary:" + std::to_string(day);
+        const auto context = WorldEvolutionSystem::proposalContext(*this, level, trigger, Json::object());
+        if (context.empty()) return;
+        EvolutionRequest request;
+        request.requestId = "evolution:auto:" + level + ":" + std::to_string(day) + ":" +
+                            std::to_string(state_.revision) + ":attempt:0";
+        request.key = key;
+        request.evolutionLevel = level;
+        request.trigger = trigger;
+        request.baseContentVersion = content_.contentVersion;
+        request.baseWorldRevision = state_.revision;
+        request.createdAt = state_.now;
+        request.deadline = GameTime{state_.now.minute + content_.evolutionPolicy.maxProposalAgeMinutes};
+        request.coalescePending = content_.evolutionPolicy.coalescePending;
+        request.context = context;
+        const auto submitted = evolution_->submit(std::move(request));
+        if (!submitted.accepted) return;
+        pendingEvolutionKeys_.insert(key);
+    };
+    schedule("level1", content_.evolutionPolicy.level1IntervalDays);
+    schedule("level2", content_.evolutionPolicy.level2IntervalDays);
+}
+
 std::size_t WorldService::pumpAsyncTurns() {
-    return WorldIntelligenceSystem(*this).pumpAsyncTurns();
+    return WorldIntelligenceSystem(*this).pumpAsyncTurns() +
+           WorldEvolutionSystem(*this).pumpAsyncProposals();
 }
 
 std::size_t WorldService::pendingAsyncTurns() const {
-    return WorldIntelligenceSystem::pendingAsyncTurns(*this);
+    return WorldIntelligenceSystem::pendingAsyncTurns(*this) +
+           (evolution_ ? evolution_->pending() : 0);
 }
 
 std::size_t WorldService::waitForAsyncTurns(std::int64_t timeoutMilliseconds) {
-    return WorldIntelligenceSystem(*this).waitForAsyncTurns(timeoutMilliseconds);
+    if (timeoutMilliseconds <= 0) return pumpAsyncTurns();
+    const auto deadline = std::chrono::steady_clock::now() +
+                          std::chrono::milliseconds(timeoutMilliseconds);
+    std::size_t consumed = 0;
+    while (pendingAsyncTurns() > 0 && std::chrono::steady_clock::now() < deadline) {
+        consumed += pumpAsyncTurns();
+        if (pendingAsyncTurns() == 0) break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    consumed += pumpAsyncTurns();
+    return consumed;
 }
 
 int WorldService::resourceValue(const std::string& resource) const {

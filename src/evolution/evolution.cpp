@@ -265,43 +265,13 @@ EvolutionProposalRequestResult EvolutionManager::propose(const WorldService& wor
                 result.message = "The provider returned a non-object evolution proposal.";
                 return result;
             }
-            Json normalized = response.evolutionProposal;
-        normalized["schema_version"] = 1;
-        static const std::set<std::string> proposalKinds{
-            "content", "knowledge", "strategy", "declarative_capability"};
-        // The tool schema calls the proposal category `proposal_kind` so it
-        // cannot be confused with create_entity_archetype.kind.  Accept an
-        // older provider payload as an adapter, but derive the category only
-        // from the registered operation when the payload is not a governed
-        // proposal kind; never treat an entity noun such as "facility" as a
-        // new governance category.
-        const auto operationKind = [&normalized]() {
-            if (!normalized.contains("operations") || !normalized.at("operations").is_array() ||
-                normalized.at("operations").empty() || !normalized.at("operations").at(0).is_object()) {
-                return std::string{};
-            }
-            return normalized.at("operations").at(0).value("operation", "");
-        }();
-        std::string proposalKind = normalized.value("proposal_kind", "");
-        if (!proposalKinds.contains(proposalKind)) proposalKind = normalized.value("kind", "");
-        if (!proposalKinds.contains(proposalKind)) {
-            proposalKind = (operationKind == "overlay_strategy" || operationKind == "overlay_schedule") ? "strategy"
-                          : operationKind == "register_behavior_recipe" ? "declarative_capability"
-                                                                          : "content";
-        }
-        normalized["kind"] = proposalKind;
-        normalized["id"] = normalized.value("id", "llm-evolution-" + std::to_string(world.state().revision));
-        normalized["source"] = "llm:" + result.provider;
-        normalized["base_content_version"] = world.content().contentVersion;
-        normalized["base_world_revision"] = world.state().revision;
-        normalized["status"] = "proposed";
-        normalized["evolution_level"] = evolutionLevel;
-            const auto proposal = EvolutionManager::fromJson(normalized);
+            const auto proposal = EvolutionManager::normalizeProviderProposal(
+                response.evolutionProposal, world, evolutionLevel, result.provider);
             const auto validation = EvolutionManager::validate(proposal, world.content(), world.state());
             if (!validation.valid) {
                 if (attempt == 0) {
                     feedback = Json{{"attempt", attempt + 1}, {"code", validation.code},
-                                    {"message", validation.message}, {"previous_proposal", normalized}};
+                                    {"message", validation.message}, {"previous_proposal", EvolutionManager::toJson(proposal)}};
                     continue;
                 }
                 result.code = validation.code;
@@ -329,6 +299,38 @@ EvolutionProposalRequestResult EvolutionManager::propose(const WorldService& wor
     result.code = "invalid_evolution_proposal";
     result.message = "The provider did not produce a valid proposal after bounded repair.";
     return result;
+}
+
+EvolutionProposal EvolutionManager::normalizeProviderProposal(const Json& value,
+                                                               const WorldService& world,
+                                                               const std::string& evolutionLevel,
+                                                               const std::string& provider) {
+    if (!value.is_object()) throw std::runtime_error("The provider returned a non-object evolution proposal.");
+    Json normalized = value;
+    normalized["schema_version"] = 1;
+    static const std::set<std::string> proposalKinds{
+        "content", "knowledge", "strategy", "declarative_capability"};
+    const auto operationKind = [&normalized]() {
+        if (!normalized.contains("operations") || !normalized.at("operations").is_array() ||
+            normalized.at("operations").empty() || !normalized.at("operations").at(0).is_object()) {
+            return std::string{};
+        }
+        return normalized.at("operations").at(0).value("operation", "");
+    }();
+    std::string proposalKind = normalized.value("proposal_kind", "");
+    if (!proposalKinds.contains(proposalKind)) proposalKind = normalized.value("kind", "");
+    if (!proposalKinds.contains(proposalKind)) {
+        proposalKind = (operationKind == "overlay_strategy" || operationKind == "overlay_schedule") ? "strategy"
+                      : operationKind == "register_behavior_recipe" ? "declarative_capability" : "content";
+    }
+    normalized["kind"] = proposalKind;
+    normalized["id"] = normalized.value("id", "llm-evolution-" + std::to_string(world.state().revision));
+    normalized["source"] = "llm:" + provider;
+    normalized["base_content_version"] = world.content().contentVersion;
+    normalized["base_world_revision"] = world.state().revision;
+    normalized["status"] = "proposed";
+    normalized["evolution_level"] = evolutionLevel;
+    return EvolutionManager::fromJson(normalized);
 }
 
 void EvolutionProposalStore::append(const std::string& path, const EvolutionProposal& proposal) {

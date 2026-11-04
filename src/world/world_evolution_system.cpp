@@ -87,18 +87,13 @@ Json stimulusEvidence(const NpcState& npc) {
 }
 }  // namespace
 
-ProviderResponse WorldEvolutionSystem::requestProposal(const WorldService& world,
-                                                       const std::string& evolutionLevel,
-                                                       const std::string& trigger,
-                                                       const Json& validationFeedback) {
-    // This path is read-only with respect to WorldState. Keeping the world
-    // reference const makes the proposal context unable to mutate facts;
-    // activation uses the non-const instance method below.
+Json WorldEvolutionSystem::proposalContext(const WorldService& world,
+                                                const std::string& evolutionLevel,
+                                                const std::string& trigger,
+                                                const Json& validationFeedback) {
     const auto& state = world.state_;
     const auto& content = world.content_;
-    if (evolutionLevel != "level1" && evolutionLevel != "level2") {
-        return ProviderResponse{false, {}, {}, "invalid_evolution_level", Json::object()};
-    }
+    if (evolutionLevel != "level1" && evolutionLevel != "level2") return Json::object();
     Json events = Json::array();
     const std::size_t first = state.events.size() > 32 ? state.events.size() - 32 : 0;
     for (std::size_t index = first; index < state.events.size(); ++index) {
@@ -158,14 +153,105 @@ ProviderResponse WorldEvolutionSystem::requestProposal(const WorldService& world
         (void)definition;
         contentSummary["registered_conditions"].push_back(id);
     }
-    const Json context{{"trigger", trigger}, {"evolution_level", evolutionLevel},
-                       {"base_content_version", content.contentVersion},
-                       {"base_world_revision", state.revision},
-                       {"world_time", state.now.minute}, {"resources", resources},
-                       {"npcs", npcs}, {"content", contentSummary},
-                       {"allowed_operations", allowedOperations}, {"evidence_events", events},
-                       {"validation_feedback", validationFeedback}};
+    return Json{{"trigger", trigger}, {"evolution_level", evolutionLevel},
+                {"base_content_version", content.contentVersion},
+                {"base_world_revision", state.revision},
+                {"world_time", state.now.minute}, {"resources", resources},
+                {"npcs", npcs}, {"content", contentSummary},
+                {"allowed_operations", allowedOperations}, {"evidence_events", events},
+                {"validation_feedback", validationFeedback}};
+}
+
+ProviderResponse WorldEvolutionSystem::requestProposal(const WorldService& world,
+                                                       const std::string& evolutionLevel,
+                                                       const std::string& trigger,
+                                                       const Json& validationFeedback) {
+    if (evolutionLevel != "level1" && evolutionLevel != "level2") {
+        return ProviderResponse{false, {}, {}, "invalid_evolution_level", Json::object()};
+    }
+    const auto context = proposalContext(world, evolutionLevel, trigger, validationFeedback);
     return world.provider_->proposeEvolution(context, evolutionLevel, validationFeedback);
+}
+
+std::size_t WorldEvolutionSystem::pumpAsyncProposals() {
+    if (!world_.evolution_) return 0;
+    const auto results = world_.evolution_->drain();
+    std::size_t consumed = 0;
+    for (auto& queued : results) {
+        ++consumed;
+        const auto finish = [this, &queued] {
+            world_.pendingEvolutionKeys_.erase(queued.request.key);
+        };
+        const auto audit = [this, &queued](const std::string& type, const std::string& detail,
+                                           Json data) {
+            WorldService::TransactionScope transaction(world_);
+            data["request_id"] = queued.request.requestId;
+            data["evolution_level"] = queued.request.evolutionLevel;
+            data["trigger"] = queued.request.trigger;
+            data["base_content_version"] = queued.request.baseContentVersion;
+            data["base_world_revision"] = queued.request.baseWorldRevision;
+            data["attempt"] = queued.request.attempt;
+            data["provider"] = queued.provider;
+            world_.addEvent(type, kWorldActor, queued.request.evolutionLevel, detail, std::move(data));
+        };
+        const bool expired = world_.state_.now.minute > queued.request.deadline.minute ||
+                             world_.state_.revision != queued.request.baseWorldRevision ||
+                             world_.content_.contentVersion != queued.request.baseContentVersion;
+        if (expired) {
+            audit("evolution.proposal_expired", "An automatic evolution proposal arrived after its captured context expired",
+                  Json{{"current_world_revision", world_.state_.revision},
+                       {"current_content_version", world_.content_.contentVersion},
+                       {"current_minute", world_.state_.now.minute}});
+            finish();
+            continue;
+        }
+        if (!queued.response.ok) {
+            audit("evolution.proposal_failed", "The configured LLM did not return an evolution proposal",
+                  Json{{"error", queued.response.error.empty() ? "provider_unavailable" : queued.response.error}});
+            finish();
+            continue;
+        }
+        try {
+            const auto proposal = EvolutionManager::normalizeProviderProposal(
+                queued.response.evolutionProposal, world_, queued.request.evolutionLevel, queued.provider);
+            const auto validation = EvolutionManager::validate(proposal, world_.content_, world_.state_);
+            if (!validation.valid) {
+                if (queued.request.attempt < 2 && queued.provider == "llama.cpp") {
+                    const Json feedback{{"attempt", queued.request.attempt + 1}, {"code", validation.code},
+                                        {"message", validation.message},
+                                        {"previous_proposal", EvolutionManager::toJson(proposal)}};
+                    auto repair = queued.request;
+                    ++repair.attempt;
+                    repair.requestId += ":repair:" + std::to_string(repair.attempt);
+                    repair.validationFeedback = feedback;
+                    repair.context["validation_feedback"] = feedback;
+                    if (world_.evolution_->submit(std::move(repair)).accepted) continue;
+                }
+                audit("evolution.proposal_rejected", "The Runtime rejected an automatic evolution proposal",
+                      Json{{"code", validation.code}, {"message", validation.message},
+                           {"proposal", EvolutionManager::toJson(proposal)}});
+                finish();
+                continue;
+            }
+            const auto sandbox = EvolutionManager::sandbox(proposal, world_);
+            Json sandboxJson{{"passed", sandbox.passed}, {"code", sandbox.code},
+                             {"message", sandbox.message}, {"proposal_id", sandbox.proposalId},
+                             {"overlay_version", sandbox.overlayVersion},
+                             {"base_content_version", sandbox.baseContentVersion},
+                             {"base_revision", sandbox.baseRevision}, {"final_revision", sandbox.finalRevision},
+                             {"metrics", sandbox.metrics}, {"event_diff", sandbox.eventDiff}};
+            audit(sandbox.passed ? "evolution.proposal_ready" : "evolution.proposal_rejected",
+                  sandbox.passed ? "A validated automatic evolution proposal passed its deterministic sandbox"
+                                 : "An automatic evolution proposal failed its deterministic sandbox",
+                  Json{{"proposal", EvolutionManager::toJson(proposal)}, {"sandbox", sandboxJson}});
+            finish();
+        } catch (const std::exception& error) {
+            audit("evolution.proposal_rejected", "The Runtime could not parse or sandbox an automatic evolution proposal",
+                  Json{{"error", error.what()}});
+            finish();
+        }
+    }
+    return consumed;
 }
 
 CommandResult WorldEvolutionSystem::activateOverlay(const EvolutionProposal& proposal,

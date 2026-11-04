@@ -760,6 +760,17 @@
       },
       "additionalProperties": false
     },
+    "evolution_policy": {
+      "type": "object",
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "level1_interval_days": {"type": "integer", "minimum": 0, "maximum": 3650},
+        "level2_interval_days": {"type": "integer", "minimum": 0, "maximum": 3650},
+        "max_proposal_age_minutes": {"type": "integer", "minimum": 1, "maximum": 525600},
+        "coalesce_pending": {"type": "boolean"}
+      },
+      "additionalProperties": false
+    },
     "anomaly_rules": {
       "type": "array",
       "items": {

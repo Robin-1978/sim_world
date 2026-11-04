@@ -82,6 +82,7 @@ void SimulationCoordinator::advanceMinutes(std::int64_t minutes) {
             world_.enqueueAutonomousTurn(npcId, trigger, channelId);
         }
         world_.pendingDecisionTriggers_.clear();
+        world_.scheduleAutomaticEvolution();
         if (autonomousBoundary) world_.processAutonomousTurns(dueNpcIds);
         world_.pumpAsyncTurns();
         world_.maybeSaveDurableCheckpoint();

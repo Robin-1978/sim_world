@@ -87,6 +87,7 @@ add_library(tide_marks_core
     src/provider/decision_context_projector.cpp
     src/provider/intelligence_coordinator.cpp
     src/provider/turn_queue.cpp
+    src/provider/evolution_queue.cpp
     src/world/meta_actions.cpp
     src/world/meta_action_executor.cpp
     src/world/resource_system.cpp
