@@ -350,8 +350,16 @@ void exchange_contracts_are_durable_and_atomic() {
     const auto proposed = service.proposeExchange("sable", "rhea", {{"energy", 1}},
                                                  {{"coolant", 1}}, 30, "sable", "contract-propose");
     expect(proposed.accepted, "a configured exchange proposal is recorded");
+    const auto proposerCannotAccept = service.decideExchange(
+        proposed.message, ExchangeContractStatus::Accepted, "sable", "contract-proposer-accept");
+    expect(!proposerCannotAccept.accepted && proposerCannotAccept.code == "counterparty_required",
+           "the proposer cannot accept its own offer");
+    const auto strangerCannotAccept = service.decideExchange(
+        proposed.message, ExchangeContractStatus::Accepted, "outsider", "contract-stranger-accept");
+    expect(!strangerCannotAccept.accepted && strangerCannotAccept.code == "unauthorized",
+           "a non-party cannot decide an exchange");
     const auto accepted = service.decideExchange(proposed.message, ExchangeContractStatus::Accepted,
-                                                 "rhea", "contract-accept");
+                                                 "npc:rhea", "contract-accept");
     expect(accepted.accepted && service.state().exchangeContracts.at(proposed.message).status ==
                ExchangeContractStatus::Accepted,
            "the counterparty can accept a live exchange");
@@ -387,10 +395,65 @@ void exchange_contracts_are_durable_and_atomic() {
                insufficient.state().exchangeContracts.at(impossible.message).status ==
                    ExchangeContractStatus::Accepted,
            "failed settlement preserves both inventories and the accepted contract");
+    expect(std::any_of(insufficient.state().events.begin(), insufficient.state().events.end(),
+                       [&impossible](const auto& event) {
+                           return event.type == "exchange.settlement_rejected" &&
+                                  event.target == impossible.message &&
+                                  event.data.value("code", "") == "insufficient_resource";
+                       }),
+           "a failed settlement records its reason without moving resources");
+
+    auto secondSideFailure = WorldService::load(TIDE_MARKS_TEST_DATA_DIR "/port-pack",
+                                                std::make_unique<MockProvider>());
+    const auto secondSideProposal = secondSideFailure.proposeExchange(
+        "sable", "rhea", {{"energy", 1}}, {{"coolant", 99}}, 30, "sable", "contract-second-bad");
+    expect(secondSideFailure.decideExchange(secondSideProposal.message,
+                                            ExchangeContractStatus::Accepted, "rhea",
+                                            "contract-second-bad-accept").accepted,
+           "the second-side failure fixture starts from an accepted contract");
+    const auto secondSideRejected = secondSideFailure.settleExchange(
+        secondSideProposal.message, "rhea", "contract-second-bad-settle");
+    expect(!secondSideRejected.accepted && secondSideRejected.code == "insufficient_resource" &&
+               secondSideFailure.state().inventories.at("npc:sable").at("energy") == 3 &&
+               secondSideFailure.state().inventories.at("npc:rhea").at("coolant") == 2,
+           "failure after the first staged transfer rolls both sides back");
+
     insufficient.advanceMinutes(30);
     expect(insufficient.state().exchangeContracts.at(impossible.message).status ==
                ExchangeContractStatus::Expired,
            "unsettled contracts expire at their authored deadline");
+    expect(std::any_of(insufficient.state().events.begin(), insufficient.state().events.end(),
+                       [&impossible](const auto& event) {
+                           return event.type == "exchange.expired" &&
+                                  event.target == impossible.message &&
+                                  event.data.value("proposer", "") == "sable" &&
+                                  event.data.value("counterparty", "") == "rhea";
+                       }),
+           "expiry identifies the contract while retaining both parties as evidence");
+    const auto lateAcceptance = insufficient.decideExchange(
+        impossible.message, ExchangeContractStatus::Accepted, "rhea", "contract-late-accept");
+    expect(!lateAcceptance.accepted && lateAcceptance.code == "exchange_expired",
+           "an expired contract cannot be revived");
+
+    auto inactive = WorldService::load(TIDE_MARKS_TEST_DATA_DIR "/port-pack",
+                                       std::make_unique<MockProvider>());
+    const auto inactiveProposal = inactive.proposeExchange(
+        "sable", "rhea", {{"energy", 1}}, {{"coolant", 1}}, 30, "sable", "contract-inactive");
+    expect(inactive.decideExchange(inactiveProposal.message, ExchangeContractStatus::Accepted,
+                                   "rhea", "contract-inactive-accept").accepted,
+           "the inactive-party fixture starts from an accepted contract");
+    expect(inactive.setEntityLifecycle(npcEntityId("rhea"), EntityLifecycle::Dormant,
+                                       "contract-dormant-rhea").accepted,
+           "an exchange party can become dormant after acceptance");
+    const auto inactiveSettlement = inactive.settleExchange(
+        inactiveProposal.message, "sable", "contract-inactive-settle");
+    expect(!inactiveSettlement.accepted && inactiveSettlement.code == "inactive_exchange_party",
+           "settlement revalidates both parties at commit time");
+    const auto inactiveCancellation = inactive.decideExchange(
+        inactiveProposal.message, ExchangeContractStatus::Cancelled, "rhea",
+        "contract-inactive-cancel");
+    expect(!inactiveCancellation.accepted && inactiveCancellation.code == "inactive_exchange_party",
+           "an inactive party cannot mutate a contract after losing lifecycle authority");
 }
 
 void autonomous_deliberation_is_triggered_not_per_tick() {

@@ -39,6 +39,7 @@ void printHelp(const WorldService& service) {
               << "  exchange <from> <to> <minutes> <offered-json> <requested-json>\n"
               << "  exchange-accept|exchange-reject|exchange-cancel <id> <actor>\n"
               << "  exchange-settle <id> <actor>\n"
+              << "  contracts [count]            show exchange contracts (default 12)\n"
               << "  save <path>                  write a JSON snapshot\n"
               << "  replay <path>                write a JSONL replay\n"
               << "  help                         show this help\n"
@@ -47,6 +48,13 @@ void printHelp(const WorldService& service) {
 
 void printLook(const WorldService& service) {
     std::cout << summarize(service.state()) << "\n";
+    for (const auto& [id, contract] : service.state().exchangeContracts) {
+        if (contract.status != ExchangeContractStatus::Proposed &&
+            contract.status != ExchangeContractStatus::Accepted) continue;
+        std::cout << "  exchange " << id << " status=" << toString(contract.status) << " "
+                  << contract.proposer << " -> " << contract.counterparty
+                  << " due=" << contract.due.toString() << "\n";
+    }
     for (const auto& [id, npc] : service.state().npcs) {
         std::cout << "  " << id << " mode=" << npc.mode << " goal_stage=" << npc.goalStage
                   << " memory=" << npc.memories.size() << " promises=" << npc.openPromises.size() << "\n";
@@ -68,6 +76,25 @@ void printLook(const WorldService& service) {
             std::cout << "    constraint " << constraint.category << ":" << constraint.id
                       << " - " << constraint.reason << "\n";
         }
+    }
+}
+
+void printContracts(const WorldService& service, std::size_t count) {
+    const auto& contracts = service.state().exchangeContracts;
+    const std::size_t start = contracts.size() > count ? contracts.size() - count : 0;
+    std::size_t index = 0;
+    for (const auto& [id, contract] : contracts) {
+        if (index++ < start) continue;
+        Json offered = Json::object();
+        for (const auto& [resource, amount] : contract.offered) offered[resource] = amount;
+        Json requested = Json::object();
+        for (const auto& [resource, amount] : contract.requested) requested[resource] = amount;
+        std::cout << "  " << id << " status=" << toString(contract.status) << " "
+                  << contract.proposer << " -> " << contract.counterparty
+                  << " due=" << contract.due.toString() << " offered=" << offered.dump()
+                  << " requested=" << requested.dump() << " version=" << contract.version;
+        if (!contract.reason.empty()) std::cout << " reason=" << contract.reason;
+        std::cout << "\n";
     }
 }
 
@@ -156,6 +183,11 @@ bool execute(WorldService& service, const std::string& line) {
         input >> count;
         if (!input) count = 12;
         printEvents(service, count);
+    } else if (command == "contracts") {
+        std::size_t count = 12;
+        input >> count;
+        if (!input) count = 12;
+        printContracts(service, count);
     } else if (command == "promise") {
         std::string from;
         std::string to;

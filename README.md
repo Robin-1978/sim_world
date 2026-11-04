@@ -32,7 +32,7 @@ For core gameplay without graphics, use the terminal client:
 ./build/tide_marks_text
 ```
 
-Try `look`, `map`, `entities`, `talk mira ration please`, `day`, `events`, `save /tmp/village.json`, and `quit`. The text console also exposes the lifecycle path with `entity-create <id> <archetype>`, `entity-dormant <id>`, `entity-activate <id>`, and `entity-destroy <id>`. Exchange contracts can be exercised with `exchange <from> <to> <minutes> <offered-json> <requested-json>`, followed by `exchange-accept <id> <actor>` and `exchange-settle <id> <actor>`; terms move only at settlement. Scripted sessions are also supported:
+Try `look`, `map`, `entities`, `talk mira ration please`, `day`, `events`, `save /tmp/village.json`, and `quit`. The text console also exposes the lifecycle path with `entity-create <id> <archetype>`, `entity-dormant <id>`, `entity-activate <id>`, and `entity-destroy <id>`. Exchange contracts can be exercised with `exchange <from> <to> <minutes> <offered-json> <requested-json>`, followed by `exchange-accept <id> <actor>` and `exchange-settle <id> <actor>`; terms move only at settlement. Use `look` for live contract state or `contracts [count]` for the full term and lifecycle record. Scripted sessions are also supported:
 
 ```bash
 ./build/tide_marks_text --script docs/examples/village-session.txt

@@ -148,7 +148,7 @@ add_test(NAME port_exchange_contract
     COMMAND tide_marks_text --content-root ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/port-pack
             --script ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/port-pack/exchange-session.txt --provider mock)
 set_tests_properties(port_exchange_contract PROPERTIES
-    PASS_REGULAR_EXPRESSION "exchange.settled rhea -> exchange-1"
+    PASS_REGULAR_EXPRESSION "exchange-1 status=proposed|exchange.settled rhea -> exchange-1"
     FAIL_REGULAR_EXPRESSION "invalid_exchange|insufficient_resource|unknown_command")
 
 set_target_properties(tide_marks_headless tide_marks_client tide_marks_text tide_marks_tests

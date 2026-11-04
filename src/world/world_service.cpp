@@ -41,6 +41,23 @@ Json quantityMapJson(const std::map<std::string, int>& quantities) {
     return result;
 }
 
+std::string canonicalActorId(const WorldState& state, const std::string& value) {
+    if (value == kWorldActor || value == kPlayerId) return value;
+    if (state.npcs.contains(value)) return value;
+    if (value.starts_with("npc:")) {
+        const auto npcId = value.substr(4);
+        if (state.npcs.contains(npcId)) return npcId;
+    }
+    return {};
+}
+
+bool actorIsActive(const WorldState& state, const std::string& actorId) {
+    if (actorId == kWorldActor) return true;
+    const auto entityId = actorId == kPlayerId ? actorId : npcEntityId(actorId);
+    const auto entity = state.entities.find(entityId);
+    return entity != state.entities.end() && entity->second.lifecycle == EntityLifecycle::Active;
+}
+
 WorldState transactionalBackup(const WorldState& state, std::size_t& eventCount) {
     eventCount = state.events.size();
     // Build the rollback image field-by-field so the immutable event history
@@ -941,7 +958,7 @@ void WorldService::applyExchangeDeadlines() {
         contract.status = ExchangeContractStatus::Expired;
         ++contract.version;
         contract.reason = "deadline_reached";
-        addEvent("exchange.expired", kWorldActor, contract.counterparty,
+        addEvent("exchange.expired", kWorldActor, id,
                  "An exchange contract reached its deadline before settlement",
                  Json{{"contract_id", id}, {"proposer", contract.proposer},
                       {"counterparty", contract.counterparty}, {"due", contract.due.minute}});
@@ -958,30 +975,16 @@ CommandResult WorldService::proposeExchange(const std::string& proposer,
     if (!turnId.empty() && state_.processedTurnIds.contains(turnId)) {
         return reject("duplicate_turn", "The exchange proposal was already applied.");
     }
-    const auto canonicalActor = [this](const std::string& value) {
-        if (value == kWorldActor || value == kPlayerId || state_.npcs.contains(value)) return value;
-        if (value.starts_with("npc:")) {
-            const auto npcId = value.substr(4);
-            if (state_.npcs.contains(npcId)) return npcId;
-        }
-        return std::string{};
-    };
-    const auto proposerId = canonicalActor(proposer);
-    const auto counterpartyId = canonicalActor(counterparty);
-    const auto actorId = canonicalActor(actor);
+    const auto proposerId = canonicalActorId(state_, proposer);
+    const auto counterpartyId = canonicalActorId(state_, counterparty);
+    const auto actorId = canonicalActorId(state_, actor);
     if (proposerId.empty() || counterpartyId.empty() || proposerId == counterpartyId) {
         return reject("unknown_exchange_party", "An exchange needs two distinct active parties.");
     }
     if (actorId != kWorldActor && actorId != proposerId) {
         return reject("unauthorized", "Only the proposer or world authority may create this exchange.");
     }
-    const auto activeParty = [this](const std::string& id) {
-        if (id == kWorldActor) return true;
-        const auto entityId = id == kPlayerId ? id : npcEntityId(id);
-        const auto entity = state_.entities.find(entityId);
-        return entity != state_.entities.end() && entity->second.lifecycle == EntityLifecycle::Active;
-    };
-    if (!activeParty(proposerId) || !activeParty(counterpartyId)) {
+    if (!actorIsActive(state_, proposerId) || !actorIsActive(state_, counterpartyId)) {
         return reject("inactive_exchange_party", "Both exchange parties must be active.");
     }
     if (dueInMinutes <= 0) {
@@ -1026,10 +1029,13 @@ CommandResult WorldService::decideExchange(const std::string& contractId,
     const auto found = state_.exchangeContracts.find(contractId);
     if (found == state_.exchangeContracts.end()) return reject("unknown_exchange", "That exchange does not exist.");
     auto& contract = found->second;
+    const auto proposer = contract.proposer;
+    const auto counterparty = contract.counterparty;
     if (state_.now.minute >= contract.due.minute || contract.status == ExchangeContractStatus::Expired) {
         return reject("exchange_expired", "The exchange deadline has passed.");
     }
-    const auto actorId = actor.starts_with("npc:") ? actor.substr(4) : actor;
+    const auto actorId = canonicalActorId(state_, actor);
+    if (actorId.empty()) return reject("unauthorized", "The actor is not a party to this exchange.");
     const bool authority = actorId == kWorldActor;
     const bool isProposer = actorId == contract.proposer;
     const bool isCounterparty = actorId == contract.counterparty;
@@ -1039,6 +1045,14 @@ CommandResult WorldService::decideExchange(const std::string& contractId,
     if ((decision == ExchangeContractStatus::Accepted || decision == ExchangeContractStatus::Rejected) &&
         !authority && !isCounterparty) {
         return reject("counterparty_required", "Only the counterparty may accept or reject an exchange.");
+    }
+    if ((decision == ExchangeContractStatus::Accepted || decision == ExchangeContractStatus::Rejected) &&
+        (!actorIsActive(state_, contract.proposer) || !actorIsActive(state_, contract.counterparty))) {
+        return reject("inactive_exchange_party", "Both exchange parties must be active to decide a proposal.");
+    }
+    if (decision == ExchangeContractStatus::Cancelled && !authority &&
+        !actorIsActive(state_, actorId)) {
+        return reject("inactive_exchange_party", "An inactive exchange party cannot cancel a contract.");
     }
     if (decision == ExchangeContractStatus::Cancelled && !authority &&
         contract.status != ExchangeContractStatus::Proposed &&
@@ -1078,27 +1092,43 @@ CommandResult WorldService::settleExchange(const std::string& contractId,
     const auto found = state_.exchangeContracts.find(contractId);
     if (found == state_.exchangeContracts.end()) return reject("unknown_exchange", "That exchange does not exist.");
     auto& contract = found->second;
+    const auto proposer = contract.proposer;
+    const auto counterparty = contract.counterparty;
     if (contract.status != ExchangeContractStatus::Accepted) {
         return reject("invalid_exchange_transition", "Only an accepted exchange can settle.");
     }
     if (state_.now.minute >= contract.due.minute) {
         return reject("exchange_expired", "The exchange deadline has passed.");
     }
-    const auto actorId = actor.starts_with("npc:") ? actor.substr(4) : actor;
+    const auto actorId = canonicalActorId(state_, actor);
+    if (actorId.empty()) return reject("unauthorized", "The actor is not a party to this exchange.");
     if (actorId != kWorldActor && actorId != contract.proposer && actorId != contract.counterparty) {
         return reject("unauthorized", "The actor is not a party to this exchange.");
     }
+    if (!actorIsActive(state_, proposer) || !actorIsActive(state_, counterparty)) {
+        return reject("inactive_exchange_party", "Both exchange parties must be active to settle.");
+    }
     for (const auto& [resource, amount] : contract.offered) {
-        const auto transfer = transferResource(contract.proposer, contract.counterparty, resource, amount, actorId);
+        const auto transfer = transferResource(proposer, counterparty, resource, amount, actorId);
         if (!transfer.accepted) {
             transaction.rollback();
+            addEvent("exchange.settlement_rejected", actorId, contractId,
+                     "An accepted exchange could not deliver both sides",
+                     Json{{"contract_id", contractId}, {"code", transfer.code},
+                          {"message", transfer.message}, {"proposer", proposer},
+                          {"counterparty", counterparty}});
             return reject(transfer.code, transfer.message);
         }
     }
     for (const auto& [resource, amount] : contract.requested) {
-        const auto transfer = transferResource(contract.counterparty, contract.proposer, resource, amount, actorId);
+        const auto transfer = transferResource(counterparty, proposer, resource, amount, actorId);
         if (!transfer.accepted) {
             transaction.rollback();
+            addEvent("exchange.settlement_rejected", actorId, contractId,
+                     "An accepted exchange could not deliver both sides",
+                     Json{{"contract_id", contractId}, {"code", transfer.code},
+                          {"message", transfer.message}, {"proposer", proposer},
+                          {"counterparty", counterparty}});
             return reject(transfer.code, transfer.message);
         }
     }
