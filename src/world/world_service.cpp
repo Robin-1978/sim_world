@@ -2795,13 +2795,37 @@ WorldService WorldService::replay(const std::string& path, std::string contentRo
                                   std::unique_ptr<IProvider> provider) {
     std::ifstream input(path);
     if (!input) throw std::runtime_error("cannot read replay: " + path);
-    std::string line;
+    std::vector<Json> documents;
+    std::ostringstream whole;
+    whole << input.rdbuf();
+    const auto bytes = whole.str();
+    if (!bytes.empty()) {
+        try {
+            const auto artifact = Json::parse(bytes);
+            if (artifact.is_object() && artifact.value("kind", "") == "durable_commit") {
+                if (!artifact.contains("replay") || !artifact.at("replay").is_array()) {
+                    throw std::runtime_error("durable commit has no replay package");
+                }
+                for (const auto& item : artifact.at("replay")) documents.push_back(item);
+            }
+        } catch (const nlohmann::json::parse_error&) {
+            // A normal Replay Package is JSONL, so parsing the complete file
+            // as one JSON document is expected to fail. Parse its records
+            // below instead.
+        }
+    }
+    if (documents.empty()) {
+        std::istringstream lines(bytes);
+        std::string line;
+        while (std::getline(lines, line)) {
+            if (line.empty()) continue;
+            documents.push_back(Json::parse(line));
+        }
+    }
     Json current;
     std::size_t expectedTransactions = 0;
     std::size_t appliedTransactions = 0;
-    while (std::getline(input, line)) {
-        if (line.empty()) continue;
-        const auto json = Json::parse(line);
+    for (const auto& json : documents) {
         const auto kind = json.value("kind", "");
         if (kind == "replay_header") {
             if (json.value("schema_version", 0) != 2 || !json.contains("state")) {

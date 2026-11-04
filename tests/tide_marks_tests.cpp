@@ -1179,9 +1179,11 @@ void snapshot_and_replay_are_deterministic() {
     service.advanceMinutes(2 * kMinutesPerDay);
     const auto path = std::filesystem::temp_directory_path() / "tide_marks_test_replay.jsonl";
     const auto snapshotPath = std::filesystem::temp_directory_path() / "tide_marks_test_snapshot.json";
+    const auto durablePath = std::filesystem::temp_directory_path() / "tide_marks_test_durable.json";
     service.writeReplay(path.string());
     service.saveSnapshot(snapshotPath.string());
     service.saveSnapshot(snapshotPath.string());
+    service.saveDurableCommit(durablePath.string());
     expect(std::filesystem::exists(path) && std::filesystem::exists(snapshotPath) &&
                !std::filesystem::exists(path.string() + ".tmp") &&
                !std::filesystem::exists(snapshotPath.string() + ".tmp"),
@@ -1259,6 +1261,9 @@ void snapshot_and_replay_are_deterministic() {
     const auto replayed = WorldService::replay(path.string());
     expect(service.snapshotJson() == replayed.snapshotJson(),
            "replay applies the commit patch and event range to reconstruct the exact final state");
+    const auto durableReplayed = WorldService::replay(durablePath.string());
+    expect(service.snapshotJson() == durableReplayed.snapshotJson(),
+           "replay also accepts the explicit durable checkpoint artifact");
     replayLines.at(1)["state_digest"] = "fnv1a64:tampered";
     const auto tamperedPath = std::filesystem::temp_directory_path() / "tide_marks_test_replay_tampered.jsonl";
     {
@@ -1273,6 +1278,7 @@ void snapshot_and_replay_are_deterministic() {
     }
     expect(tamperedReplayRejected, "replay rejects a commit frame whose reconstructed state digest changed");
     std::filesystem::remove(path);
+    std::filesystem::remove(durablePath);
     std::filesystem::remove(tamperedPath);
     std::filesystem::remove(snapshotPath);
     const auto restored = WorldService::fromSnapshot(service.snapshotJson());
