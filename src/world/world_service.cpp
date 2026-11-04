@@ -1981,6 +1981,9 @@ TurnRequest WorldService::makeTurnRequest(const std::string& npcId, const std::s
     request.context.trigger = trigger;
     request.context.promptVersion =
         "tide-marks-intent-v2:" + content_.contentVersion + ":" + content_.id;
+    request.context.runtimeMetadata["channel_id"] = channelId;
+    request.context.runtimeMetadata["trigger"] = trigger;
+    request.context.runtimeMetadata["prompt_version"] = request.context.promptVersion;
     request.promptVersion = request.context.promptVersion;
     request.coalescePending = !channel->second.conversation &&
                               content_.npcDeliberation.coalescePending;

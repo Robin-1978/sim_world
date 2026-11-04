@@ -96,6 +96,10 @@ struct DecisionContext {
     // trigger.  The Runtime always includes time/revision metadata, while
     // world facts are limited to what the actor can observe or already knows.
     Json worldSnapshot = Json::object();
+    // Runtime identity and version metadata is an audit envelope, not a
+    // world fact. Providers may echo it in diagnostics, but prompts must not
+    // use it to infer locations, resources, motives, or actions.
+    Json runtimeMetadata = Json::object();
     Json selfState = Json::object();
     Json planCatalog = Json::array();
     Json currentActivity = Json{{"status", "idle"}};

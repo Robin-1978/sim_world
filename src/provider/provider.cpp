@@ -281,6 +281,7 @@ ProviderResponse LlamaCppProvider::decide(const DecisionContext& context, const 
     }
 
     const Json userContent{{"npc_id", context.npcId}, {"time", context.now.toString()},
+                           {"runtime_metadata", context.runtimeMetadata},
                            {"decision_channel", context.channel}, {"decision_trigger", context.trigger},
                            {"world_snapshot", context.worldSnapshot},
                            {"self_state", context.selfState},
@@ -309,6 +310,8 @@ ProviderResponse LlamaCppProvider::decide(const DecisionContext& context, const 
     for (const auto& drive : context.drives) needIds.push_back(drive.id);
     const std::string systemPrompt =
         "Return one JSON object only. The utterance_understanding stage has already classified the player's communication. "
+        "runtime_metadata is an audit envelope containing identifiers and versions; do not treat it as observable world state "
+        "and do not use it to infer facts, motives, locations, resources, or actions. "
         "Choose exactly one action_id from plan_catalog, or use an empty action_id for a conversation-only response or refusal. "
         "Each non-empty action_id selects one registered behavior plan: Runtime will execute its complete content-authored behavior tree. "
         "The behavior_tree shown in plan_catalog is descriptive context; do not invent or partially execute its nodes in this response. "

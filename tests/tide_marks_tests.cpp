@@ -959,6 +959,16 @@ void decision_context_projects_location_relevant_resources() {
     auto service = WorldService::load(ContentPackLoader::defaultRoot(), std::make_unique<MockProvider>());
     const auto mira = service.decisionContext("mira");
     const auto lorn = service.decisionContext("lorn");
+    expect(mira.runtimeMetadata.at("world_id") == service.state().worldId &&
+               mira.runtimeMetadata.at("instance_id") == service.state().instanceId &&
+               mira.runtimeMetadata.at("content_version") == service.content().contentVersion &&
+               mira.runtimeMetadata.at("simulation_version") == kSimulationVersion &&
+               mira.runtimeMetadata.at("world_revision") == mira.worldRevision &&
+               mira.runtimeMetadata.at("npc_state_version") == mira.npcStateVersion,
+           "decision requests carry auditable runtime identity separately from actor-visible facts");
+    expect(!mira.worldSnapshot.contains("world_id") && !mira.worldSnapshot.contains("instance_id") &&
+               !mira.worldSnapshot.contains("content_version"),
+           "engineering identity is not mixed into the NPC world-fact projection");
     expect(mira.worldSnapshot["public_resources"].contains("grain") &&
                !mira.worldSnapshot["public_resources"].contains("boat_integrity") &&
                lorn.worldSnapshot["public_resources"].contains("boat_integrity") &&

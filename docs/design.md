@@ -293,6 +293,8 @@ Provider 与决策预算由可版本化的 Intelligence Profile 选择，不绑�
 
 Profile 的 `decision_policy` 是按 channel 使用的命名策略表。Provider 接收 Runtime 解析后的 `provider_policy`，只负责执行对应预算和输出格式，不再根据 `player_dialogue` 或 `autonomous_reappraisal` 这样的业务触发字符串猜测决策类型。
 
+每次决策还带有独立的 `runtime_metadata` 审计信封，包含 `world_id`、`instance_id`、`content_version`、`simulation_version`、`prompt_version`、`world_revision` 和 `npc_state_version`，以及实际 channel/trigger。它用于日志关联、异步过期校验和回放定位，不属于 NPC 的可见世界事实；`worldSnapshot` 不复制这些工程身份字段，Provider 的系统提示也明确禁止据此推断资源、地点、动机或行动。
+
 ```json
 {
   "kind": "intelligence_profile",

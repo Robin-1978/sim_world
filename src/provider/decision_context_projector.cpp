@@ -78,6 +78,14 @@ DecisionContext DecisionContextProjector::build(const WorldState& state,
     context.now = state.now;
     context.worldRevision = worldRevision;
     context.npcStateVersion = npc.stateVersion;
+    context.runtimeMetadata = Json{
+        {"world_id", state.worldId},
+        {"instance_id", state.instanceId},
+        {"content_version", content.contentVersion},
+        {"simulation_version", kSimulationVersion},
+        {"prompt_version", context.promptVersion},
+        {"world_revision", worldRevision},
+        {"npc_state_version", npc.stateVersion}};
 
     const auto ownerIsNpc = [&state](const std::string& owner) {
         if (state.npcs.contains(owner)) return true;
