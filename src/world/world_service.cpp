@@ -561,7 +561,7 @@ DecisionContext WorldService::decisionContext(const std::string& npcId) const {
     }
     // Utility ranking chooses the long-term intent deterministically. The
     // provider may still choose any authored candidate after seeing this list.
-    const auto ranked = GoalSelector::rank(npc, needs);
+    const auto ranked = GoalSelector::rank(npc, needs, context.candidates);
     std::vector<ActionCandidate> ordered;
     for (const auto& choice : ranked) {
         const auto candidate = std::find_if(context.candidates.begin(), context.candidates.end(),
@@ -571,6 +571,9 @@ DecisionContext WorldService::decisionContext(const std::string& npcId) const {
             rankedCandidate.utilityScore = choice.score;
             for (const auto& [needId, contribution] : choice.needContributions) {
                 rankedCandidate.utilityContributions[needId] = contribution;
+            }
+            for (const auto& [term, contribution] : choice.utilityTerms) {
+                rankedCandidate.utilityContributions[term] = contribution;
             }
             ordered.push_back(std::move(rankedCandidate));
         }

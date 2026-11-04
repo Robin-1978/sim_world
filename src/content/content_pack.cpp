@@ -301,6 +301,20 @@ std::vector<ActionCandidate> parseActions(const Json& beats, const std::string& 
                                       recipe->interruptible, recipe->interruptSalienceThreshold,
                                       recipe->reservationMode, recipe->id, {}, recipe->priority,
                                       recipe->preemptionPolicy};
+            const auto utility = definition.value("utility_profile", Json::object());
+            if (!utility.is_object()) throw std::runtime_error("utility_profile must be an object: " + id);
+            const auto bounded = [&utility, &id](const char* key, double minimum, double maximum) {
+                const double value = utility.value(key, 0.0);
+                if (!std::isfinite(value) || value < minimum || value > maximum) {
+                    throw std::runtime_error("utility_profile value is out of range: " + id + "/" + key);
+                }
+                return value;
+            };
+            candidate.resourceCost = bounded("resource_cost", 0.0, 1.0);
+            candidate.risk = bounded("risk", 0.0, 1.0);
+            candidate.relationshipEffect = bounded("relationship_effect", -1.0, 1.0);
+            candidate.futureValue = bounded("future_value", -1.0, 1.0);
+            candidate.constraintPenalty = bounded("constraint_penalty", 0.0, 1.0);
             collectBehaviorReservations(recipe->root, pack, candidate.reservations);
             result.push_back(std::move(candidate));
         }

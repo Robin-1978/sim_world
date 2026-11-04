@@ -165,7 +165,7 @@ utility(a) = Σ(drive_i × expected_relief_i)
              - resource_cost - risk_cost - constraint_penalty
 ```
 
-这里的需求收益由 `GoalSelector` 对同一 `action_id` 满足的所有需求贡献求和，并把 `utility_score` 与每项 `utility_contributions` 放入决策上下文和意图事件。资源成本、风险、关系影响和约束惩罚仍由候选行为、结构约束和 LLM 的权衡字段提供；它们不能伪造已经不存在的事实。参数和候选来自内容包。LLM 可以在复杂社会情境中提出 `IntentProposal`，但只能从当前 Context 的 `action_id`、`beat_id`、谈判立场和策略候选中选择；它不能凭空创建资源、任务、关系变化或事件。C++ 校验结构约束后把意图转成 Command，事务成功后的结果才改变世界，并生成下一轮外驱和内驱输入。
+这里的需求收益由 `GoalSelector` 对同一 `action_id` 满足的所有需求贡献求和，并把 `utility_score` 与每项 `utility_contributions` 放入决策上下文和意图事件。行动可以由内容声明 `utility_profile`，包括 `resource_cost`、`risk`、`relationship_effect`、`future_value` 和 `constraint_penalty`；Runtime 校验范围后按声明组合这些分项，不在 C++ 里按角色或故事写死权重。LLM 可以在复杂社会情境中解释和权衡这些项，但它不能伪造已经不存在的事实。参数和候选来自内容包。LLM 可以提出 `IntentProposal`，但只能从当前 Context 的 `action_id`、`beat_id`、谈判立场和策略候选中选择；它不能凭空创建资源、任务、关系变化或事件。C++ 校验结构约束后把意图转成 Command，事务成功后的结果才改变世界，并生成下一轮外驱和内驱输入。
 
 ### 社会和集体驱力
 

@@ -273,6 +273,27 @@ void goal_ranking_aggregates_all_satisfied_needs() {
     }
 }
 
+void authored_utility_profile_is_bounded_and_auditable() {
+    NpcState npc;
+    NeedContent need{"food", "physiological", "food", 0.8, 0.0, 0.9, 1.0, 0.0,
+                     {{"trade", NeedSatisfier{0.5, {}}}, {"risky", NeedSatisfier{0.5, {}}}}};
+    npc.needs["food"] = NeedState{0.8, {}, 0, 1.0, {}, 1.0};
+    ActionCandidate trade;
+    trade.actionId = "trade";
+    trade.futureValue = 0.2;
+    trade.resourceCost = 0.1;
+    ActionCandidate risky;
+    risky.actionId = "risky";
+    risky.futureValue = 0.2;
+    risky.risk = 0.4;
+    const auto ranked = GoalSelector::rank(npc, {need}, {trade, risky});
+    expect(ranked.size() == 2 && ranked.front().actionId == "trade",
+           "bounded authored utility terms participate in deterministic action ranking");
+    expect(ranked.front().utilityTerms.at("future_value") == 0.2 &&
+               ranked.front().utilityTerms.at("resource_cost") == -0.1,
+           "utility ranking exposes each authored cost and benefit term for audit");
+}
+
 void offline_progression_changes_village() {
     auto service = WorldService::load();
     const auto before = summarize(service.state());
@@ -2188,6 +2209,8 @@ int main() {
     };
     run("village_has_three_independent_npcs", village_has_three_independent_npcs);
     run("goal_ranking_aggregates_all_satisfied_needs", goal_ranking_aggregates_all_satisfied_needs);
+    run("authored_utility_profile_is_bounded_and_auditable",
+        authored_utility_profile_is_bounded_and_auditable);
     run("offline_progression_changes_village", offline_progression_changes_village);
     run("needs_are_data_driven_and_replayable", needs_are_data_driven_and_replayable);
     run("accepted_intent_runs_without_reasking_llm", accepted_intent_runs_without_reasking_llm);

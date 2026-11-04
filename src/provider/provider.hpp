@@ -21,6 +21,13 @@ struct ActionCandidate {
     std::string preemptionPolicy{"none"};
     double utilityScore{0.0};
     Json utilityContributions = Json::object();
+    // Author-declared, bounded utility terms. Runtime never invents story
+    // weights; it only combines these terms with deterministic drive relief.
+    double resourceCost{0.0};
+    double risk{0.0};
+    double relationshipEffect{0.0};
+    double futureValue{0.0};
+    double constraintPenalty{0.0};
 };
 
 struct StructuralConstraintView {
