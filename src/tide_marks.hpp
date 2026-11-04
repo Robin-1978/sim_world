@@ -17,6 +17,7 @@
 #include "physics/physics_world.hpp"
 #include "provider/provider.hpp"
 #include "provider/provider_profile.hpp"
+#include "provider/intelligence_coordinator.hpp"
 #include "world/world_service.hpp"
 #include "world/persistence.hpp"
 #include "world/event_journal.hpp"

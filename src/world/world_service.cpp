@@ -205,7 +205,7 @@ std::string join(const std::vector<std::string>& values, std::string_view separa
 WorldService::WorldService(std::unique_ptr<IProvider> provider,
                            std::unique_ptr<IWorldPersistence> persistence)
     : provider_(provider ? std::move(provider) : makeDefaultRuntimeProvider()),
-      turnQueue_(std::make_unique<TurnQueue>(*provider_)),
+      intelligence_(std::make_unique<IntelligenceCoordinator>(*provider_)),
       persistence_(persistence ? std::move(persistence) : std::make_unique<JsonFilePersistence>()) {}
 
 WorldService WorldService::load(std::string contentRoot, std::unique_ptr<IProvider> provider) {
@@ -2602,22 +2602,21 @@ void WorldService::enqueueAutonomousTurn(const std::string& npcId, const std::st
     if (!content_.decisionChannels.contains(selectedChannel)) return;
     const std::string turnId = "autonomous:" + npcId + ":" + std::to_string(state_.now.minute) + ":" +
                                std::to_string(state_.revision);
-    if (pendingAsyncTurnIds_.contains(turnId)) return;
+    if (intelligence_->isTracked(turnId)) return;
     const auto request = makeTurnRequest(npcId, {}, turnId, selectedChannel, trigger);
-    const auto submitted = turnQueue_->submit(request);
+    const auto submitted = intelligence_->submit(request);
     if (!submitted.accepted) return;
-    for (const auto& supersededId : submitted.supersededTurnIds) pendingAsyncTurnIds_.erase(supersededId);
-    pendingAsyncTurnIds_.insert(turnId);
+    intelligence_->track(turnId);
     state_.npcs.at(npcId).lastAutonomousTurn = state_.now;
 }
 
 std::size_t WorldService::pumpAsyncTurns() {
-    if (!turnQueue_) return 0;
-    const auto results = turnQueue_->drain();
+    if (!intelligence_) return 0;
+    const auto results = intelligence_->drain();
     std::size_t consumed = 0;
     for (auto& queued : results) {
         ++consumed;
-        pendingAsyncTurnIds_.erase(queued.request.turnId);
+        intelligence_->forget(queued.request.turnId);
         const auto turn = commitTurn(queued.request, std::move(queued.response));
         if (turn.accepted) continue;
         const auto retryable = [](const std::string& code) {
@@ -2634,9 +2633,9 @@ std::size_t WorldService::pumpAsyncTurns() {
                 {"code", turn.error},
                 {"message", "Runtime rejected the proposed action parameters; repair only the declared plan input."},
                 {"previous_turn_id", queued.request.turnId}};
-            const auto submitted = turnQueue_->submit(std::move(repair));
+            const auto submitted = intelligence_->submit(std::move(repair));
             if (submitted.accepted) {
-                pendingAsyncTurnIds_.insert(queued.request.turnId);
+                intelligence_->track(queued.request.turnId);
                 continue;
             }
         }
@@ -2665,7 +2664,7 @@ std::size_t WorldService::pumpAsyncTurns() {
 }
 
 std::size_t WorldService::pendingAsyncTurns() const {
-    return turnQueue_ ? turnQueue_->pending() : 0;
+    return intelligence_ ? intelligence_->pending() : 0;
 }
 
 int WorldService::resourceValue(const std::string& resource) const {

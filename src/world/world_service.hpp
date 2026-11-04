@@ -10,6 +10,7 @@
 #include "navigation/path_planner.hpp"
 #include "provider/provider.hpp"
 #include "provider/turn_queue.hpp"
+#include "provider/intelligence_coordinator.hpp"
 #include "world/components.hpp"
 #include "world/persistence.hpp"
 #include "world/event_journal.hpp"
@@ -178,7 +179,7 @@ private:
 
     WorldState state_;
     std::unique_ptr<IProvider> provider_;
-    std::unique_ptr<TurnQueue> turnQueue_;
+    std::unique_ptr<IntelligenceCoordinator> intelligence_;
     std::unique_ptr<IWorldPersistence> persistence_;
     EventBus eventBus_;
     EntityRegistry entities_;
@@ -192,7 +193,6 @@ private:
     // partial changes without cancelling the enclosing world-time transition.
     Json replayBaseline_ = Json::object();
     std::vector<WorldEvent> replayBaselineEvents_;
-    std::set<std::string> pendingAsyncTurnIds_;
     std::vector<std::tuple<std::string, std::string, std::string>> pendingDecisionTriggers_;
     SimulationMetrics simulationMetrics_;
     void beginTransaction();

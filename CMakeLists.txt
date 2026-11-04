@@ -84,6 +84,7 @@ add_library(tide_marks_core
     src/physics/physics_world.cpp
     src/provider/provider.cpp
     src/provider/provider_profile.cpp
+    src/provider/intelligence_coordinator.cpp
     src/provider/turn_queue.cpp
     src/world/meta_actions.cpp
     src/world/event_journal.cpp
