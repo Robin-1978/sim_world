@@ -11,6 +11,7 @@
 #include "world/entity_projection_system.hpp"
 #include "world/simulation_coordinator.hpp"
 #include "world/schedule_system.hpp"
+#include "world/world_command_system.hpp"
 #include "world/resource_system.hpp"
 #include "world/social_system.hpp"
 #include "world/meta_action_executor.hpp"
@@ -307,190 +308,54 @@ CommandResult WorldService::decidePromise(const std::string& promiseId, PromiseS
 
 CommandResult WorldService::createEntity(const std::string& id, const std::string& archetypeId,
                                          Json metadata, const std::string& turnId) {
-    TransactionScope transaction(*this);
-    if (id.empty() || archetypeId.empty()) return reject("invalid_entity", "Entity id and archetype are required.");
-    if (state_.entities.contains(id)) return reject("duplicate_entity", "That entity id already exists.");
-    if (!turnId.empty() && state_.processedTurnIds.contains(turnId)) return reject("duplicate_turn", "The turn was already applied.");
-    const auto archetype = std::find_if(content_.entityArchetypes.begin(), content_.entityArchetypes.end(),
-                                        [&archetypeId](const auto& item) { return item.id == archetypeId; });
-    if (archetype == content_.entityArchetypes.end()) return reject("unknown_archetype", "The entity archetype is not registered.");
-    Json merged = archetype->defaultMetadata;
-    for (auto it = metadata.begin(); it != metadata.end(); ++it) merged[it.key()] = it.value();
-    state_.entities.emplace(id, WorldEntityState{id, archetype->kind, EntityLifecycle::Active, std::move(merged)});
-    state_.inventories.try_emplace(id);
-    if (!turnId.empty()) state_.processedTurnIds.insert(turnId);
-    const auto event = addEvent(
-        "entity.created", kWorldActor, id, "Runtime entity created",
-        Json{{"entity_id", id}, {"archetype", archetypeId}, {"kind", archetype->kind},
-             {"metadata", state_.entities.at(id).metadata}});
-    return CommandResult{true, "ok", id, event};
+    return WorldCommandSystem(*this).createEntity(id, archetypeId, std::move(metadata), turnId);
 }
 
 CommandResult WorldService::setEntityLifecycle(const std::string& id, EntityLifecycle lifecycle,
                                                const std::string& turnId) {
-    TransactionScope transaction(*this);
-    auto found = state_.entities.find(id);
-    if (found == state_.entities.end()) return reject("unknown_entity", "That entity does not exist.");
-    if (found->second.lifecycle == EntityLifecycle::Destroyed) return reject("destroyed_entity", "A destroyed entity cannot be revived.");
-    if (!turnId.empty() && state_.processedTurnIds.contains(turnId)) return reject("duplicate_turn", "The turn was already applied.");
-    found->second.lifecycle = lifecycle;
-    if (!turnId.empty()) state_.processedTurnIds.insert(turnId);
-    const auto event = addEvent("entity.lifecycle", kWorldActor, id, "Runtime entity lifecycle changed",
-                                Json{{"entity_id", id}, {"lifecycle", toString(lifecycle)}});
-    return CommandResult{true, "ok", toString(lifecycle), event};
+    return WorldCommandSystem(*this).setEntityLifecycle(id, lifecycle, turnId);
 }
 
 CommandResult WorldService::setLinkState(const std::string& linkId, bool traversable, bool locked,
                                          const std::string& turnId) {
-    TransactionScope transaction(*this);
-    const auto entity = state_.entities.find(linkEntityId(linkId));
-    if (entity == state_.entities.end()) return reject("unknown_link", "That link does not exist.");
-    if (entity->second.lifecycle != EntityLifecycle::Active) return reject("inactive_link", "The link is not active.");
-    if (!turnId.empty() && state_.processedTurnIds.contains(turnId)) return reject("duplicate_turn", "The turn was already applied.");
-    state_.links[linkId] = RuntimeLinkState{traversable, locked};
-    if (!turnId.empty()) state_.processedTurnIds.insert(turnId);
-    const auto event = addEvent("link.state", kWorldActor, linkEntityId(linkId), "Traversal link state changed",
-                                Json{{"link_id", linkId}, {"traversable", traversable}, {"locked", locked}});
-    return CommandResult{true, "ok", linkId, event};
+    return WorldCommandSystem(*this).setLinkState(linkId, traversable, locked, turnId);
 }
 
 CommandResult WorldService::transferResource(const std::string& source, const std::string& target,
                                              const std::string& resource, int amount,
                                              const std::string& actor, const std::string& turnId) {
-    TransactionScope transaction(*this);
-    if (!turnId.empty() && state_.processedTurnIds.contains(turnId)) {
-        return reject("duplicate_turn", "The transfer was already applied.");
-    }
-    const auto sourceId = ResourceSystem::resolveParty(state_, source);
-    const auto targetId = ResourceSystem::resolveParty(state_, target);
-    if (actor != kWorldActor && actor != kPlayerId && actor != sourceId && actor != targetId &&
-        actor != source && actor != target) {
-        return reject("unauthorized", "The actor is not a party to this transfer.");
-    }
-    const auto result = ResourceSystem::transfer(state_, content_, source, target, resource, amount);
-    if (!result.accepted) return reject(result.code, result.message);
-    if (!turnId.empty()) state_.processedTurnIds.insert(turnId);
-    const auto event = addEvent(
-        "resource.transferred", actor, targetId, "A registered resource transfer changed ownership quantities",
-        Json{{"resource", resource}, {"amount", amount}, {"source", sourceId}, {"target", targetId},
-             {"source_before", result.sourceBefore}, {"source_after", result.sourceAfter},
-             {"target_before", result.targetBefore}, {"target_after", result.targetAfter}});
-    return CommandResult{true, "ok", resource, event};
+    return WorldCommandSystem(*this).transferResource(source, target, resource, amount, actor, turnId);
 }
 
 CommandResult WorldService::tradeResources(const std::string& seller, const std::string& buyer,
                                            const std::string& sellerResource, int sellerAmount,
                                            const std::string& buyerResource, int buyerAmount,
                                            const std::string& actor, const std::string& turnId) {
-    TransactionScope transaction(*this);
-    if (sellerAmount <= 0 || buyerAmount <= 0 || sellerResource.empty() || buyerResource.empty()) {
-        return reject("invalid_trade", "A trade needs two positive resource quantities.");
-    }
-    if (!turnId.empty() && state_.processedTurnIds.contains(turnId)) {
-        return reject("duplicate_turn", "The trade was already applied.");
-    }
-    if (actor != kWorldActor && actor != kPlayerId && actor != seller && actor != buyer) {
-        return reject("unauthorized", "The actor is not a party to this trade.");
-    }
-    const auto first = transferResource(seller, buyer, sellerResource, sellerAmount, actor);
-    if (!first.accepted) return reject(first.code, first.message);
-    const auto second = transferResource(buyer, seller, buyerResource, buyerAmount, actor);
-    if (!second.accepted) {
-        transaction.rollback();
-        return reject(second.code, second.message);
-    }
-    if (!turnId.empty()) {
-        state_.processedTurnIds.insert(turnId);
-    }
-    const auto event = addEvent("trade.settled", actor, seller,
-                                "Two parties exchanged configured resources atomically",
-                                Json{{"seller", seller}, {"buyer", buyer}, {"seller_resource", sellerResource},
-                                     {"seller_amount", sellerAmount}, {"buyer_resource", buyerResource},
-                                     {"buyer_amount", buyerAmount}});
-    return CommandResult{true, "ok", "trade", event};
+    return WorldCommandSystem(*this).tradeResources(seller, buyer, sellerResource, sellerAmount,
+                                                    buyerResource, buyerAmount, actor, turnId);
 }
 
 CommandResult WorldService::adjustRelationship(const std::string& npcId, const std::string& target,
                                                RelationshipAxes delta, const std::string& actor,
                                                const std::string& turnId, const std::string& reason) {
-    TransactionScope transaction(*this);
-    if (actor != kWorldActor && actor != kPlayerId && actor != npcId) {
-        return reject("unauthorized", "Only the actor or world authority may change this relationship.");
-    }
-    if (!turnId.empty() && state_.processedTurnIds.contains(turnId)) {
-        return reject("duplicate_turn", "The relationship change was already applied.");
-    }
-    const auto result = SocialSystem::adjustRelationship(state_, npcId, target, delta);
-    if (!result.accepted) return reject(result.code, result.message);
-    ++state_.npcs.at(npcId).stateVersion;
-    if (!turnId.empty()) state_.processedTurnIds.insert(turnId);
-    const auto event = addEvent("relationship.adjusted", actor, target,
-                                reason.empty() ? "A relationship changed" : reason,
-                                Json{{"npc_id", npcId}, {"target", target}, {"trust", delta.trust},
-                                     {"respect", delta.respect}, {"fear", delta.fear}, {"owed", delta.owed}});
-    return CommandResult{true, "ok", target, event};
+    return WorldCommandSystem(*this).adjustRelationship(npcId, target, delta, actor, turnId, reason);
 }
 
 CommandResult WorldService::adjustGroupMetric(const std::string& groupId, const std::string& metric,
                                               double delta, const std::string& actor,
                                               const std::string& turnId, const std::string& reason) {
-    TransactionScope transaction(*this);
-    if (!turnId.empty() && state_.processedTurnIds.contains(turnId)) return reject("duplicate_turn", "The group metric change was already applied.");
-    const auto result = SocialSystem::adjustGroupMetric(state_, groupId, metric, delta);
-    if (!result.accepted) return reject(result.code, result.message);
-    if (!turnId.empty()) state_.processedTurnIds.insert(turnId);
-    const auto event = addEvent(
-        "social.group_metric", actor, groupId, reason.empty() ? "A social group metric changed" : reason,
-        Json{{"group_id", groupId}, {"metric", metric}, {"before", result.before},
-             {"after", result.after}, {"delta", delta}});
-    return CommandResult{true, "ok", metric, event};
+    return WorldCommandSystem(*this).adjustGroupMetric(groupId, metric, delta, actor, turnId, reason);
 }
 
 CommandResult WorldService::setGroupMembership(const std::string& groupId, const std::string& npcId,
                                                const std::string& role, bool active,
                                                const std::string& actor, const std::string& turnId) {
-    TransactionScope transaction(*this);
-    if (!turnId.empty() && state_.processedTurnIds.contains(turnId)) return reject("duplicate_turn", "The membership change was already applied.");
-    const auto result = SocialSystem::setMembership(state_, groupId, npcId, role, active);
-    if (!result.accepted) return reject(result.code, result.message);
-    if (!turnId.empty()) state_.processedTurnIds.insert(turnId);
-    const auto event = addEvent(
-        active ? "social.member_joined" : "social.member_left", actor, groupId,
-        active ? "An NPC joined a social group" : "An NPC left a social group",
-        Json{{"group_id", groupId}, {"npc_id", npcId}, {"role", role}});
-    return CommandResult{true, "ok", groupId, event};
+    return WorldCommandSystem(*this).setGroupMembership(groupId, npcId, role, active, actor, turnId);
 }
 
 CommandResult WorldService::moveNpc(const std::string& npcId, const std::string& destination,
                                     const std::string& actor, const std::string& turnId) {
-    TransactionScope transaction(*this);
-    if (!turnId.empty() && state_.processedTurnIds.contains(turnId)) {
-        return reject("duplicate_turn", "The movement was already applied.");
-    }
-    const auto npcFound = state_.npcs.find(npcId);
-    if (npcFound == state_.npcs.end()) return reject("unknown_npc", "That NPC does not exist.");
-    if (actor != kWorldActor && actor != npcId && actor != kPlayerId) {
-        return reject("unauthorized", "Only the NPC or an authorized world actor can move it.");
-    }
-    const auto destinationEntity = state_.entities.find(spatialEntityId(destination));
-    if (destinationEntity == state_.entities.end() ||
-        destinationEntity->second.lifecycle != EntityLifecycle::Active) {
-        return reject("unknown_destination", "The destination is not an active spatial entity.");
-    }
-    if (npcFound->second.location == destination) return CommandResult{true, "ok", destination, std::nullopt};
-    if (!planRoute(npcFound->second.location, destination).has_value()) {
-        return reject("no_route", "No active topology route connects the NPC to the destination.");
-    }
-    const std::string previous = npcFound->second.location;
-    npcFound->second.location = destination;
-    ++npcFound->second.stateVersion;
-    if (!turnId.empty()) state_.processedTurnIds.insert(turnId);
-    const auto event = addEvent(
-        "entity.moved", actor, npcEntityId(npcId), "An NPC arrived at an authored location",
-        Json{{"npc_id", npcId}, {"from", previous}, {"to", destination},
-             {"route", planRoute(previous, destination).value_or(std::vector<std::string>{})}});
-    syncNpcEntityState();
-    return CommandResult{true, "ok", destination, event};
+    return WorldCommandSystem(*this).moveNpc(npcId, destination, actor, turnId);
 }
 
 CommandResult WorldService::activateOverlay(const EvolutionProposal& proposal,
@@ -528,20 +393,7 @@ CommandResult WorldService::applySecurityOperator(const std::string& operation, 
 
 std::optional<std::vector<std::string>> WorldService::planRoute(const std::string& from,
                                                                 const std::string& to) const {
-    GlobalPlanner planner;
-    for (const auto& spatial : content_.spatialEntities) planner.addNode(spatial.id);
-    for (const auto& authored : content_.links) {
-        const auto entity = state_.entities.find(linkEntityId(authored.id));
-        const auto runtime = state_.links.find(authored.id);
-        if (entity != state_.entities.end() && entity->second.lifecycle != EntityLifecycle::Active) continue;
-        if (runtime != state_.links.end() && (!runtime->second.traversable || runtime->second.locked)) continue;
-        for (std::size_t left = 0; left < authored.link.endpoints.size(); ++left) {
-            for (std::size_t right = left + 1; right < authored.link.endpoints.size(); ++right) {
-                planner.addEdge(authored.link.endpoints[left], authored.link.endpoints[right], 1.0, true);
-            }
-        }
-    }
-    return planner.plan(from, to);
+    return WorldCommandSystem::planRoute(*this, from, to);
 }
 
 DialogueTurn WorldService::converse(const std::string& npcId, const std::string& playerInput,
