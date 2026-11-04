@@ -8,9 +8,18 @@ const std::set<std::string>& MetaActionRegistry::executableOperators() {
         "resource.produce",
         "resource.reserve",
         "resource.release",
+        "resource.transfer",
         "need.relieve",
         "link.set_state",
         "relationship.adjust",
+        "movement.traverse",
+        "movement.arrive",
+        "conflict.attack",
+        "conflict.sabotage",
+        "security.threaten",
+        "security.defend",
+        "security.evacuate",
+        "security.repair",
     };
     return operators;
 }

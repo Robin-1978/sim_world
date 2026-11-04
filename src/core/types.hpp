@@ -203,6 +203,14 @@ struct RuntimeLinkState {
     bool locked{false};
 };
 
+struct SecurityState {
+    double integrity{1.0};
+    double availability{1.0};
+    double threat{0.0};
+    double exposure{0.0};
+    bool evacuated{false};
+};
+
 struct ResourceState {
     int amount{0};
     int reserved{0};
@@ -232,6 +240,10 @@ struct WorldState {
     GameTime now;
     std::uint64_t revision{0};
     std::map<std::string, ResourceState> resources;
+    // Entity-owned quantities are separate from public resource pools and are
+    // changed only through registered resource operators.
+    std::map<std::string, std::map<std::string, int>> inventories;
+    std::map<std::string, SecurityState> security;
     // Runtime entity identity and lifecycle are authoritative world facts.
     // Typed components remain projected through EntityRegistry and are only
     // mutated by a transaction/system.

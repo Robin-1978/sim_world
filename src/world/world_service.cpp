@@ -47,6 +47,8 @@ WorldState transactionalBackup(const WorldState& state, std::size_t& eventCount)
     backup.now = state.now;
     backup.revision = state.revision;
     backup.resources = state.resources;
+    backup.inventories = state.inventories;
+    backup.security = state.security;
     backup.entities = state.entities;
     backup.links = state.links;
     backup.npcs = state.npcs;
@@ -161,6 +163,7 @@ WorldService WorldService::fromContent(const WorldContentPack& content,
         service.state_.resources[id] = ResourceState{initial, 0};
     }
     service.state_.entities[kPlayerId] = WorldEntityState{kPlayerId, "actor", EntityLifecycle::Active, Json::object()};
+    service.state_.inventories.try_emplace(kPlayerId);
     for (const auto& spatial : content.spatialEntities) {
         service.state_.entities[spatialEntityId(spatial.id)] =
             WorldEntityState{spatialEntityId(spatial.id), spatial.kind, EntityLifecycle::Active, Json::object()};
@@ -192,6 +195,7 @@ WorldService WorldService::fromContent(const WorldContentPack& content,
         service.state_.npcs.emplace(authored.definition.id, std::move(npc));
         service.state_.entities[npcEntityId(authored.definition.id)] =
             WorldEntityState{npcEntityId(authored.definition.id), "npc", EntityLifecycle::Active, Json::object()};
+        service.state_.inventories.try_emplace(npcEntityId(authored.definition.id));
     }
     service.rebuildEntityRegistry();
     Json ids = Json::array();
@@ -214,7 +218,11 @@ void WorldService::rebuildEntityRegistry() {
     const auto regionId = state_.worldId.empty() ? content_.worldId : state_.worldId;
     if (entities_.contains(kPlayerId)) {
         entities_.set<LocationComponent>(kPlayerId, LocationComponent{defaultLocation, regionId});
-        entities_.set<InventoryComponent>(kPlayerId, InventoryComponent{});
+        InventoryComponent inventory;
+        if (const auto found = state_.inventories.find(kPlayerId); found != state_.inventories.end()) {
+            inventory.quantities = found->second;
+        }
+        entities_.set<InventoryComponent>(kPlayerId, std::move(inventory));
     }
     for (const auto& authored : content_.spatialEntities) {
         const auto entity = spatialEntityId(authored.id);
@@ -247,7 +255,11 @@ void WorldService::rebuildEntityRegistry() {
         entities_.set<NpcComponent>(entity, NpcComponent{id, npc.mode});
         entities_.set<LocationComponent>(entity, LocationComponent{npc.location, content_.worldId});
         entities_.set<RenderableComponent>(entity, RenderableComponent{"npc." + id, true});
-        entities_.set<InventoryComponent>(entity, InventoryComponent{});
+        InventoryComponent inventory;
+        if (const auto found = state_.inventories.find(entity); found != state_.inventories.end()) {
+            inventory.quantities = found->second;
+        }
+        entities_.set<InventoryComponent>(entity, std::move(inventory));
     }
     for (const auto& [id, runtimeEntity] : state_.entities) {
         if (runtimeEntity.lifecycle == EntityLifecycle::Destroyed || entities_.contains(id)) continue;
@@ -793,6 +805,32 @@ CommandResult WorldService::submit(const Command& command) {
                           : command.kind == "link_unlock" ? false : state->second.locked;
         return setLinkState(command.target, traversable, locked, command.turnId);
     }
+    if (command.kind == "resource_transfer") {
+        try {
+            const Json args = command.detail.empty() ? Json::object() : Json::parse(command.detail);
+            const auto source = args.value("source", command.actor);
+            const auto target = args.value("target", command.target);
+            const auto resource = args.value("resource", std::string{});
+            const auto amount = args.value("amount", 0);
+            return transferResource(source, target, resource, amount, command.actor, command.turnId);
+        } catch (...) {
+            return reject("invalid_resource_transfer", "Resource transfer detail must be valid JSON.");
+        }
+    }
+    if (command.kind == "npc_move") {
+        return moveNpc(command.actor, command.target, command.actor, command.turnId);
+    }
+    if (command.kind == "security") {
+        try {
+            const Json args = command.detail.empty() ? Json::object() : Json::parse(command.detail);
+            const auto operation = args.value("operation", std::string{});
+            const auto target = args.value("target", command.target);
+            if (operation.empty()) return reject("invalid_security_operator", "Security command needs an operation.");
+            return applySecurityOperator(operation, command.actor, target, args, command.turnId);
+        } catch (...) {
+            return reject("invalid_security_operator", "Security command detail must be valid JSON.");
+        }
+    }
     return reject("unknown_command", "The command is not part of the registered action vocabulary.");
 }
 
@@ -864,6 +902,7 @@ CommandResult WorldService::createEntity(const std::string& id, const std::strin
     Json merged = archetype->defaultMetadata;
     for (auto it = metadata.begin(); it != metadata.end(); ++it) merged[it.key()] = it.value();
     state_.entities.emplace(id, WorldEntityState{id, archetype->kind, EntityLifecycle::Active, std::move(merged)});
+    state_.inventories.try_emplace(id);
     if (!turnId.empty()) state_.processedTurnIds.insert(turnId);
     addEvent("entity.created", kWorldActor, id, "Runtime entity created",
              Json{{"entity_id", id}, {"archetype", archetypeId}, {"kind", archetype->kind},
@@ -897,6 +936,186 @@ CommandResult WorldService::setLinkState(const std::string& linkId, bool travers
     addEvent("link.state", kWorldActor, linkEntityId(linkId), "Traversal link state changed",
              Json{{"link_id", linkId}, {"traversable", traversable}, {"locked", locked}});
     return CommandResult{true, "ok", linkId, state_.events.back()};
+}
+
+CommandResult WorldService::transferResource(const std::string& source, const std::string& target,
+                                             const std::string& resource, int amount,
+                                             const std::string& actor, const std::string& turnId) {
+    TransactionScope transaction(*this);
+    if (!turnId.empty() && state_.processedTurnIds.contains(turnId)) {
+        return reject("duplicate_turn", "The transfer was already applied.");
+    }
+    if (amount <= 0 || !content_.resources.contains(resource)) {
+        return reject("invalid_resource_transfer", "A transfer needs a known resource and a positive amount.");
+    }
+    const auto resolve = [this](const std::string& value) -> std::string {
+        if (value == "world" || value == kWorldActor) return kWorldActor;
+        if (value == kPlayerId && state_.entities.contains(kPlayerId)) return kPlayerId;
+        if (state_.entities.contains(value)) return value;
+        if (state_.npcs.contains(value)) return npcEntityId(value);
+        return {};
+    };
+    const auto sourceId = resolve(source);
+    const auto targetId = resolve(target);
+    if (sourceId.empty() || targetId.empty()) return reject("unknown_transfer_party", "Both transfer parties must be active entities or the world pool.");
+    if (sourceId == targetId) return reject("invalid_resource_transfer", "A resource cannot be transferred to itself.");
+    if (actor != kWorldActor && actor != kPlayerId && actor != sourceId && actor != targetId &&
+        actor != source && actor != target) {
+        return reject("unauthorized", "The actor is not a party to this transfer.");
+    }
+    const auto activeEntity = [this](const std::string& id) {
+        if (id == kWorldActor) return true;
+        const auto found = state_.entities.find(id);
+        return found != state_.entities.end() && found->second.lifecycle == EntityLifecycle::Active;
+    };
+    if (!activeEntity(sourceId) || !activeEntity(targetId)) return reject("inactive_transfer_party", "A transfer party is not active.");
+    const auto balance = [this, &resource](const std::string& id) {
+        if (id == kWorldActor) return availableResourceValue(resource);
+        const auto inventory = state_.inventories.find(id);
+        if (inventory == state_.inventories.end()) return 0;
+        const auto quantity = inventory->second.find(resource);
+        return quantity == inventory->second.end() ? 0 : quantity->second;
+    };
+    if (balance(sourceId) < amount) return reject("insufficient_resource", "The source does not have enough unreserved resource.");
+    if (targetId == kWorldActor) {
+        const auto& definition = content_.resources.at(resource);
+        if (resourceValue(resource) + amount > definition.maximum) {
+            return reject("resource_capacity", "The destination resource pool has no capacity.");
+        }
+    }
+    const int sourceBefore = balance(sourceId);
+    const int targetBefore = balance(targetId);
+    if (sourceId == kWorldActor) {
+        state_.resources[resource].amount -= amount;
+    } else {
+        state_.inventories[sourceId][resource] -= amount;
+    }
+    if (targetId == kWorldActor) {
+        state_.resources[resource].amount += amount;
+    } else {
+        state_.inventories[targetId][resource] += amount;
+    }
+    if (!turnId.empty()) state_.processedTurnIds.insert(turnId);
+    addEvent("resource.transferred", actor, targetId,
+             "A registered resource transfer changed ownership quantities",
+             Json{{"resource", resource}, {"amount", amount}, {"source", sourceId}, {"target", targetId},
+                  {"source_before", sourceBefore}, {"source_after", balance(sourceId)},
+                  {"target_before", targetBefore}, {"target_after", balance(targetId)}});
+    return CommandResult{true, "ok", resource, state_.events.back()};
+}
+
+CommandResult WorldService::moveNpc(const std::string& npcId, const std::string& destination,
+                                    const std::string& actor, const std::string& turnId) {
+    TransactionScope transaction(*this);
+    if (!turnId.empty() && state_.processedTurnIds.contains(turnId)) {
+        return reject("duplicate_turn", "The movement was already applied.");
+    }
+    const auto npcFound = state_.npcs.find(npcId);
+    if (npcFound == state_.npcs.end()) return reject("unknown_npc", "That NPC does not exist.");
+    if (actor != kWorldActor && actor != npcId && actor != kPlayerId) {
+        return reject("unauthorized", "Only the NPC or an authorized world actor can move it.");
+    }
+    const auto destinationEntity = state_.entities.find(spatialEntityId(destination));
+    if (destinationEntity == state_.entities.end() ||
+        destinationEntity->second.lifecycle != EntityLifecycle::Active) {
+        return reject("unknown_destination", "The destination is not an active spatial entity.");
+    }
+    if (npcFound->second.location == destination) return CommandResult{true, "ok", destination, std::nullopt};
+    if (!planRoute(npcFound->second.location, destination).has_value()) {
+        return reject("no_route", "No active topology route connects the NPC to the destination.");
+    }
+    const std::string previous = npcFound->second.location;
+    npcFound->second.location = destination;
+    ++npcFound->second.stateVersion;
+    if (!turnId.empty()) state_.processedTurnIds.insert(turnId);
+    addEvent("entity.moved", actor, npcEntityId(npcId), "An NPC arrived at an authored location",
+             Json{{"npc_id", npcId}, {"from", previous}, {"to", destination},
+                  {"route", planRoute(previous, destination).value_or(std::vector<std::string>{})}});
+    syncNpcEntityState();
+    return CommandResult{true, "ok", destination, state_.events.back()};
+}
+
+CommandResult WorldService::applySecurityOperator(const std::string& operation, const std::string& actor,
+                                                  const std::string& target, const Json& args,
+                                                  const std::string& turnId) {
+    TransactionScope transaction(*this);
+    if (!turnId.empty() && state_.processedTurnIds.contains(turnId)) {
+        return reject("duplicate_turn", "The security action was already applied.");
+    }
+    const auto resolve = [this](const std::string& value) -> std::string {
+        if (value == "world" || value == kWorldActor) return kWorldActor;
+        if (state_.entities.contains(value)) return value;
+        if (state_.npcs.contains(value)) return npcEntityId(value);
+        return {};
+    };
+    const auto actorEntity = resolve(actor);
+    const auto requestedTarget = target.empty() ? actor : target;
+    const auto targetEntity = resolve(requestedTarget == "self" ? actor : requestedTarget);
+    if (actorEntity.empty() || targetEntity.empty() ||
+        (actorEntity == targetEntity &&
+         (operation == "conflict.attack" || operation == "conflict.sabotage" || operation == "security.threaten"))) {
+        return reject("invalid_security_target", "Security actions need distinct active actor and target entities.");
+    }
+    const auto active = [this](const std::string& id) {
+        if (id == kWorldActor) return true;
+        const auto found = state_.entities.find(id);
+        return found != state_.entities.end() && found->second.lifecycle == EntityLifecycle::Active;
+    };
+    if (!active(actorEntity) || !active(targetEntity)) return reject("inactive_security_target", "The security target is not active.");
+    if (operation == "conflict.attack" || operation == "conflict.sabotage" || operation == "security.threaten") {
+        if (actorEntity == kWorldActor) return reject("invalid_security_actor", "A conflict action needs a concrete actor.");
+    }
+    auto& security = state_.security[targetEntity];
+    const auto bounded = [](double value) { return std::clamp(value, 0.0, 1.0); };
+    const double integrityBefore = security.integrity;
+    const double availabilityBefore = security.availability;
+    const double threatBefore = security.threat;
+    const double exposureBefore = security.exposure;
+    const bool evacuatedBefore = security.evacuated;
+    if (operation == "conflict.attack" || operation == "conflict.sabotage") {
+        const double defaultDamage = operation == "conflict.attack" ? 0.15 : 0.10;
+        const double damage = bounded(args.value("integrity_loss", args.value("damage", defaultDamage)));
+        const double availabilityLoss = bounded(args.value("availability_loss", damage));
+        const double threatGain = bounded(args.value("threat_gain", 0.7));
+        security.integrity = bounded(security.integrity - damage);
+        security.availability = bounded(security.availability - availabilityLoss);
+        security.threat = bounded(security.threat + threatGain);
+        security.exposure = bounded(security.exposure + args.value("exposure_gain", 0.4));
+    } else if (operation == "security.threaten") {
+        const double threatGain = bounded(args.value("threat_gain", 0.55));
+        security.threat = bounded(security.threat + threatGain);
+        security.exposure = bounded(security.exposure + args.value("exposure_gain", 0.25));
+    } else if (operation == "security.defend") {
+        security.threat = bounded(security.threat - args.value("threat_reduction", 0.35));
+        security.exposure = bounded(security.exposure - args.value("exposure_reduction", 0.25));
+    } else if (operation == "security.evacuate") {
+        security.evacuated = true;
+        security.exposure = bounded(security.exposure - args.value("exposure_reduction", 0.6));
+    } else if (operation == "security.repair") {
+        const auto resource = args.value("resource", "");
+        const int cost = args.value("amount", 0);
+        if (!resource.empty() && (cost <= 0 || availableResourceValue(resource) < cost)) {
+            return reject("insufficient_resource", "Security repair lacks its authored repair resource.");
+        }
+        if (!resource.empty()) state_.resources[resource].amount -= cost;
+        security.integrity = bounded(security.integrity + args.value("integrity_restore", 0.2));
+        security.availability = bounded(security.availability + args.value("availability_restore", 0.2));
+        security.threat = bounded(security.threat - args.value("threat_reduction", 0.2));
+        security.evacuated = false;
+    } else {
+        return reject("unknown_security_operator", "The security operator is not registered.");
+    }
+    if (!turnId.empty()) state_.processedTurnIds.insert(turnId);
+    const auto eventActor = actorEntity.starts_with("npc:") ? actorEntity.substr(4) : actorEntity;
+    const auto eventTarget = targetEntity.starts_with("npc:") ? targetEntity.substr(4) : targetEntity;
+    addEvent(operation, eventActor, eventTarget, "A registered security operator changed target security facts",
+             Json{{"operation", operation}, {"actor_entity", actorEntity}, {"target_entity", targetEntity},
+                  {"integrity_before", integrityBefore}, {"integrity_after", security.integrity},
+                  {"availability_before", availabilityBefore}, {"availability_after", security.availability},
+                  {"threat_before", threatBefore}, {"threat_after", security.threat},
+                  {"exposure_before", exposureBefore}, {"exposure_after", security.exposure},
+                  {"evacuated_before", evacuatedBefore}, {"evacuated_after", security.evacuated}});
+    return CommandResult{true, "ok", operation, state_.events.back()};
 }
 
 std::optional<std::vector<std::string>> WorldService::planRoute(const std::string& from,
@@ -1341,6 +1560,32 @@ bool WorldService::applyMetaAction(const std::string& npcId, const std::string& 
                  Json{{"action_id", actionId}, {"resource", resource}, {"amount", amount}});
         return true;
     }
+    if (operation == "resource.transfer") {
+        const auto source = args.value("source", "self");
+        const auto target = args.value("target", "world");
+        const auto resource = args.value("resource", "");
+        const int amount = args.value("amount", 0);
+        const auto resolvedSource = source == "self" ? npcEntityId(npcId) : source;
+        const auto resolvedTarget = target == "self" ? npcEntityId(npcId) : target;
+        const auto transfer = transferResource(resolvedSource, resolvedTarget, resource, amount, npcId,
+                                               "recipe:" + npcId + ":" + actionId);
+        return transfer.accepted;
+    }
+    if (operation == "movement.traverse" || operation == "movement.arrive") {
+        const auto destination = args.value("destination", args.value("location", ""));
+        if (destination.empty()) return false;
+        const auto moved = moveNpc(npcId, destination, npcId,
+                                   "recipe:" + npcId + ":" + actionId + ":movement");
+        return moved.accepted;
+    }
+    if (operation == "conflict.attack" || operation == "conflict.sabotage" ||
+        operation == "security.threaten" || operation == "security.defend" ||
+        operation == "security.evacuate" || operation == "security.repair") {
+        const auto target = args.value("target", "self");
+        const auto security = applySecurityOperator(operation, npcId, target, args,
+                                                    "recipe:" + npcId + ":" + actionId + ":security");
+        return security.accepted;
+    }
     if (operation == "need.relieve") {
         const auto sourceAction = args.value("action", actionId);
         applyNeedRelief(npcId, sourceAction);
@@ -1546,12 +1791,12 @@ WorldService WorldService::fromSnapshot(const Json& json, std::string contentRoo
     const auto& snapshot = json.contains("state") ? json.at("state") : json;
     if (!snapshot.is_object() || !snapshot.contains("save_schema_version") ||
         !snapshot.at("save_schema_version").is_number_integer() ||
-        snapshot.at("save_schema_version").get<int>() != 10) {
-        throw std::runtime_error("unsupported snapshot schema; expected save_schema_version=10");
+        snapshot.at("save_schema_version").get<int>() != 11) {
+        throw std::runtime_error("unsupported snapshot schema; expected save_schema_version=11");
     }
     if (!snapshot.contains("simulation_version") || !snapshot.at("simulation_version").is_string() ||
-        snapshot.at("simulation_version") != "adaptive-runtime-p0.10") {
-        throw std::runtime_error("unsupported snapshot simulation version; expected adaptive-runtime-p0.10");
+        snapshot.at("simulation_version") != "adaptive-runtime-p1.11") {
+        throw std::runtime_error("unsupported snapshot simulation version; expected adaptive-runtime-p1.11");
     }
     service.state_ = deserializeWorldState(snapshot);
     for (const auto& [id, npc] : service.state_.npcs) {

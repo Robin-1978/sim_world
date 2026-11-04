@@ -155,6 +155,30 @@
       "valence": 0.0,
       "source_confidence": 1.0,
       "ttl_minutes": 720
+    },
+    {
+      "id": "conflict",
+      "event_prefix": "conflict.",
+      "category": "security_threat",
+      "visibility": "participants",
+      "relevance": 1.0,
+      "intensity": 1.0,
+      "urgency": 0.95,
+      "valence": -1.0,
+      "source_confidence": 1.0,
+      "ttl_minutes": 1440
+    },
+    {
+      "id": "security",
+      "event_prefix": "security.",
+      "category": "security_response",
+      "visibility": "participants",
+      "relevance": 0.9,
+      "intensity": 0.7,
+      "urgency": 0.65,
+      "valence": 0.1,
+      "source_confidence": 1.0,
+      "ttl_minutes": 720
     }
   ],
   "id": "village_tidemark",

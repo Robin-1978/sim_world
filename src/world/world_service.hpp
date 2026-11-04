@@ -11,6 +11,7 @@
 #include "provider/provider.hpp"
 #include "provider/turn_queue.hpp"
 #include "world/components.hpp"
+#include "world/ids.hpp"
 #include <memory>
 #include <optional>
 #include <set>
@@ -91,6 +92,13 @@ public:
                                      const std::string& turnId = {});
     CommandResult setLinkState(const std::string& linkId, bool traversable, bool locked,
                                const std::string& turnId = {});
+    CommandResult transferResource(const std::string& source, const std::string& target,
+                                   const std::string& resource, int amount,
+                                   const std::string& actor = kWorldActor,
+                                   const std::string& turnId = {});
+    CommandResult moveNpc(const std::string& npcId, const std::string& destination,
+                          const std::string& actor = kWorldActor,
+                          const std::string& turnId = {});
     [[nodiscard]] std::optional<std::vector<std::string>> planRoute(const std::string& from,
                                                                      const std::string& to) const;
 
@@ -137,6 +145,9 @@ private:
                                               const std::string& turnId, const std::string& channelId,
                                               const std::string& trigger) const;
     DialogueTurn commitTurn(const TurnRequest& request, ProviderResponse response);
+    CommandResult applySecurityOperator(const std::string& operation, const std::string& actor,
+                                        const std::string& target, const Json& args,
+                                        const std::string& turnId);
     DialogueTurn executeTurn(const std::string& npcId, const std::string& input,
                              const std::string& turnId, const std::string& channelId,
                              const std::string& trigger);

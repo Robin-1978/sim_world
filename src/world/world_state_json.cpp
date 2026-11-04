@@ -213,12 +213,24 @@ Json worldStateToJson(const WorldState& state) {
     for (const auto& event : state.events) events.push_back(worldEventToJson(event));
     Json resources = Json::object();
     for (const auto& [id, value] : state.resources) resources[id] = Json{{"amount", value.amount}, {"reserved", value.reserved}};
-    return Json{{"save_schema_version", 10}, {"simulation_version", "adaptive-runtime-p0.10"},
+    Json inventories = Json::object();
+    for (const auto& [entity, quantities] : state.inventories) {
+        Json values = Json::object();
+        for (const auto& [resource, amount] : quantities) values[resource] = amount;
+        inventories[entity] = std::move(values);
+    }
+    Json security = Json::object();
+    for (const auto& [entity, securityState] : state.security) {
+        security[entity] = Json{{"integrity", securityState.integrity}, {"availability", securityState.availability},
+                                {"threat", securityState.threat}, {"exposure", securityState.exposure},
+                                {"evacuated", securityState.evacuated}};
+    }
+    return Json{{"save_schema_version", 11}, {"simulation_version", "adaptive-runtime-p1.11"},
                 {"event_sequence", state.events.size()}, {"world_id", state.worldId},
                 {"instance_id", state.instanceId},
                 {"content_version", state.contentVersion}, {"now", state.now.minute},
                 {"revision", state.revision},
-                {"resources", resources},
+                {"resources", resources}, {"inventories", inventories}, {"security", security},
                 {"entities", entities}, {"links", links}, {"npcs", npcs}, {"promises", promises}, {"events", events},
                 {"processed_turn_ids", state.processedTurnIds}};
 }
@@ -235,6 +247,24 @@ WorldState deserializeWorldState(const Json& json) {
     for (auto it = resources.begin(); it != resources.end(); ++it) {
         state.resources[it.key()] =
             ResourceState{jsonValue<int>(it.value(), "amount", 0), jsonValue<int>(it.value(), "reserved", 0)};
+    }
+    const auto inventories = json.value("inventories", Json::object());
+    if (!inventories.is_object()) throw std::runtime_error("snapshot inventories must be an object");
+    for (auto entity = inventories.begin(); entity != inventories.end(); ++entity) {
+        if (!entity.value().is_object()) throw std::runtime_error("snapshot inventory must be an object");
+        for (auto quantity = entity.value().begin(); quantity != entity.value().end(); ++quantity) {
+            state.inventories[entity.key()][quantity.key()] = quantity.value().get<int>();
+        }
+    }
+    const auto security = json.value("security", Json::object());
+    if (!security.is_object()) throw std::runtime_error("snapshot security must be an object");
+    for (auto entity = security.begin(); entity != security.end(); ++entity) {
+        state.security[entity.key()] = SecurityState{
+            jsonValue<double>(entity.value(), "integrity", 1.0),
+            jsonValue<double>(entity.value(), "availability", 1.0),
+            jsonValue<double>(entity.value(), "threat", 0.0),
+            jsonValue<double>(entity.value(), "exposure", 0.0),
+            jsonValue<bool>(entity.value(), "evacuated", false)};
     }
     const auto entities = json.value("entities", Json::object());
     for (auto it = entities.begin(); it != entities.end(); ++it) {

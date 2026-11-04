@@ -368,7 +368,7 @@ void external_stimuli_and_structures_are_observable_and_persistent() {
                return event.type == "stimulus.habituated";
            }),
            "repeated stimuli produce bounded habituation evidence");
-    const auto restored = WorldService::fromSnapshot(service.snapshotJson());
+    auto restored = WorldService::fromSnapshot(service.snapshotJson());
     expect(restored.state().npcs.at("mira").stimuli.size() == service.state().npcs.at("mira").stimuli.size(),
            "external stimulus history survives snapshot restore");
     expect(restored.state().npcs.at("mira").stimulusSensitivity ==
@@ -429,7 +429,7 @@ void snapshot_and_replay_are_deterministic() {
     const auto path = std::filesystem::temp_directory_path() / "tide_marks_test_replay.jsonl";
     service.writeReplay(path.string());
     const auto snapshot = service.snapshotJson();
-    expect(snapshot.at("save_schema_version").get<int>() == 10, "snapshot declares its schema version");
+    expect(snapshot.at("save_schema_version").get<int>() == 11, "snapshot declares its schema version");
     expect(snapshot.at("instance_id") == "tide_marks.village.instance",
            "snapshot records the concrete game instance identity");
     expect(snapshot.at("event_sequence").get<std::size_t>() == service.state().events.size(),
@@ -648,6 +648,67 @@ void world_entity_lifecycle_is_transactional_and_persistent() {
     expect(!restored.entities().contains("object:field-note"), "destroyed entities are not projected after restore");
 }
 
+void resource_transfer_is_atomic_and_persistent() {
+    auto service = WorldService::load();
+    const auto initial = service.state().resources.at("grain").amount;
+    const auto delivered = service.transferResource("world", "mira", "grain", 7, kPlayerId, "transfer-1");
+    expect(delivered.accepted, "registered transfer moves a resource from the public pool to an entity");
+    expect(service.state().resources.at("grain").amount == initial - 7,
+           "public resource quantity decreases by the transferred amount");
+    expect(service.state().inventories.at("npc:mira").at("grain") == 7,
+           "entity inventory receives the transferred quantity");
+    expect(delivered.event && delivered.event->type == "resource.transferred",
+           "transfer produces an auditable world event");
+    const auto insufficient = service.transferResource("mira", "lorn", "grain", 99, "mira", "transfer-fail");
+    expect(!insufficient.accepted && insufficient.code == "insufficient_resource",
+           "insufficient entity inventory is rejected without partial mutation");
+    expect(service.state().inventories.at("npc:lorn").empty(),
+           "failed transfer leaves the destination inventory unchanged");
+    auto restored = WorldService::fromSnapshot(service.snapshotJson());
+    expect(restored.state().inventories.at("npc:mira").at("grain") == 7,
+           "entity inventory survives snapshot restore");
+    expect(restored.transferResource("mira", "world", "grain", 2, "mira", "transfer-2").accepted,
+           "entity inventory can transfer back to the public pool");
+}
+
+void movement_operator_obeys_authored_topology() {
+    auto service = WorldService::load();
+    const auto moved = service.moveNpc("mira", "village_square", "mira", "move-1");
+    expect(moved.accepted && service.state().npcs.at("mira").location == "village_square",
+           "movement operator commits an arrival along an authored route");
+    expect(std::any_of(service.state().events.begin(), service.state().events.end(), [](const auto& event) {
+               return event.type == "entity.moved";
+           }),
+           "movement produces a fact event");
+    const auto blocked = service.moveNpc("mira", "archive", "mira", "move-2");
+    expect(blocked.accepted, "the authored village topology connects the archive");
+    expect(!service.moveNpc("mira", "missing-place", "mira", "move-invalid").accepted,
+           "movement rejects an unknown destination");
+    expect(!service.moveNpc("mira", "granary", "eve", "move-unauthorized").accepted,
+           "movement rejects an unrelated actor");
+}
+
+void conflict_and_security_operators_change_facts_then_stimuli() {
+    auto service = WorldService::load();
+    const auto attack = service.submit(Command{
+        "attack-1", "security", "mira", "", "", R"({"operation":"conflict.attack","target":"lorn","damage":0.4})"});
+    expect(attack.accepted, "a registered conflict attack commits through the command boundary");
+    expect(service.state().security.at("npc:lorn").integrity < 1.0,
+           "an attack changes target integrity facts");
+    expect(std::any_of(service.state().npcs.at("lorn").stimuli.begin(), service.state().npcs.at("lorn").stimuli.end(),
+                       [](const auto& stimulus) { return stimulus.category == "security_threat"; }),
+           "the conflict fact projects a security stimulus to the participant");
+    const auto defend = service.submit(Command{
+        "defend-1", "security", "lorn", "", "", R"({"operation":"security.defend","target":"lorn"})"});
+    expect(defend.accepted, "the target can defend itself through a registered operator");
+    const auto repair = service.submit(Command{
+        "repair-security-1", "security", "lorn", "", "", R"({"operation":"security.repair","target":"lorn","resource":"grain","amount":2,"integrity_restore":0.2})"});
+    expect(repair.accepted, "repair consumes an authored resource and restores security facts");
+    const auto restored = WorldService::fromSnapshot(service.snapshotJson());
+    expect(restored.state().security.at("npc:lorn").integrity == service.state().security.at("npc:lorn").integrity,
+           "security facts survive snapshot restore");
+}
+
 void runtime_loads_a_world_without_village_identifiers() {
     const std::filesystem::path fixtureRoot = std::filesystem::path(TIDE_MARKS_TEST_DATA_DIR) / "minimal-pack";
     auto service = WorldService::load(fixtureRoot.string());
@@ -787,6 +848,9 @@ int main() {
     run("entity_registry_accepts_feature_components_without_core_changes", entity_registry_accepts_feature_components_without_core_changes);
     run("entity_projection_tracks_committed_npc_movement", entity_projection_tracks_committed_npc_movement);
     run("world_entity_lifecycle_is_transactional_and_persistent", world_entity_lifecycle_is_transactional_and_persistent);
+    run("resource_transfer_is_atomic_and_persistent", resource_transfer_is_atomic_and_persistent);
+    run("movement_operator_obeys_authored_topology", movement_operator_obeys_authored_topology);
+    run("conflict_and_security_operators_change_facts_then_stimuli", conflict_and_security_operators_change_facts_then_stimuli);
     run("runtime_loads_a_world_without_village_identifiers", runtime_loads_a_world_without_village_identifiers);
     run("npc_activity_slot_is_single_owner", npc_activity_slot_is_single_owner);
     run("evolution_proposals_are_governed", evolution_proposals_are_governed);
