@@ -38,6 +38,7 @@ class SecuritySystem;
 class CognitionSystem;
 class StimulusSystem;
 class EntityProjectionSystem;
+class SimulationCoordinator;
 struct Command {
     std::string turnId;
     std::string kind;
@@ -211,6 +212,7 @@ private:
     friend class CognitionSystem;
     friend class StimulusSystem;
     friend class EntityProjectionSystem;
+    friend class SimulationCoordinator;
     class TransactionScope {
     public:
         explicit TransactionScope(WorldService& service);

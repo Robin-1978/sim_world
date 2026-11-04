@@ -94,6 +94,7 @@ add_library(tide_marks_core
     src/world/event_journal.cpp
         src/world/persistence.cpp
     src/world/simulation_scheduler.cpp
+    src/world/simulation_coordinator.cpp
     src/world/transaction_manager.cpp
     src/world/contract_system.cpp
     src/world/npc_simulation_system.cpp

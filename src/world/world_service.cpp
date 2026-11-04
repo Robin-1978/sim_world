@@ -9,6 +9,7 @@
 #include "world/cognition_system.hpp"
 #include "world/stimulus_system.hpp"
 #include "world/entity_projection_system.hpp"
+#include "world/simulation_coordinator.hpp"
 #include "world/resource_system.hpp"
 #include "world/social_system.hpp"
 #include "world/meta_action_executor.hpp"
@@ -254,82 +255,11 @@ DecisionContext WorldService::decisionContext(const std::string& npcId) const {
 }
 
 void WorldService::advanceMinutes(std::int64_t minutes) {
-    if (minutes <= 0) return;
-    // Consume completed provider work at the world boundary. The worker never
-    // runs while a WorldState transaction is open.
-    pumpAsyncTurns();
-    const auto target = state_.now.minute + minutes;
-    while (state_.now.minute < target) {
-        const auto boundary = SimulationScheduler::nextBoundary(state_, content_, target);
-        const auto elapsedMinutes = boundary - state_.now.minute;
-        if (elapsedMinutes <= 0) throw std::logic_error("simulation scheduler did not advance time");
-        // A time step is one state transition. A long offline jump is a
-        // sequence of committed logical steps. When no rule can observe an
-        // intermediate minute, the scheduler coalesces those quiet steps into
-        // one transaction while preserving their revision count and final
-        // state. Observable boundaries still publish in timestamp order.
-        std::set<std::string> dueNpcIds;
-        bool autonomousBoundary = false;
-        {
-            TransactionScope transaction(*this);
-            state_.now.minute = boundary;
-            // TransactionScope commits one revision. Account for the quiet
-            // logical minutes that were coalesced before that final commit.
-            state_.revision += static_cast<std::uint64_t>(elapsedMinutes - 1);
-            simulationMetrics_.scheduledBoundaries++;
-            simulationMetrics_.simulatedMinutes += elapsedMinutes;
-            StimulusSystem(*this).expire();
-            for (auto& [id, npc] : state_.npcs) {
-                const auto* authored = authoredNpc(id);
-                const auto tier = authored != nullptr ? authored->simulationTier : std::string("near");
-                const int interval = tier == "far" ? content_.simulationPolicy.farTickMinutes
-                                                    : content_.simulationPolicy.nearTickMinutes;
-                const bool processDue = npc.activity.process &&
-                                        npc.activity.process->status == ProcessStatus::Running &&
-                                        npc.activity.process->completesAt.minute <= state_.now.minute;
-                const bool due = (interval > 0 && state_.now.minute % interval == 0) || processDue;
-                if (due) {
-                    dueNpcIds.insert(id);
-                    if (tier == "far") ++simulationMetrics_.farNpcTicks;
-                    else ++simulationMetrics_.nearNpcTicks;
-                    npc.lastSimulationTick = state_.now;
-                }
-                // There was no NPC wakeup at any coalesced minute: the next
-                // boundary is selected as the earliest one in the world.
-                simulationMetrics_.skippedNpcTicks +=
-                    static_cast<std::uint64_t>(elapsedMinutes - (due ? 1 : 0));
-            }
-            resumeSuspendedProcesses(dueNpcIds);
-            tickProcesses(dueNpcIds);
-            if (state_.now.minute % kMinutesPerHour == 0) {
-                autonomousBoundary = true;
-                processHourBoundary(state_.now.day(), state_.now.hour(), dueNpcIds);
-            }
-            if (state_.now.minute % kMinutesPerDay == 0) processDayBoundary(state_.now.day(), dueNpcIds);
-            applyPromiseDeadline();
-            applyExchangeDeadlines();
-            // Time itself is authoritative state. Even an otherwise quiet minute
-            // invalidates proposals captured before that minute elapsed.
-            transaction.markChanged();
-        }
-        // Provider requests must capture the revision after the time-step
-        // transaction commits. Scheduling them from inside that transaction
-        // made every result stale as soon as the clock advanced.
-        for (const auto& [npcId, trigger, channelId] : pendingDecisionTriggers_) {
-            enqueueAutonomousTurn(npcId, trigger, channelId);
-        }
-        pendingDecisionTriggers_.clear();
-        if (autonomousBoundary) processAutonomousTurns(dueNpcIds);
-        pumpAsyncTurns();
-        maybeSaveDurableCheckpoint();
-    }
-    pumpAsyncTurns();
-    syncNpcEntityState();
+    SimulationCoordinator(*this).advanceMinutes(minutes);
 }
 
 void WorldService::advanceTo(GameTime target) {
-    if (target.minute <= state_.now.minute) return;
-    advanceMinutes(target.minute - state_.now.minute);
+    SimulationCoordinator(*this).advanceTo(target);
 }
 
 void WorldService::processHourBoundary(int day, int hour, const std::set<std::string>& dueNpcIds) {
