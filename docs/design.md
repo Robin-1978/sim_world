@@ -299,6 +299,8 @@ Level 1 是主体行为演化：LLM 在现有 Runtime 能力内泛化一个主�
 
 创新不属于普通 Tick，也不应变成每个行动都触发的“再问一次模型”。Runtime 把每日边界的 Level 1 请求解释为 `daily_reflection`，并使用独立的 `ReflectionResult` schema：主体回顾 `ReflectionCursor` 之后的新事件、持久化的 `unresolved_issues` 和当前状态，可选地产生四类结果——Belief/Knowledge 更新、Experience/Memory 总结、策略或 Goal 调整、Innovation Hypothesis。ReflectionResult 不是事实，也不是 EvolutionProposal：Cognition 更新必须经 `CognitionSystem` 做来源、权限和置信度校验；Goal 调整只能通过现有 `NpcActivity` 生命周期入口；Strategy 调整写入主体策略事实；只有 `innovation_hypotheses` 进入 `EvolutionManager` 的 Level 1 私有提案链。没有足够证据时，反思只更新认知或策略，不得为了满足调用次数而生成创新。
 
+创新分支是反思结果中的可选部分，不能阻塞认知游标：如果模型提交的假设没有持久未解决问题、没有在本次证据窗口中引用同一过程至少两次 `npc.process_failed`，或其声明式配方/测试计划未通过 Runtime 校验，Runtime 会记录 `innovation.hypothesis_rejected`，丢弃该可选分支，同时仍在同一事务中提交合法的 Belief、Experience、Memory、Strategy、Goal 和新的 `ReflectionCursor`。只有核心反思字段（主体、来源事件、权限和边界）无效时，整条 ReflectionResult 才进入有界修正或拒绝。
+
 每日反思是幂等的日边界事务。`ReflectionCursor.last_event_sequence` 只在结果和审计事件提交后前移，输入窗口按游标增量聚合，并始终附带未解决问题；同一 NPC 同一天重复调度返回 `reflection_already_processed`。Runtime 先校验全部结构化结果，再以同一事务提交认知事件、Goal/Strategy 投影、创新假设事件和新的游标，因此模型重试或进程恢复不会重复消费证据。创新假设、Overlay 激活和 NPC Adoption 仍分别保留自己的生命周期。
 
 配置中的 `reflection` 与 `npc_evolution` 是两个不同的 Provider purpose：`reflection` 是自动日边界的 `ReflectionResult` 入口，负责把新证据整理为认知、策略、Goal 和可选的私有创新假设；`npc_evolution` 是显式/治理调度的 Level 1 `EvolutionProposal` 入口，负责把主体证据转换为待验证的私有 Strategy、Schedule 或 Behavior Overlay。自动反思不会隐式调用 `npc_evolution`，也不会因为反思没有创新就补发一次演化请求；只有被治理队列接受的创新假设或明确的 Level 1 请求才进入提案、沙箱和审批链。两者可以使用同一个实际模型和不同预算，但 schema、幂等键、重试反馈和持久化生命周期不能混用。
@@ -327,7 +329,7 @@ Provider 请求按“稳定前缀、动态尾部”组织：静态系统规则�
 
 模型可见的函数名使用语义范围，而不是 Runtime 的等级编号：`propose_npc_change` 只允许目标 NPC 的私有策略、日程和行为配方，`propose_world_change` 只允许共享实体原型和声明式行为配方，`daily_reflection` 只返回一次主体反思结果。每次请求只暴露一个强制函数，参数名保持短而明确（`id`、`kind`、`evidence_event_sequences`、`operations`、`tree`/`root`、`actors`/`available_to`）；模型不得把长解释塞进参数，提案理由不属于世界事实。运行时仍使用严格 JSON Schema、`additionalProperties=false`、枚举和数量上限校验；函数参数只是候选数据，提交前必须经过 Runtime 权限、Revision、引用、参数 Schema 和 Sandbox 校验。反思结果同样不包含自由文本事实，Runtime 只消费有来源的 Cognition、Goal、Strategy 和 Innovation 字段。
 
-Reflection 的 `source_sequence` 和 `evidence_event_sequences` 枚举由本次上下文的 `new_evidence.sequence` 动态生成；没有待处理创新时，Provider schema 直接把 `innovation_hypotheses` 和 `innovation_actions` 限制为空数组。这样模型不能凭空编造事件来源，也不会为了填满每日调用而生成创新。缺失 `reflection` purpose 的旧用户 profile 只在装配时继承显式 `world_evolution` policy，正式 profile 仍应声明独立 Reflection 预算。
+Reflection 的 `source_sequence` 和 `evidence_event_sequences` 在稳定 tool schema 中只声明正整数；本次上下文的 `new_evidence.sequence`、目标 NPC、待处理假设和未解决问题仍由 Runtime 做确定性成员校验。这样 tool schema 可以跨主体和日期复用 KV 前缀，同时模型不能凭空提交未经提交的事件来源；没有待处理创新时，Runtime 会拒绝任何 `innovation_actions`，而不是为动态数据重写 schema。缺失 `reflection` purpose 的旧用户 profile 只在装配时继承显式 `world_evolution` policy，正式 profile 仍应声明独立 Reflection 预算。
 
 当前实现的结构化 `IntentProposal` 是短输出任务；玩家对白拆成独立的 `utterance_understanding` 和 `player_dialogue` 两次结构化调用。前者需要理解自然语言和歧义，默认使用约 128 token 的 thinking；后者只根据已解析的通信意图和当前事实生成简短回答，默认关闭 thinking。自驱审议没有玩家给出的明确目标，需要依据内驱、外驱和结构约束进行短权衡，因此默认开启约 128 token 的 thinking。Provider 通过顶层 `reasoning_budget_tokens` 限制思考段预算；该预算不等于最终 JSON 的总输出预算。无论是否开启 thinking，Runtime 只解析最终 JSON，`reasoning_content` 永远不进入对白、记忆或世界事实。
 
