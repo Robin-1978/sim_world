@@ -190,7 +190,8 @@ Json WorldEvolutionSystem::proposalContext(const WorldService& world,
         scopedTarget = content.npcs.front().definition.id;
     }
     Json events = Json::array();
-    const std::size_t first = state.events.size() > 32 ? state.events.size() - 32 : 0;
+    const std::size_t evidenceLimit = kMaxEvolutionEvidenceEntries * 3;
+    const std::size_t first = state.events.size() > evidenceLimit ? state.events.size() - evidenceLimit : 0;
     for (std::size_t index = first; index < state.events.size(); ++index) {
         const auto& event = state.events[index];
         if (!visibleInEvolutionContext(event, evolutionLevel, scopedTarget)) continue;
