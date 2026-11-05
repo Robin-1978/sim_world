@@ -32,6 +32,7 @@
           "interruptible": {"type": "boolean"},
           "interrupt_salience_threshold": {"type": "number", "minimum": 0, "maximum": 1},
           "reservation_mode": {"enum": ["none", "input_resources"]},
+          "reservations": {"type": "object", "minProperties": 0, "additionalProperties": {"type": "integer", "minimum": 1}},
           "priority": {"type": "integer", "minimum": 0},
           "preemption_policy": {"enum": ["none", "lower_priority"]},
           "parameters": {"type": "object"},

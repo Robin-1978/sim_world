@@ -2915,6 +2915,89 @@ void evolved_behavior_recipe_is_bound_to_declared_npcs() {
            "an evolved behavior is visible only to the NPCs declared by the overlay");
 }
 
+void innovation_adoption_binds_process_and_measures_effects() {
+    auto content = ContentPackLoader::load(ContentPackLoader::defaultRoot());
+    content.npcDeliberation.enabled = false;
+    content.evolutionPolicy.enabled = false;
+    auto service = WorldService::fromContent(content, std::make_unique<MockProvider>());
+    const auto evidence = service.state().events.back().sequence;
+    EvolutionProposal proposal{
+        "innovation.adoption.process", "innovation", "llm", service.content().contentVersion,
+        service.state().revision,
+        Json::array({Json{{"operation", "register_behavior_recipe"}, {"id", "private_reflection"},
+                         {"plan_id", "private_reflection"}, {"duration_minutes", 5},
+                         {"interruptible", true}, {"interrupt_salience_threshold", 1.0},
+                         {"reservation_mode", "input_resources"}, {"reservations", Json{{"grain", 5}}},
+                         {"priority", 1},
+                         {"preemption_policy", "none"}, {"parameters", Json::object()},
+                         {"available_to", Json::array({"mira"})},
+                         {"root", Json{{"type", "meta_action"}, {"id", "reflect"},
+                                       {"name", "relieve_need"}, {"args", Json{{"action", "rest"}}}}}}})};
+    proposal.evolutionLevel = "level1";
+    proposal.targetNpcId = "mira";
+    proposal.evidenceEventSequences = {evidence};
+    proposal.innovation = Json{
+        {"hypothesis", "A short private reflection rehearsal can reduce a known deficit."},
+        {"novelty_basis", "new_combination"},
+        {"operation_ids", Json::array({"private_reflection"})},
+        {"expected_benefits", Json::array({"measured need relief"})},
+        {"risks", Json::array({"consumes five minutes"})},
+        {"test_plan", Json{{"horizon_minutes", 10}, {"metrics", Json::array({"advance_minutes"})},
+                             {"baseline", "Mira rests using an authored routine."},
+                             {"scenario", "Mira executes the private reflection recipe."},
+                             {"expected_metrics", Json{{"advance_minutes", 5.0}}},
+                             {"constraints", Json::array({"do not change shared content"})},
+                             {"resource_budget", Json{{"minutes", 5.0}}},
+                             {"success_criteria", "The process completes within the declared horizon."},
+                             {"failure_criteria", "The process does not complete."}}}};
+    expect(EvolutionManager::validate(proposal, service.content(), service.state()).valid,
+           "an adoption test starts from a valid private innovation proposal");
+    const auto sandbox = EvolutionManager::sandbox(proposal, service);
+    proposal.innovationStatus = "accepted";
+    proposal.status = EvolutionProposalStatus::Validated;
+    const auto approval = EvolutionManager::approve(proposal, "developer", true);
+    const auto activation = approval.valid ? service.activateOverlay(proposal, sandbox)
+                                           : CommandResult{};
+    expect(sandbox.passed && approval.valid && activation.accepted,
+           "an adoption recipe must pass sandbox and independent approval before activation");
+    auto snapshot = service.snapshotJson();
+    snapshot["npcs"]["mira"]["innovation_hypotheses"] =
+        Json::array({EvolutionManager::toJson(proposal)});
+    auto blockedSnapshot = snapshot;
+    blockedSnapshot["resources"]["grain"]["amount"] = 0;
+    blockedSnapshot["resources"]["grain"]["reserved"] = 0;
+    auto blocked = WorldService::fromSnapshot(blockedSnapshot);
+    const auto blockedStart = blocked.startInnovationAdoption("mira", proposal.id);
+    expect(blockedStart.accepted && blockedStart.code == "resource_blocked" &&
+               blocked.state().npcs.at("mira").innovationAdoptions.front().status ==
+                   InnovationAdoptionStatus::ResourceBlocked &&
+               blocked.state().npcs.at("mira").activity.status == ActivityStatus::Proposed,
+           "an adoption with unavailable reservations remains resource_blocked without creating a process");
+    auto restored = WorldService::fromSnapshot(snapshot);
+    const auto started = restored.startInnovationAdoption("mira", proposal.id);
+    expect(started.accepted && started.code == "executing" &&
+               restored.state().npcs.at("mira").activity.status == ActivityStatus::Active &&
+               restored.state().npcs.at("mira").activity.process.has_value(),
+           "accepted innovation adoption creates a real NpcActivity ProcessExecution");
+    const auto& runningAdoption = restored.state().npcs.at("mira").innovationAdoptions.front();
+    expect(runningAdoption.status == InnovationAdoptionStatus::Executing &&
+               !runningAdoption.processId.empty() && runningAdoption.processId ==
+                   restored.state().npcs.at("mira").activity.process->id,
+           "adoption and process facts share a durable process identity");
+    restored.advanceMinutes(5);
+    const auto& finished = restored.state().npcs.at("mira").innovationAdoptions.front();
+    expect(finished.status == InnovationAdoptionStatus::Completed &&
+               finished.observedMetrics.value("advance_minutes", 0) == 5 &&
+               finished.metricEvaluation.value("passed", false),
+           "process completion records Runtime effect metrics and evaluates the declared threshold");
+    const auto roundTrip = WorldService::fromSnapshot(restored.snapshotJson());
+    const auto& persisted = roundTrip.state().npcs.at("mira").innovationAdoptions.front();
+    expect(persisted.status == InnovationAdoptionStatus::Completed &&
+               persisted.observedMetrics == finished.observedMetrics &&
+               persisted.metricEvaluation == finished.metricEvaluation,
+           "adoption process identity and measured outcomes survive snapshot restore");
+}
+
 void llm_schedule_overlay_is_versioned_and_content_driven() {
     auto service = WorldService::load(ContentPackLoader::defaultRoot(), std::make_unique<MockProvider>());
     const auto baseVersion = service.content().contentVersion;
@@ -3369,6 +3452,8 @@ int main() {
     run("evolution_sandbox_isolated_and_versioned", evolution_sandbox_isolated_and_versioned);
     run("evolved_behavior_recipe_is_bound_to_declared_npcs",
         evolved_behavior_recipe_is_bound_to_declared_npcs);
+    run("innovation_adoption_binds_process_and_measures_effects",
+        innovation_adoption_binds_process_and_measures_effects);
     run("llm_schedule_overlay_is_versioned_and_content_driven",
         llm_schedule_overlay_is_versioned_and_content_driven);
     run("overlay_stack_restores_and_rolls_back_in_order", overlay_stack_restores_and_rolls_back_in_order);

@@ -786,37 +786,153 @@ CommandResult WorldEvolutionSystem::startAdoption(const std::string& npcId,
     if (active == world_.state_.activeOverlays.end()) {
         return world_.reject("innovation_overlay_inactive", "Adoption requires an independently approved active overlay.");
     }
+    std::string recipeId;
+    const auto operations = hypothesis->value("operations", Json::array());
+    if (operations.is_array() && operations.size() == 1 && operations.at(0).is_object()) {
+        recipeId = operations.at(0).value("id", "");
+    }
+    const auto* recipe = recipeId.empty() ? nullptr : world_.recipeForAction(recipeId);
+    if (recipe == nullptr) {
+        return world_.reject("innovation_recipe_inactive", "The active overlay does not expose the adopted behavior recipe.");
+    }
+    if (std::find(recipe->allowedActors.begin(), recipe->allowedActors.end(), npcId) == recipe->allowedActors.end()) {
+        return world_.reject("innovation_recipe_forbidden", "The adopted recipe is not authorized for this NPC.");
+    }
     auto& adoptions = npcFound->second.innovationAdoptions;
-    const auto existing = std::find_if(adoptions.begin(), adoptions.end(),
+    auto existing = std::find_if(adoptions.begin(), adoptions.end(),
                                        [&proposalId](const auto& item) { return item.proposalId == proposalId; });
     if (existing != adoptions.end()) {
         if (existing->status == InnovationAdoptionStatus::Executing ||
             existing->status == InnovationAdoptionStatus::Completed) {
             return world_.reject("innovation_adoption_exists", "That innovation is already executing or completed for this NPC.");
         }
-        existing->status = InnovationAdoptionStatus::Executing;
-        existing->updatedAt = world_.state_.now;
-        existing->reason = "resources became available";
-        const auto event = world_.addEvent("innovation.adoption_started", npcId, proposalId,
-                                           "The NPC began adopting an accepted innovation",
-                                           Json{{"proposal_id", proposalId}, {"recipe_id", existing->recipeId}});
-        return CommandResult{true, "ok", "adoption executing", event};
+        if (existing->recipeId != recipeId) {
+            return world_.reject("innovation_adoption_recipe_changed", "An adoption record cannot change its recipe identity.");
+        }
     }
-    if (adoptions.size() >= 8) return world_.reject("innovation_adoption_limit", "An NPC cannot retain more than eight adoption records.");
-    std::string recipeId;
-    const auto operations = hypothesis->value("operations", Json::array());
-    if (operations.is_array() && !operations.empty() && operations.at(0).is_object()) {
-        recipeId = operations.at(0).value("id", "");
+    if (existing == adoptions.end()) {
+        if (adoptions.size() >= 8) {
+            return world_.reject("innovation_adoption_limit", "An NPC cannot retain more than eight adoption records.");
+        }
+        adoptions.push_back(InnovationAdoptionState{proposalId, recipeId, {},
+                                                     InnovationAdoptionStatus::Pending, {-1}, {-1}, {}, 0,
+                                                     Json::object(), Json::object()});
+        existing = std::prev(adoptions.end());
     }
-    InnovationAdoptionState adoption{proposalId, recipeId, InnovationAdoptionStatus::Executing,
-                                     world_.state_.now, world_.state_.now, "accepted overlay available"};
-    adoptions.push_back(adoption);
+    auto& adoption = *existing;
+    const std::map<std::string, int> requirements = recipe->reservationMode == "input_resources"
+                                                        ? recipe->reservations
+                                                        : std::map<std::string, int>{};
+    const auto markBlocked = [&](const std::string& reason) {
+        adoption.status = InnovationAdoptionStatus::ResourceBlocked;
+        adoption.updatedAt = world_.state_.now;
+        adoption.reason = reason;
+        ++npcFound->second.stateVersion;
+        const auto event = world_.addEvent("innovation.adoption_blocked", npcId, proposalId,
+                                           "An accepted innovation is waiting for its required resources",
+                                           Json{{"proposal_id", proposalId}, {"recipe_id", recipeId},
+                                                {"status", toString(adoption.status)}, {"reason", reason},
+                                                {"required_resources", requirements}});
+        return CommandResult{true, "resource_blocked", reason, event};
+    };
+    if (npcFound->second.activity.status != ActivityStatus::Proposed || npcFound->second.activity.process) {
+        return world_.reject("npc_busy", "An innovation adoption cannot replace an active NPC process.");
+    }
+    std::optional<std::vector<std::string>> victims = std::vector<std::string>{};
+    if (recipe->preemptionPolicy == "lower_priority") {
+        victims = world_.planResourcePreemption(npcId, requirements, recipe->priority);
+        if (!victims) return markBlocked("required resources are reserved by equal or higher priority work");
+    }
+    for (const auto& [resource, amount] : requirements) {
+        if (world_.availableResourceValue(resource) < amount) {
+            return markBlocked("required resources are not available");
+        }
+    }
+    if (victims) {
+        for (const auto& victimId : *victims) {
+            auto victim = world_.state_.npcs.find(victimId);
+            if (victim != world_.state_.npcs.end() && victim->second.activity.process) {
+                world_.suspendProcess(victimId, *victim->second.activity.process, "resource_preempted",
+                                      Json{{"preempted_by", npcId}, {"preempting_proposal_id", proposalId}});
+            }
+        }
+    }
+    for (const auto& [resource, amount] : requirements) world_.state_.resources[resource].reserved += amount;
+    adoption.status = InnovationAdoptionStatus::Executing;
+    adoption.startedAt = world_.state_.now;
+    adoption.updatedAt = world_.state_.now;
+    adoption.reason = "accepted overlay available";
+    adoption.processId = "innovation-process:" + npcId + ":" + proposalId + ":" +
+                         std::to_string(world_.state_.events.size() + 1);
+    adoption.startEventSequence = world_.state_.events.empty() ? 0 : world_.state_.events.back().sequence;
+    adoption.observedMetrics = Json::object();
+    adoption.metricEvaluation = Json::object();
+    if (recipe->durationMinutes <= 0) {
+        ProcessExecution instant;
+        instant.id = adoption.processId;
+        instant.actionId = recipeId;
+        instant.recipeId = recipeId;
+        instant.planId = recipe->planId;
+        instant.trigger = "innovation_adoption:" + proposalId;
+        instant.startedAt = world_.state_.now;
+        instant.completesAt = world_.state_.now;
+        instant.parameters = Json::object();
+        instant.requiredResources = requirements;
+        instant.reservedResources = requirements;
+        const bool applied = world_.applyActionEffects(npcId, recipeId, &instant.reservedResources, &instant.parameters);
+        if (!applied) {
+            world_.releaseReservations(instant);
+            adoption.status = InnovationAdoptionStatus::Failed;
+            adoption.updatedAt = world_.state_.now;
+            adoption.reason = "recipe completion failed";
+            const auto event = world_.addEvent("innovation.adoption_failed", npcId, proposalId,
+                                               "An innovation recipe failed during immediate adoption",
+                                               Json{{"proposal_id", proposalId}, {"recipe_id", recipeId}});
+            return CommandResult{true, "failed", adoption.reason, event};
+        }
+        world_.releaseReservations(instant);
+        adoption.status = InnovationAdoptionStatus::Completed;
+        adoption.updatedAt = world_.state_.now;
+        adoption.reason = "recipe completed";
+        const auto event = world_.addEvent("innovation.adoption_completed", npcId, proposalId,
+                                           "An innovation recipe completed immediately",
+                                           Json{{"proposal_id", proposalId}, {"recipe_id", recipeId}});
+        ++npcFound->second.stateVersion;
+        return CommandResult{true, "completed", adoption.reason, event};
+    }
+    GoalState goal{"innovation-goal:" + adoption.processId, "adopt:" + recipeId, recipeId, 0.5,
+                   GoalStatus::Active, world_.state_.now,
+                   GameTime{world_.state_.now.minute + recipe->durationMinutes},
+                   "accepted innovation hypothesis"};
+    ProcessExecution process;
+    process.id = adoption.processId;
+    process.goalId = goal.id;
+    process.actionId = recipeId;
+    process.recipeId = recipeId;
+    process.planId = recipe->planId;
+    process.trigger = "innovation_adoption:" + proposalId;
+    process.startedAt = world_.state_.now;
+    process.completesAt = GameTime{world_.state_.now.minute + recipe->durationMinutes};
+    process.parameters = Json::object();
+    process.interruptible = recipe->interruptible;
+    process.interruptSalienceThreshold = recipe->interruptSalienceThreshold;
+    process.reservationMode = recipe->reservationMode;
+    process.reservedResources = requirements;
+    process.requiredResources = requirements;
+    process.priority = recipe->priority;
+    process.preemptionPolicy = recipe->preemptionPolicy;
+    npcFound->second.activity.goal = std::move(goal);
+    npcFound->second.activity.process = std::move(process);
+    setActivityStatus(npcFound->second.activity, ActivityStatus::Active);
     ++npcFound->second.stateVersion;
     const auto event = world_.addEvent("innovation.adoption_started", npcId, proposalId,
                                        "The NPC began adopting an accepted innovation",
                                        Json{{"proposal_id", proposalId}, {"recipe_id", recipeId},
+                                            {"process_id", adoption.processId},
+                                            {"required_resources", requirements},
                                             {"status", toString(adoption.status)}});
-    return CommandResult{true, "ok", "adoption executing", event};
+    adoption.startEventSequence = event.sequence;
+    return CommandResult{true, "executing", "adoption process started", event};
 }
 
 CommandResult WorldEvolutionSystem::transitionAdoption(const std::string& npcId,

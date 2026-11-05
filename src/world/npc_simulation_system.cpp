@@ -5,6 +5,7 @@
 #include "npc/state_machine.hpp"
 
 #include <algorithm>
+#include <numeric>
 
 namespace tide_marks {
 
@@ -270,6 +271,77 @@ void NpcSimulationSystem::cancelProcess(const std::string& npcId, ProcessExecuti
                   {"reason", reason}, {"progress", process.progress}, {"status", toString(process.status)}});
 }
 
+void NpcSimulationSystem::finalizeInnovationAdoption(const std::string& npcId,
+                                                     const ProcessExecution& process,
+                                                     bool recipeApplied) {
+    if (process.trigger.rfind("innovation_adoption:", 0) != 0) return;
+    const auto proposalId = process.trigger.substr(std::string("innovation_adoption:").size());
+    auto npc = world_.state_.npcs.find(npcId);
+    if (npc == world_.state_.npcs.end()) return;
+    auto adoption = std::find_if(npc->second.innovationAdoptions.begin(), npc->second.innovationAdoptions.end(),
+                                 [&process, &proposalId](const auto& item) {
+                                     return item.processId == process.id || item.proposalId == proposalId;
+                                 });
+    if (adoption == npc->second.innovationAdoptions.end()) return;
+    Json observed = Json::object();
+    const auto eventCount = std::count_if(world_.state_.events.begin(), world_.state_.events.end(),
+                                          [&adoption](const auto& event) {
+                                              return event.sequence > adoption->startEventSequence;
+                                          });
+    observed["events_added"] = eventCount;
+    observed["final_revision"] = world_.state_.revision;
+    observed["npc_count"] = world_.state_.npcs.size();
+    observed["knowledge_count"] = std::accumulate(
+        world_.state_.npcs.begin(), world_.state_.npcs.end(), std::size_t{0},
+        [](std::size_t total, const auto& entry) { return total + entry.second.knowledge.size(); });
+    observed["experience_count"] = std::accumulate(
+        world_.state_.npcs.begin(), world_.state_.npcs.end(), std::size_t{0},
+        [](std::size_t total, const auto& entry) { return total + entry.second.experiences.size(); });
+    observed["advance_minutes"] = std::max<std::int64_t>(0, world_.state_.now.minute - process.startedAt.minute);
+    observed["resource_total"] = std::accumulate(
+        world_.state_.resources.begin(), world_.state_.resources.end(), 0,
+        [](int total, const auto& entry) { return total + entry.second.amount; });
+
+    Json evaluation = Json{{"passed", recipeApplied}, {"metrics", Json::object()}};
+    bool metricsPassed = recipeApplied;
+    const auto hypothesis = std::find_if(npc->second.innovationHypotheses.begin(), npc->second.innovationHypotheses.end(),
+                                         [&proposalId](const Json& item) { return item.value("id", "") == proposalId; });
+    if (hypothesis != npc->second.innovationHypotheses.end()) {
+        const auto expected = hypothesis->value("innovation", Json::object())
+                                  .value("test_plan", Json::object())
+                                  .value("expected_metrics", Json::object());
+        if (!expected.is_object() || expected.empty()) metricsPassed = false;
+        for (auto item = expected.begin(); item != expected.end(); ++item) {
+            const auto actual = observed.value(item.key(), Json());
+            const bool comparable = actual.is_number() && item.value().is_number();
+            const double actualValue = comparable ? actual.get<double>() : 0.0;
+            const double target = item.value().is_number() ? item.value().get<double>() : 0.0;
+            // Counts and progress targets are lower bounds. Resource budgets
+            // are upper bounds so a successful innovation cannot spend more
+            // than the declared budget.
+            const bool passed = comparable && (item.key() == "resource_total" ? actualValue <= target
+                                                                                : actualValue >= target);
+            evaluation["metrics"][item.key()] = Json{{"actual", actualValue}, {"expected", target},
+                                                       {"passed", passed}};
+            metricsPassed = metricsPassed && passed;
+        }
+    }
+    evaluation["passed"] = metricsPassed;
+    adoption->observedMetrics = observed;
+    adoption->metricEvaluation = evaluation;
+    adoption->updatedAt = world_.state_.now;
+    adoption->status = metricsPassed ? InnovationAdoptionStatus::Completed : InnovationAdoptionStatus::Failed;
+    adoption->reason = metricsPassed ? "recipe completed and effect metrics passed"
+                                     : (recipeApplied ? "effect metrics failed" : "recipe completion failed");
+    ++npc->second.stateVersion;
+    world_.addEvent(metricsPassed ? "innovation.adoption_completed" : "innovation.adoption_failed", npcId,
+                    proposalId, metricsPassed ? "Innovation adoption completed with measured effects"
+                                               : "Innovation adoption failed its measured effect criteria",
+                    Json{{"proposal_id", proposalId}, {"process_id", process.id},
+                         {"status", toString(adoption->status)}, {"reason", adoption->reason},
+                         {"observed_metrics", observed}, {"metric_evaluation", evaluation}});
+}
+
 void NpcSimulationSystem::completeProcess(const std::string& npcId, ProcessExecution process) {
     if (!world_.state_.npcs.contains(npcId)) return;
     const bool applied = world_.applyActionEffects(
@@ -278,13 +350,17 @@ void NpcSimulationSystem::completeProcess(const std::string& npcId, ProcessExecu
     process.progress = 1.0;
     process.status = applied ? ProcessStatus::Completed : ProcessStatus::Failed;
     process.behaviorStatus = applied ? "success" : "failure";
-    if (!applied) releaseReservations(process);
+    // A successful recipe may consume only part of its declared reservation
+    // (or none at all). Release the remainder on every terminal path so an
+    // adoption cannot strand capacity after its ProcessExecution disappears.
+    releaseReservations(process);
     world_.addEvent(applied ? "npc.process_completed" : "npc.process_failed", npcId, process.actionId,
              applied ? "A committed process completed and its effects were applied"
                      : "A committed process could not satisfy its completion preconditions",
              Json{{"process_id", process.id}, {"action_id", process.actionId},
                   {"started_at", process.startedAt.minute}, {"completed_at", world_.state_.now.minute},
                   {"progress", process.progress}, {"status", toString(process.status)}});
+    finalizeInnovationAdoption(npcId, process, applied);
     // A failed recipe restores a nested savepoint and invalidates iterators
     // into WorldState. Reacquire the NPC after the recipe has returned.
     auto found = world_.state_.npcs.find(npcId);

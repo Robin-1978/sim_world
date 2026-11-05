@@ -218,10 +218,14 @@ InnovationAdoptionStatus innovationAdoptionStatusFromString(const std::string& v
 struct InnovationAdoptionState {
     std::string proposalId;
     std::string recipeId;
+    std::string processId;
     InnovationAdoptionStatus status{InnovationAdoptionStatus::Pending};
     GameTime startedAt{-1};
     GameTime updatedAt{-1};
     std::string reason;
+    std::uint64_t startEventSequence{0};
+    Json observedMetrics = Json::object();
+    Json metricEvaluation = Json::object();
 };
 
 struct NpcState {

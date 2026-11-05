@@ -67,18 +67,26 @@ Experience experienceFromJson(const Json& json) {
 
 Json innovationAdoptionJson(const InnovationAdoptionState& adoption) {
     return Json{{"proposal_id", adoption.proposalId}, {"recipe_id", adoption.recipeId},
+                {"process_id", adoption.processId},
                 {"status", toString(adoption.status)}, {"started_at", adoption.startedAt.minute},
-                {"updated_at", adoption.updatedAt.minute}, {"reason", adoption.reason}};
+                {"updated_at", adoption.updatedAt.minute}, {"reason", adoption.reason},
+                {"start_event_sequence", adoption.startEventSequence},
+                {"observed_metrics", adoption.observedMetrics},
+                {"metric_evaluation", adoption.metricEvaluation}};
 }
 
 InnovationAdoptionState innovationAdoptionFromJson(const Json& json) {
     return InnovationAdoptionState{
         jsonValue<std::string>(json, "proposal_id", ""),
         jsonValue<std::string>(json, "recipe_id", ""),
+        jsonValue<std::string>(json, "process_id", ""),
         innovationAdoptionStatusFromString(jsonValue<std::string>(json, "status", "pending")),
         GameTime{jsonValue<std::int64_t>(json, "started_at", -1)},
         GameTime{jsonValue<std::int64_t>(json, "updated_at", -1)},
-        jsonValue<std::string>(json, "reason", "")};
+        jsonValue<std::string>(json, "reason", ""),
+        jsonValue<std::uint64_t>(json, "start_event_sequence", 0),
+        json.value("observed_metrics", Json::object()),
+        json.value("metric_evaluation", Json::object())};
 }
 
 Json stimulusJson(const ExternalStimulus& stimulus) {
@@ -458,6 +466,11 @@ WorldState deserializeWorldState(const Json& json) {
         }
         for (const auto& adoption : adoptions) {
             if (!adoption.is_object()) throw std::runtime_error("snapshot NPC innovation adoption must be an object");
+            const auto observed = adoption.value("observed_metrics", Json::object());
+            const auto evaluation = adoption.value("metric_evaluation", Json::object());
+            if (!observed.is_object() || !evaluation.is_object()) {
+                throw std::runtime_error("snapshot NPC innovation adoption metrics must be objects");
+            }
             npc.innovationAdoptions.push_back(innovationAdoptionFromJson(adoption));
         }
         npc.openPromises = value.value("open_promises", std::vector<std::string>{});

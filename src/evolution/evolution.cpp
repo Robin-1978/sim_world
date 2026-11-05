@@ -439,6 +439,21 @@ EvolutionValidation applyOperations(WorldContentPack& content, const EvolutionPr
             recipe.durationMinutes = operation.value("duration_minutes", 0);
             recipe.interruptible = operation.value("interruptible", true);
             recipe.interruptSalienceThreshold = operation.value("interrupt_salience_threshold", 1.0);
+            recipe.reservationMode = operation.value("reservation_mode", "none");
+            const auto reservations = operation.value("reservations", Json::object());
+            if (!reservations.is_object()) {
+                return {false, "invalid_behavior_reservations", "Behavior recipe reservations must be an object."};
+            }
+            for (auto item = reservations.begin(); item != reservations.end(); ++item) {
+                if (!content.resources.contains(item.key()) || !item.value().is_number_integer() ||
+                    item.value().get<int>() <= 0) {
+                    return {false, "invalid_behavior_reservations",
+                            "Behavior recipe reservations must reference positive quantities of registered resources."};
+                }
+                recipe.reservations[item.key()] = item.value().get<int>();
+            }
+            recipe.priority = operation.value("priority", 0);
+            recipe.preemptionPolicy = operation.value("preemption_policy", "none");
             recipe.root = behaviorNodeFromJson(operation.at("root"));
             BehaviorRecipeRuntime::validate(recipe);
             const auto references = validateBehaviorRecipeReferences(recipe.root, content);
@@ -772,7 +787,7 @@ EvolutionValidation EvolutionManager::validate(const EvolutionProposal& proposal
         } else if (type == "register_behavior_recipe") {
             for (const auto& field : {"plan_id", "duration_minutes", "interruptible",
                                       "interrupt_salience_threshold", "reservation_mode", "priority",
-                                      "preemption_policy", "parameters", "available_to", "root"}) fields.insert(field);
+                                      "preemption_policy", "reservations", "parameters", "available_to", "root"}) fields.insert(field);
         }
         for (auto item = operation.begin(); item != operation.end(); ++item) {
             if (!fields.contains(item.key())) {
@@ -825,6 +840,21 @@ EvolutionValidation EvolutionManager::validate(const EvolutionProposal& proposal
                 recipe.id = operation.at("id").get<std::string>();
                 recipe.planId = operation.value("plan_id", recipe.id);
                 recipe.parameterSchema = operation.value("parameters", Json::object());
+                recipe.reservationMode = operation.value("reservation_mode", "none");
+                const auto reservations = operation.value("reservations", Json::object());
+                if (!reservations.is_object()) {
+                    return {false, "invalid_behavior_reservations", "Behavior recipe reservations must be an object."};
+                }
+                for (auto item = reservations.begin(); item != reservations.end(); ++item) {
+                    if (!content.resources.contains(item.key()) || !item.value().is_number_integer() ||
+                        item.value().get<int>() <= 0) {
+                        return {false, "invalid_behavior_reservations",
+                                "Behavior recipe reservations must reference positive quantities of registered resources."};
+                    }
+                    recipe.reservations[item.key()] = item.value().get<int>();
+                }
+                recipe.priority = operation.value("priority", 0);
+                recipe.preemptionPolicy = operation.value("preemption_policy", "none");
                 const auto parameterValidation = validateParameterSchema(recipe.parameterSchema);
                 if (!parameterValidation.valid) return parameterValidation;
                 const auto actors = operation.value("available_to", Json::array());

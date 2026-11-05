@@ -37,6 +37,8 @@ private:
     void cancelProcess(const std::string& npcId, ProcessExecution& process,
                       const std::string& reason);
     void completeProcess(const std::string& npcId, ProcessExecution process);
+    void finalizeInnovationAdoption(const std::string& npcId, const ProcessExecution& process,
+                                    bool recipeApplied);
     void reviseNpcStrategies(int day);
 
     WorldService& world_;
