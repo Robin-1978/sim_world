@@ -19,7 +19,8 @@
       "required": ["decision", "npc_evolution", "world_evolution"],
       "properties": {
         "decision": {"$ref": "#/$defs/decision_purpose"},
-        "npc_evolution": {"$ref": "#/$defs/evolution_purpose"},
+        "npc_evolution": {"$ref": "#/$defs/npc_evolution_purpose"},
+        "reflection": {"$ref": "#/$defs/reflection_purpose"},
         "world_evolution": {"$ref": "#/$defs/evolution_purpose"}
       },
       "additionalProperties": false
@@ -83,7 +84,27 @@
       "unevaluatedProperties": false
     },
     "evolution_purpose": {
-      "description": "Evolution proposals. npc_evolution serves Level 1 and world_evolution serves Level 2.",
+      "description": "Shared world-content proposals for Level 2. This purpose is infrequent and governance-bound; it is not daily cognition or NPC action selection.",
+      "allOf": [{"$ref": "#/$defs/purpose_binding"}],
+      "type": "object",
+      "required": ["policy"],
+      "properties": {
+        "policy": {"$ref": "#/$defs/policy"}
+      },
+      "unevaluatedProperties": false
+    },
+    "npc_evolution_purpose": {
+      "description": "Private Level 1 evolution proposals for one target NPC: strategy, schedule, or a private declarative behavior recipe. It does not perform daily reflection and never activates an overlay by itself.",
+      "allOf": [{"$ref": "#/$defs/purpose_binding"}],
+      "type": "object",
+      "required": ["policy"],
+      "properties": {
+        "policy": {"$ref": "#/$defs/policy"}
+      },
+      "unevaluatedProperties": false
+    },
+    "reflection_purpose": {
+      "description": "Daily structured cognition for one NPC: sourced belief, experience, memory, strategy and goal updates, plus an optional private innovation hypothesis. It does not submit a Level 1 proposal unless an innovation hypothesis is explicitly produced.",
       "allOf": [{"$ref": "#/$defs/purpose_binding"}],
       "type": "object",
       "required": ["policy"],

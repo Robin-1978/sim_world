@@ -360,12 +360,16 @@ Profile 的 `purposes.decision.policies` 是按 channel 使用的命名策略表
       "policies": {
         "player_dialogue": {"thinking": false, "max_tokens": 512},
         "utterance_understanding": {"thinking": true, "reasoning_budget_tokens": 128, "max_tokens": 512},
-        "autonomous_reappraisal": {"thinking": true, "reasoning_budget_tokens": 128, "max_tokens": 1024}
+        "autonomous_reappraisal": {"thinking": true, "reasoning_budget_tokens": 128, "max_tokens": 1536}
       }
     },
     "npc_evolution": {
       "provider": "local_qwen",
       "policy": {"thinking": true, "reasoning_budget_tokens": 256, "max_tokens": 1024}
+    },
+    "reflection": {
+      "provider": "local_qwen",
+      "policy": {"thinking": true, "reasoning_budget_tokens": 256, "max_tokens": 1536}
     },
     "world_evolution": {
       "provider": "local_qwen",
