@@ -89,11 +89,11 @@
 6. ~~在文本界面显示驱力上下文~~ 已完成：显示所有内容声明的需求域、deficit、drive、临界状态、外驱和约束。
 7. ~~增加需求和适应回归~~ 已完成：覆盖衰减、临界、满足、适应、快照恢复和最小内容包。
 8. ~~清理剩余内容特例，使 P0 行为通过内容包动作和注册规则表达，避免把 NPC ID 写进 Runtime 算法。~~ 已完成；话语行为只由内容包声明语义说明和权限，在线理解由 LLM 完成，Runtime 与 Mock Provider 都不再匹配玩家关键词。
-9. ~~将当前村庄资源字段收口为通用资源组件/资源存储。~~ 已完成；生产、交易、合同和通信对象的完整语义扩展属于 P1。
+9. ~~将当前村庄资源字段收口为通用资源组件/资源存储。~~ 已完成；生产、交易、合同和通信对象的最小通用语义已在 P1 纵向切片中落地，复杂经济条款仍按事实模型单独扩展。
 
 ### P0-N：结构自动演化（治理基线已完成）
 
-1. ~~将 `StructuralConstraint` 从字符串改为可引用的事实投影，覆盖访问、权限、所有权、容量、配方、合同和信息范围。~~ 已完成当前 P0 的资源、拓扑、能力白名单投影；更丰富的制度字段留给 P1。
+1. ~~将 `StructuralConstraint` 从字符串改为可引用的事实投影，覆盖访问、权限、所有权、容量、配方、合同和信息范围。~~ 已完成当前 P0 的资源、拓扑、能力白名单投影；组织、合同和安全事实的结构化字段已在 P1 增补。
 2. 已声明的常规结构变化走现有事务；新的规则/能力/配方/类型走 `EvolutionProposal`。
 3. ~~P0 的声明式结构提案必须由独立的开发/设计审批策略批准；LLM 可以提出，不得批准自己的提案。~~ 已完成 `EvolutionManager::approve`。
 4. Schema/不变量校验和审批记录、密封回放沙箱、指标与版本化 overlay 激活均已完成；LLM 仍只能产生提案，独立审批后才可激活。
@@ -103,7 +103,7 @@
 1. 将 Provider 结构化响应固定为 `IntentProposal`：候选动作、意图、理由、预期结果、引用 Stimulus、权衡、预期满足、置信度、上下文 Revision。
 2. 校验模型返回的上下文版本、候选白名单、资源、权限、关系和幂等键。
 3. ~~让一次有效决策启动持久化为 `ProcessExecution`，过程中不重复调用 LLM~~ 已完成：候选行为声明时长、可中断策略和显著性阈值；完成/中断才提交对应效果。`NpcActivity` 现在是唯一活动槽和生命周期状态源，Goal/Process/FSM/BT 不再各自维护生命周期。
-4. 已提交行动统一形成 WorldEvent，并驱动资源、需求、记忆和下一轮外部刺激；更丰富的关系/合同元动作属于 P1。
+4. 已提交行动统一形成 WorldEvent，并驱动资源、需求、记忆和下一轮外部刺激；关系、合同、知识/经验、安全和生产 operator 已在 P1 通过同一事务边界接入。
 5. ~~把真实 Provider 的自主审议接入异步 TurnQueue~~ 延后到 P1；当前同步路径只用于受控推进，不能被误称为非阻塞调度。
 6. ~~对模型关闭、模型迟到、过期提案、未知动作、重复提案、过程恢复和中断释放预留增加回归测试~~ 已覆盖；对话和自驱 Provider 失败时都失败关闭且不提交事实，测试通过显式 Mock Provider 保持可重复。
 
@@ -120,9 +120,9 @@ P0-K 的提案校验、对话/自驱失败关闭、过期提案、重复提案�
 
 已完成：运行态 NPC 只保存 `definition_id`，快照不复制内容定义；承诺关系增量与重谈期限由 `promise_policy` 数据驱动；实体 ID 前缀和游戏时间单位由共享运行时常量生成；Game Instance 清单与 Content Pack 清单分开；快照保存并校验 `instance_id`；第二个最小实例验证替换性。
 
-1. ~~冻结 Entity/Agent、Resource、ProductionProcess、ConsumptionNeed、Exchange/Contract、Communication、Institution/Rule 和 Event 的属性契约~~ 已完成 P0 的基础字段和 JSON 边界；完整交易、制度和生产字段继续在 P1 逐项落地。
-2. ~~让内容加载器校验单位、所有权、容量、输入/输出、时间窗口、权限和引用~~ 已完成当前资源、拓扑、需求、行为配方和引用校验；质量、所有权、交易输入/输出的完整语义属于 P1 operator。
-3. ~~完成 P0 元动作注册表：资源消耗/产出/预留、需求满足、关系调整和连接状态~~ 已完成；当前已注册执行器为 `resource.consume`、`resource.produce`、`resource.reserve`、`resource.release`、`need.relieve`、`relationship.adjust`、`link.set_state`。资源转移、移动、承诺和知识动作保留为 P1 operator，不提前写入可加载内容。
+1. ~~冻结 Entity/Agent、Resource、ProductionProcess、ConsumptionNeed、Exchange/Contract、Communication、Institution/Rule 和 Event 的属性契约~~ 已完成 P0 基础字段和 JSON 边界；P1 已为交易、组织、安全、知识/经验和生产补齐最小可执行字段，抵押、价格和复杂制度条款仍是独立内容模型。
+2. ~~让内容加载器校验单位、所有权、容量、输入/输出、时间窗口、权限和引用~~ 已完成资源、拓扑、需求、行为配方、合同参与方、库存容量、生产输入/输出和引用校验；质量轴与复杂价格语义不会在没有事实模型时伪造。
+3. ~~完成 P0 元动作注册表：资源消耗/产出/预留、需求满足、关系调整和连接状态~~ 已完成；P1 已扩展为 `resource.transfer`、`movement.traverse/arrive`、冲突/安全、承诺、交换合同、知识/经验、生产和组织指标等注册 operator，全部通过内容绑定而不是 NPC 特例。
 4. ~~把小村庄真实的配给、修船、档案整理和承诺行为组合为 BehaviorRecipe；不再为每个 NPC 添加 C++ 特例。~~ 已完成：`data/behaviors/village.json` 定义 meta actions、conditions 和 recipes，Runtime 编译 Sequence/Selector/Condition/Action/Timeout/Interruptible 节点；ActionCandidate 只引用配方，ProcessExecution 在完成时执行同一配方。
 5. ~~为元动作、复合行为、事务失败和回滚补自动化测试~~ 已完成。新增商店、利率或政策规则前，必须先完成对应的 P1 事实模型。
 
