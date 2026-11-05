@@ -853,7 +853,9 @@ ProviderResponse LlamaCppProvider::proposeReflection(const Json& context,
     const DecisionPolicy policy = policyFound == config_.purposePolicies.end()
                                       ? config_.fallbackPolicy
                                       : policyFound->second;
+    const std::string configuredPrompt = context.value("reflection_prompt", "");
     const std::string systemPrompt =
+        (configuredPrompt.empty() ? "" : configuredPrompt + " ") +
         "Run one optional daily reflection for the target NPC. Reflection is cognition, not world mutation. "
         "Use only new_evidence after reflection_cursor plus unresolved_issues and current_state. "
         "Return structured fields: sourced belief, experience and memory updates; an optional strategy adjustment; "
@@ -936,10 +938,15 @@ ProviderResponse LlamaCppProvider::proposeReflection(const Json& context,
         schema["properties"]["innovation_hypotheses"] = Json{{"type", "array"}, {"maxItems", 0}};
         schema["properties"]["innovation_actions"] = Json{{"type", "array"}, {"maxItems", 0}};
     }
+    Json modelContext = context;
+    // The authored role prompt belongs in the trusted system prefix. Keeping
+    // a second copy in the dynamic user projection wastes tokens and invites
+    // the model to treat it as ordinary world data.
+    modelContext.erase("reflection_prompt");
     Json request{
         {"model", endpointConfig.model}, {"temperature", endpointConfig.temperature}, {"max_tokens", policy.maxTokens},
         {"messages", Json::array({Json{{"role", "system"}, {"content", systemPrompt}},
-                                   Json{{"role", "user"}, {"content", Json{{"context", context}}.dump()}}})},
+                                   Json{{"role", "user"}, {"content", Json{{"context", modelContext}}.dump()}}})},
         {"tools", Json::array({Json{{"type", "function"},
                                      {"function", Json{{"name", "daily_reflection"},
                                                         {"description", "Return one bounded daily reflection result."},

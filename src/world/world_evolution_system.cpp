@@ -9,7 +9,11 @@
 namespace tide_marks {
 
 namespace {
-constexpr std::size_t kMaxEvolutionEvidenceEntries = 8;
+// Keep the incremental window small enough that a daily reflection remains a
+// cheap, cacheable request even after a busy day. The cursor and EventLog keep
+// the complete history; the provider only needs a representative evidence
+// slice plus unresolved issues.
+constexpr std::size_t kMaxEvolutionEvidenceEntries = 4;
 
 // EventLog is authoritative and remains complete in WorldState.  Providers
 // receive a deterministic evidence projection instead of the raw event data:
@@ -149,7 +153,7 @@ Json reflectionEvidence(const WorldState& state, const NpcState& npc) {
                               {"detail", event.detail.size() <= 256 ? event.detail
                                                                       : event.detail.substr(0, 256) + "…"},
                               {"data", compactEventData(event)}});
-        if (events.size() >= kMaxEvolutionEvidenceEntries * 4) break;
+        if (events.size() >= kMaxEvolutionEvidenceEntries * 3) break;
     }
     return events;
 }
@@ -357,7 +361,14 @@ Json WorldEvolutionSystem::reflectionContext(const WorldService& world,
                                         {"memories", memoryEvidence(npc)},
                                         {"relationships", relationshipEvidence(npc)},
                                         {"stimuli", stimulusEvidence(npc)},
-                                        {"pending_innovation_hypotheses", npc.innovationHypotheses},
+                                        {"pending_innovation_ids", [&npc] {
+                                             Json value = Json::array();
+                                             for (const auto& hypothesis : npc.innovationHypotheses) {
+                                                 value.push_back(Json{{"id", hypothesis.value("id", "")},
+                                                                      {"status", hypothesis.value("innovation_status", "hypothesized")}});
+                                             }
+                                             return value;
+                                         }()},
                                         {"innovation_adoptions", [&npc] { Json value = Json::array(); for (const auto& adoption : npc.innovationAdoptions) value.push_back(Json{{"proposal_id", adoption.proposalId}, {"recipe_id", adoption.recipeId}, {"status", toString(adoption.status)}, {"reason", adoption.reason}}); return value; }()}}},
                 {"reflection_cursor", Json{{"last_event_sequence", npc.reflectionCursor.lastEventSequence},
                                              {"last_reflection_day", npc.reflectionCursor.lastReflectionDay},
