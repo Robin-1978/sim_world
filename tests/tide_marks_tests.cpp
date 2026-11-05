@@ -1023,6 +1023,25 @@ void async_turn_queue_rejects_decisions_past_game_deadline() {
            "a result that misses its game-time deadline is rejected at the main-thread commit boundary");
 }
 
+void autonomous_turns_do_not_duplicate_in_flight_npc_requests() {
+    auto content = ContentPackLoader::load(ContentPackLoader::defaultRoot());
+    content.npcDeliberation.minStimulusSalience = 0.0;
+    content.npcDeliberation.minDrivePressure = 0.0;
+    content.npcDeliberation.cooldownMinutes = 0;
+    auto provider = std::make_unique<DelayedProvider>(std::chrono::milliseconds(1000));
+    auto* raw = provider.get();
+    auto service = WorldService::fromContent(content, std::move(provider));
+    service.advanceMinutes(60);
+    service.advanceMinutes(60);
+    service.advanceMinutes(60);
+    expect(service.pendingAsyncTurns() <= 3,
+           "a slow provider keeps at most one in-flight autonomous request per NPC");
+    expect(raw->calls.load() <= 1,
+           "simulated hourly boundaries do not start duplicate calls for an NPC already in flight");
+    std::this_thread::sleep_for(std::chrono::milliseconds(1100));
+    service.pumpAsyncTurns();
+}
+
 void time_step_partitioning_preserves_deterministic_world_state() {
     auto content = ContentPackLoader::load(ContentPackLoader::defaultRoot());
     content.npcDeliberation.enabled = false;
@@ -3455,6 +3474,8 @@ int main() {
         async_turn_queue_coalesces_pending_requests_per_npc_and_channel);
     run("async_turn_queue_rejects_decisions_past_game_deadline",
         async_turn_queue_rejects_decisions_past_game_deadline);
+    run("autonomous_turns_do_not_duplicate_in_flight_npc_requests",
+        autonomous_turns_do_not_duplicate_in_flight_npc_requests);
     run("time_step_partitioning_preserves_deterministic_world_state",
         time_step_partitioning_preserves_deterministic_world_state);
     run("high_salience_stimulus_interrupts_and_releases_reservations", high_salience_stimulus_interrupts_and_releases_reservations);

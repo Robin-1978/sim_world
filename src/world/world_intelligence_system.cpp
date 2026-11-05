@@ -416,6 +416,12 @@ DialogueTurn WorldIntelligenceSystem::commitTurn(const TurnRequest& request, Pro
 void WorldIntelligenceSystem::enqueueAutonomousTurn(const std::string& npcId, const std::string& trigger,
                                          const std::string& channelId) {
     if (!world_.hasNpc(npcId)) return;
+    // Game-time cooldowns do not prevent a slow local model from having an
+    // older request still in flight after several simulated hours. Keep one
+    // autonomous request per NPC until that request (or its bounded repair)
+    // has returned, otherwise a serial provider lane accumulates proposals
+    // that can only arrive after the NPC has become busy or stale.
+    if (world_.intelligence_->isTrackedForNpc(npcId)) return;
     const std::string selectedChannel = channelId.empty() ? world_.content_.autonomousChannelId : channelId;
     if (!world_.content_.decisionChannels.contains(selectedChannel)) return;
     const std::string turnId = "autonomous:" + npcId + ":" + std::to_string(world_.state_.now.minute) + ":" +
@@ -424,7 +430,7 @@ void WorldIntelligenceSystem::enqueueAutonomousTurn(const std::string& npcId, co
     const auto request = makeTurnRequest(npcId, {}, turnId, selectedChannel, trigger);
     const auto submitted = world_.intelligence_->submit(request);
     if (!submitted.accepted) return;
-    world_.intelligence_->track(turnId);
+    world_.intelligence_->track(turnId, npcId);
     world_.state_.npcs.at(npcId).lastAutonomousTurn = world_.state_.now;
 }
 
@@ -472,7 +478,7 @@ std::size_t WorldIntelligenceSystem::pumpAsyncTurns() {
                 {"previous_utterance_understanding", previousResponse.proposal.utteranceUnderstanding}};
             const auto submitted = world_.intelligence_->submit(std::move(repair));
             if (submitted.accepted) {
-                world_.intelligence_->track(queued.request.turnId);
+                world_.intelligence_->track(queued.request.turnId, queued.request.npcId);
                 continue;
             }
         }

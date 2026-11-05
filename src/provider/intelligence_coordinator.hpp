@@ -3,6 +3,7 @@
 #include "provider/turn_queue.hpp"
 
 #include <memory>
+#include <map>
 #include <set>
 #include <string>
 
@@ -19,12 +20,14 @@ public:
     [[nodiscard]] std::vector<TurnResult> drain();
     [[nodiscard]] std::size_t pending() const;
     [[nodiscard]] bool isTracked(const std::string& turnId) const;
-    void track(const std::string& turnId);
+    [[nodiscard]] bool isTrackedForNpc(const std::string& npcId) const;
+    void track(const std::string& turnId, const std::string& npcId = {});
     void forget(const std::string& turnId);
 
 private:
     std::unique_ptr<TurnQueue> queue_;
     std::set<std::string> trackedTurnIds_;
+    std::map<std::string, std::string> trackedTurnNpcs_;
 };
 
 }  // namespace tide_marks
