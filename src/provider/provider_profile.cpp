@@ -111,6 +111,10 @@ PurposeProvider readPurposeProvider(const Json& value, const std::string& purpos
                                          ".api_key_env must be a string or null: " + path);
             }
             result.apiKeyEnv = value.at("api_key_env").get<std::string>();
+            if (result.apiKeyEnv.empty()) {
+                throw std::runtime_error("purposes." + purpose +
+                                         ".api_key_env must not be empty: " + path);
+            }
         } else {
             result.apiKeyEnv.clear();
         }
@@ -151,6 +155,9 @@ ProviderDefinition readProviderDefinition(const Json& value, const std::string& 
             throw std::runtime_error("providers." + id + ".api_key_env must be a string or null: " + path);
         }
         result.apiKeyEnv = value.at("api_key_env").get<std::string>();
+        if (result.apiKeyEnv.empty()) {
+            throw std::runtime_error("providers." + id + ".api_key_env must not be empty: " + path);
+        }
     }
     result.timeoutMs = value.value("timeout_ms", 120000);
     result.temperature = value.value("temperature", 0.2);
