@@ -391,6 +391,10 @@ std::size_t WorldEvolutionSystem::pumpAsyncProposals() {
     if (!world_.evolution_) return 0;
     const auto results = world_.evolution_->drain();
     std::size_t consumed = 0;
+    const auto retryableProviderFailure = [](const std::string& error) {
+        return error.starts_with("provider_truncated:") ||
+               error.starts_with("invalid_provider_json:");
+    };
     for (auto& queued : results) {
         ++consumed;
         const auto finish = [this, &queued] {
@@ -415,6 +419,17 @@ std::size_t WorldEvolutionSystem::pumpAsyncProposals() {
                 audit("reflection.rejected", "The Runtime rejected a reflection for an unknown NPC",
                       Json{{"code", "unknown_npc"}});
             } else if (!queued.response.ok) {
+                if (queued.request.attempt < 2 && world_.provider_->capabilities().structuredRepair &&
+                    retryableProviderFailure(queued.response.error)) {
+                    const Json feedback{{"attempt", queued.request.attempt + 1},
+                                        {"code", queued.response.error},
+                                        {"message", "The previous structured function call was truncated or invalid. Return fewer items, shorter text, and one complete JSON tool call matching the schema."}};
+                    auto repair = queued.request;
+                    ++repair.attempt;
+                    repair.requestId += ":repair:" + std::to_string(repair.attempt);
+                    repair.validationFeedback = feedback;
+                    if (world_.evolution_->submit(std::move(repair)).accepted) continue;
+                }
                 audit("reflection.failed", "The configured LLM did not return a daily reflection",
                       Json{{"error", queued.response.error.empty() ? "provider_unavailable" : queued.response.error}});
             } else {
@@ -453,6 +468,17 @@ std::size_t WorldEvolutionSystem::pumpAsyncProposals() {
             continue;
         }
         if (!queued.response.ok) {
+            if (queued.request.attempt < 2 && world_.provider_->capabilities().structuredRepair &&
+                retryableProviderFailure(queued.response.error)) {
+                const Json feedback{{"attempt", queued.request.attempt + 1},
+                                    {"code", queued.response.error},
+                                    {"message", "The previous structured function call was truncated or invalid. Return one small complete proposal tool call matching the schema."}};
+                auto repair = queued.request;
+                ++repair.attempt;
+                repair.requestId += ":repair:" + std::to_string(repair.attempt);
+                repair.validationFeedback = feedback;
+                if (world_.evolution_->submit(std::move(repair)).accepted) continue;
+            }
             audit("evolution.proposal_failed", "The configured LLM did not return an evolution proposal",
                   Json{{"error", queued.response.error.empty() ? "provider_unavailable" : queued.response.error}});
             finish();
