@@ -50,3 +50,8 @@ references, active overlays and event provenance. A new game is a new database;
 re-importing a template never overwrites an existing instance. If an imported
 content bundle or runtime definition no longer matches those identities,
 restore is rejected instead of silently mixing new definitions with old facts.
+The content bundle is the only JSON input that becomes part of the instance:
+the deployment's Intelligence Profile (and its API-key environment-variable
+name), JSON Schemas, visual assets and compiled Runtime operators stay outside
+the save because they are deployment/configuration or code, not mutable world
+facts.

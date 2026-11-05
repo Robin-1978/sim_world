@@ -144,7 +144,7 @@ An instance can be created and resumed as one SQLite file. Creation imports the 
   --database ~/.sim_world/instances/village/world.sqlite --days 1
 ```
 
-`WorldService::createSqliteInstance()` imports the template and writes the initial durable checkpoint; `loadSqliteInstance()` reads the content snapshot and all mutable facts from that database. JSON remains the inspectable development/test adapter. The SQLite checkpoint is written at configured committed boundaries and does not perform I/O inside every simulation minute.
+`WorldService::createSqliteInstance()` imports the world-content JSON documents and writes the initial durable checkpoint; `loadSqliteInstance()` reads the immutable content bundle and all mutable facts from that database. The original content directory can therefore be absent after initialization, and changing a template does not silently change an existing instance. The provider profile (including the name of an API-key environment variable), JSON Schemas, visual assets, and compiled C++ operators remain deployment concerns rather than world facts. JSON remains the inspectable development/test adapter. The SQLite checkpoint is written at configured committed boundaries and does not perform I/O inside every simulation minute.
 
 The project goal is summarized in [`docs/goal.md`](docs/goal.md); architecture and continuation checkpoints are in [`docs/design.md`](docs/design.md) and [`docs/release-continuation-plan.md`](docs/release-continuation-plan.md).
 

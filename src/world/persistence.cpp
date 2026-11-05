@@ -272,6 +272,103 @@ void SqlitePersistence::saveDurableCommit(const std::string& path, const Json& s
     close(database);
 }
 
+void SqlitePersistence::saveInstance(const std::string& path, const Json& documents,
+                                     const Json& snapshot,
+                                     const std::vector<Json>& replayLines) const {
+    if (!documents.is_object() || documents.empty()) {
+        throw std::invalid_argument("content documents must be a non-empty JSON object");
+    }
+    if (!snapshot.is_object() || !snapshot.contains("world_revision") ||
+        !snapshot.contains("event_sequence") || !snapshot.contains("events")) {
+        throw std::invalid_argument("durable commit snapshot is missing revision or event history");
+    }
+    Json state = snapshot;
+    const Json events = state.at("events");
+    state.erase("events");
+    const auto serializedReplay = Json(replayLines).dump();
+    const auto serializedState = state.dump();
+    const auto serializedEvents = events.dump();
+    const auto processedTurns = snapshot.value("processed_turn_ids", Json::array()).dump();
+    const auto overlays = snapshot.value("active_overlays", Json::array()).dump();
+
+    sqlite3* database = open();
+    try {
+        initialize(database);
+        check(sqlite3_exec(database, "BEGIN IMMEDIATE;", nullptr, nullptr, nullptr), database,
+              "begin instance initialization transaction");
+
+        sqlite3_stmt* deleteStatement = nullptr;
+        check(sqlite3_prepare_v2(database, "DELETE FROM content_documents WHERE path=?;", -1,
+                                  &deleteStatement, nullptr), database, "prepare instance content delete");
+        check(sqlite3_bind_text(deleteStatement, 1, path.c_str(), -1, SQLITE_TRANSIENT), database,
+              "bind instance content path");
+        check(sqlite3_step(deleteStatement), database, "delete instance content bundle");
+        sqlite3_finalize(deleteStatement);
+
+        sqlite3_stmt* contentStatement = nullptr;
+        check(sqlite3_prepare_v2(database,
+                                  "INSERT INTO content_documents(path,document_name,payload) VALUES(?,?,?);",
+                                  -1, &contentStatement, nullptr), database,
+              "prepare instance content insert");
+        for (auto item = documents.begin(); item != documents.end(); ++item) {
+            if (!item.value().is_object()) {
+                sqlite3_finalize(contentStatement);
+                throw std::invalid_argument("content document must be a JSON object: " + item.key());
+            }
+            sqlite3_reset(contentStatement);
+            sqlite3_clear_bindings(contentStatement);
+            check(sqlite3_bind_text(contentStatement, 1, path.c_str(), -1, SQLITE_TRANSIENT), database,
+                  "bind instance content path");
+            check(sqlite3_bind_text(contentStatement, 2, item.key().c_str(), -1, SQLITE_TRANSIENT), database,
+                  "bind instance content name");
+            const auto payload = item.value().dump();
+            check(sqlite3_bind_text(contentStatement, 3, payload.c_str(), -1, SQLITE_TRANSIENT), database,
+                  "bind instance content payload");
+            check(sqlite3_step(contentStatement), database, "write instance content document");
+        }
+        sqlite3_finalize(contentStatement);
+
+        sqlite3_stmt* durableStatement = nullptr;
+        check(sqlite3_prepare_v2(
+                  database,
+                  "INSERT OR REPLACE INTO durable_commits "
+                  "(path,world_id,instance_id,content_version,world_revision,event_sequence,state_payload,"
+                  "event_log_payload,replay_payload,processed_turns_payload,overlays_payload,updated_at) "
+                  "VALUES(?,?,?,?,?,?,?,?,?,?,?,CAST(strftime('%s','now') AS INTEGER));",
+                  -1, &durableStatement, nullptr),
+              database, "prepare instance durable commit");
+        const auto bind = [database, durableStatement](int index, const std::string& value) {
+            return sqlite3_bind_text(durableStatement, index, value.c_str(), -1, SQLITE_TRANSIENT);
+        };
+        check(bind(1, path), database, "bind instance durable path");
+        check(bind(2, snapshot.value("world_id", "")), database, "bind instance durable world");
+        check(bind(3, snapshot.value("instance_id", "")), database, "bind instance durable instance");
+        check(bind(4, snapshot.value("content_version", "")), database,
+              "bind instance durable content version");
+        check(sqlite3_bind_int64(durableStatement, 5,
+                                 snapshot.at("world_revision").get<sqlite3_int64>()), database,
+              "bind instance durable revision");
+        check(sqlite3_bind_int64(durableStatement, 6,
+                                 snapshot.at("event_sequence").get<sqlite3_int64>()), database,
+              "bind instance durable event sequence");
+        check(bind(7, serializedState), database, "bind instance durable state");
+        check(bind(8, serializedEvents), database, "bind instance durable events");
+        check(bind(9, serializedReplay), database, "bind instance durable replay");
+        check(bind(10, processedTurns), database, "bind instance durable idempotency");
+        check(bind(11, overlays), database, "bind instance durable overlays");
+        check(sqlite3_step(durableStatement), database, "write instance durable commit");
+        sqlite3_finalize(durableStatement);
+
+        check(sqlite3_exec(database, "COMMIT;", nullptr, nullptr, nullptr), database,
+              "commit instance initialization transaction");
+    } catch (...) {
+        sqlite3_exec(database, "ROLLBACK;", nullptr, nullptr, nullptr);
+        close(database);
+        throw;
+    }
+    close(database);
+}
+
 Json SqlitePersistence::loadSnapshot(const std::string& path) const {
     sqlite3* database = open();
     try {

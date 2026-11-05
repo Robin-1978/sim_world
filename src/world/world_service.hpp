@@ -313,6 +313,7 @@ private:
     [[nodiscard]] std::optional<std::vector<std::string>> planResourcePreemption(
         const std::string& requesterId, const std::map<std::string, int>& requirements,
         int requesterPriority);
+    [[nodiscard]] std::vector<Json> durableReplayLines() const;
     void applyNeedRelief(const std::string& npcId, const std::string& actionId);
     [[nodiscard]] const NpcContent* authoredNpc(const std::string& npcId) const;
     [[nodiscard]] int resourceValue(const std::string& resource) const;

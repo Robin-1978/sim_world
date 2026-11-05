@@ -43,6 +43,31 @@ Json replayFactJson(const WorldState& state, std::size_t eventSequence) {
     return json;
 }
 
+std::string stateDigest(const Json& state);
+
+std::vector<Json> buildReplayLines(const WorldState& state, const Json& baseline,
+                                   const std::vector<WorldEvent>& baselineEvents) {
+    const auto baselineRevision = baseline.at("world_revision").get<std::uint64_t>();
+    Json baselineFact = baseline;
+    baselineFact.erase("events");
+    const Json currentFact = replayFactJson(state, state.events.size());
+    const auto patch = Json::diff(baselineFact, currentFact);
+    const bool hasChanges = !patch.empty() || state.events.size() > baselineEvents.size();
+    std::vector<Json> lines;
+    lines.push_back(Json{{"kind", "replay_header"}, {"schema_version", 2}, {"state", baseline},
+                         {"transaction_count", hasChanges ? 1U : 0U}});
+    if (hasChanges) {
+        Json events = Json::array();
+        for (std::size_t index = baselineEvents.size(); index < state.events.size(); ++index) {
+            events.push_back(worldEventToJson(state.events[index]));
+        }
+        lines.push_back(Json{{"kind", "transaction"}, {"base_world_revision", baselineRevision},
+                             {"world_revision", state.revision}, {"patch", patch}, {"events", events},
+                             {"state_digest", stateDigest(currentFact)}});
+    }
+    return lines;
+}
+
 std::string stateDigest(const Json& state) {
     std::uint64_t hash = 1469598103934665603ULL;
     const std::string canonical = state.dump();
@@ -112,8 +137,8 @@ WorldService WorldService::createSqliteInstance(const std::string& databasePath,
     const auto documents = ContentPackLoader::readDocuments(contentRoot);
     WorldService service = WorldService::fromContent(content, std::move(provider));
     service.persistence_ = std::make_unique<SqlitePersistence>(databasePath);
-    service.persistence_->saveContentDocuments(kSqliteInstanceArtifact, contentDocumentsJson(documents));
-    service.saveDurableCommit(kSqliteInstanceArtifact);
+    service.persistence_->saveInstance(kSqliteInstanceArtifact, contentDocumentsJson(documents),
+                                       service.snapshotJson(), service.durableReplayLines());
     service.configureDurableCheckpoint(
         DurableCheckpointPolicy{DurableCheckpointMode::DayBoundary, kSqliteInstanceArtifact, 0});
     return service;
@@ -139,49 +164,18 @@ void WorldService::saveSnapshot(const std::string& path) const {
 }
 
 void WorldService::writeReplay(const std::string& path) const {
-    std::vector<Json> lines;
     Json baseline = replayBaseline_.is_object() && !replayBaseline_.empty() ? replayBaseline_ : snapshotJson();
-    const auto baselineRevision = baseline.at("world_revision").get<std::uint64_t>();
-    Json baselineFact = baseline;
-    baselineFact.erase("events");
-    const Json currentFact = replayFactJson(state_, state_.events.size());
-    const auto patch = Json::diff(baselineFact, currentFact);
-    const bool hasChanges = !patch.empty() || state_.events.size() > replayBaselineEvents_.size();
-    lines.push_back(Json{{"kind", "replay_header"}, {"schema_version", 2}, {"state", baseline},
-                         {"transaction_count", hasChanges ? 1U : 0U}});
-    if (hasChanges) {
-        Json events = Json::array();
-        for (std::size_t index = replayBaselineEvents_.size(); index < state_.events.size(); ++index) {
-            events.push_back(worldEventToJson(state_.events[index]));
-        }
-        lines.push_back(Json{{"kind", "transaction"}, {"base_world_revision", baselineRevision},
-                             {"world_revision", state_.revision}, {"patch", patch}, {"events", events},
-                             {"state_digest", stateDigest(currentFact)}});
-    }
-    persistence_->saveReplay(path, lines);
+    persistence_->saveReplay(path, buildReplayLines(state_, baseline, replayBaselineEvents_));
 }
 
 void WorldService::saveDurableCommit(const std::string& path) const {
-    std::vector<Json> lines;
     Json baseline = replayBaseline_.is_object() && !replayBaseline_.empty() ? replayBaseline_ : snapshotJson();
-    const auto baselineRevision = baseline.at("world_revision").get<std::uint64_t>();
-    Json baselineFact = baseline;
-    baselineFact.erase("events");
-    const Json currentFact = replayFactJson(state_, state_.events.size());
-    const auto patch = Json::diff(baselineFact, currentFact);
-    const bool hasChanges = !patch.empty() || state_.events.size() > replayBaselineEvents_.size();
-    lines.push_back(Json{{"kind", "replay_header"}, {"schema_version", 2}, {"state", baseline},
-                         {"transaction_count", hasChanges ? 1U : 0U}});
-    if (hasChanges) {
-        Json events = Json::array();
-        for (std::size_t index = replayBaselineEvents_.size(); index < state_.events.size(); ++index) {
-            events.push_back(worldEventToJson(state_.events[index]));
-        }
-        lines.push_back(Json{{"kind", "transaction"}, {"base_world_revision", baselineRevision},
-                             {"world_revision", state_.revision}, {"patch", patch}, {"events", events},
-                             {"state_digest", stateDigest(currentFact)}});
-    }
-    persistence_->saveDurableCommit(path, snapshotJson(), lines);
+    persistence_->saveDurableCommit(path, snapshotJson(), buildReplayLines(state_, baseline, replayBaselineEvents_));
+}
+
+std::vector<Json> WorldService::durableReplayLines() const {
+    const Json baseline = replayBaseline_.is_object() && !replayBaseline_.empty() ? replayBaseline_ : snapshotJson();
+    return buildReplayLines(state_, baseline, replayBaselineEvents_);
 }
 
 void WorldService::configureDurableCheckpoint(DurableCheckpointPolicy policy) {

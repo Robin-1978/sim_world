@@ -51,7 +51,7 @@ LLM 提出新的需求类型、驱动力曲线、集体指标、行为配方、�
 
 ## 3. 世界实例与内容边界
 
-Runtime 不认识 Mira、村庄、潮门港或具体剧情。世界内容包用 JSON 声明实体原型、空间拓扑、资源、日程、需求、行为配方、事件条件、对白和可选视觉资产；Game Instance 选择内容版本并组合开局位置、初始关系和玩家体验；World Runtime State 保存当前事实；Intelligence Profile 定义感知投影、记忆策略、Provider、工具白名单和演化策略。Content Pack 是可复用的原型、规则和行为定义，Game Instance 是一次具体运行的身份与开局覆盖。创建新游戏时，Runtime 将这些 JSON 文档导入该实例唯一的 SQLite 文件，作为不可变内容快照；运行事实、事件和批准后的演化 Overlay 也写入同一个数据库。之后恢复该实例不依赖原始 JSON 目录，模板只用于创建另一局或发布新的内容版本。
+Runtime 不认识 Mira、村庄、潮门港或具体剧情。世界内容包用 JSON 声明实体原型、空间拓扑、资源、日程、需求、行为配方、事件条件、对白和可选视觉资产；Game Instance 选择内容版本并组合开局位置、初始关系和玩家体验；World Runtime State 保存当前事实；Intelligence Profile 定义感知投影、记忆策略、Provider、工具白名单和演化策略。Content Pack 是可复用的原型、规则和行为定义，Game Instance 是一次具体运行的身份与开局覆盖。创建新游戏时，Runtime 将这些 JSON 文档导入该实例唯一的 SQLite 文件，作为不可变内容快照；运行事实、事件和批准后的演化 Overlay 也写入同一个数据库。之后恢复该实例不依赖原始内容 JSON 目录，模板只用于创建另一局或发布新的内容版本。导入范围是 `content-pack.json` 引用的 world、NPC、behavior、dialogue 和 Game Instance 文档；Intelligence Profile、JSON Schema、视觉资产和 C++ operator 属于部署环境，不是世界事实，不会复制进实例数据库。因而修改模板不会悄悄改变已经创建的实例；必须创建新实例或经过治理的内容版本/Overlay 才会生效。
 
 JSON 是内容和提案的机器边界，C++ 类型是编译期契约，WorldState 是某个实例的当前事实。它们不是两份可写的游戏状态。创建实例时 JSON 只初始化并导入内容快照；运行中只改 SQLite 中的 WorldState、EventLog 和 Overlay；EntityRegistry/Component 是已提交事实的投影；存档保存实例状态。项目尚未发布，字段变化直接同步修改代码、数据、测试和文档，不保留旧字段别名或兼容解析路径。
 

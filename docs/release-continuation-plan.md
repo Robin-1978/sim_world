@@ -166,7 +166,7 @@ Evolution Proposal Schema、提案库、EventLog 来源事实、回放沙箱、�
 | 社会与通用 operator | 纵向完成 | 合同、交易、生产、移动、安全、知识/经验和资源仲裁已有最小切片 |
 | World Intelligence 演化治理 | 纵向完成 | Proposal→Validate→Sandbox→Approve→Overlay→Observe 已覆盖；Runtime Core 不在线热改 |
 | 可替换世界实例 | 纵向完成 | Port 与 Glass Orchard 已证明内容替换；继续增加内容规模而非 C++ 特例 |
-| 持久化生产化 | 原型阶段部分完成 | JSON 仍是默认开发/测试格式；静态 SQLite 已能以 `saveDurableCommit` 事务化保存 Snapshot/Replay 及其状态索引。后续再把每个根事务的提交自动接入同一 durable commit |
+| 持久化生产化 | 原型阶段部分完成 | SQLite 是产品世界实例的默认存储：新游戏把内容 JSON 文档和初始事实写入同一个实例数据库，后续恢复不读取原始内容目录；JSON 文件适配器仅用于开发/测试和显式检查点。静态 SQLite 已能以 `saveDurableCommit` 事务化保存 Snapshot/Replay 及其状态索引，后续再把每个根事务的提交自动接入同一 durable commit |
 | 商店、价格、利率、税费、政策和复杂仲裁 | 尚未建模 | 先定义对应事实、主体、规则和校准数据，再接入 Scenario/Evolution |
 | 大规模社会校准、多模型并发、分布式 Runtime | 尚未开始 | 不进入当前小村验证门槛 |
 | Runtime Core 自主修改/任意代码热加载 | 明确禁止 | 只能由开发者通过代码、测试、迁移和发布演化 |

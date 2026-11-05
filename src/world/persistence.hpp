@@ -19,6 +19,15 @@ public:
     // committed Snapshot and its Replay artifact visible as one checkpoint.
     virtual void saveDurableCommit(const std::string& path, const Json& snapshot,
                                    const std::vector<Json>& replayLines) const = 0;
+    // Create a new instance atomically from its immutable content bundle and
+    // initial committed state. File adapters may implement this as two
+    // deterministic writes; a database adapter should use one transaction.
+    virtual void saveInstance(const std::string& path, const Json& documents,
+                              const Json& snapshot,
+                              const std::vector<Json>& replayLines) const {
+        saveContentDocuments(path, documents);
+        saveDurableCommit(path, snapshot, replayLines);
+    }
     // A SQLite instance may carry the immutable content bundle used to create
     // it. File persistence keeps this optional artifact out of the ordinary
     // snapshot path.
@@ -54,6 +63,8 @@ public:
     void saveReplay(const std::string& path, const std::vector<Json>& lines) const override;
     void saveDurableCommit(const std::string& path, const Json& snapshot,
                            const std::vector<Json>& replayLines) const override;
+    void saveInstance(const std::string& path, const Json& documents, const Json& snapshot,
+                      const std::vector<Json>& replayLines) const override;
 
     [[nodiscard]] Json loadSnapshot(const std::string& path) const;
     [[nodiscard]] std::vector<Json> loadReplay(const std::string& path) const;
