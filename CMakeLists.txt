@@ -120,6 +120,7 @@ add_library(tide_marks_core
     src/world/world_service_commands.cpp
     src/world/world_service_intelligence.cpp
     src/world/world_service_execution.cpp
+    src/world/world_service_transaction.cpp
     src/world/world_service.cpp
     src/world/world_service_persistence.cpp
     src/world/world_state_json.cpp
