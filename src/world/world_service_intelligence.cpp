@@ -89,7 +89,16 @@ std::size_t WorldService::waitForAsyncTurns(std::int64_t timeoutMilliseconds) {
         if (pendingAsyncTurns() == 0) break;
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
-    consumed += pumpAsyncTurns();
+    // A worker can publish its ready result between the last pending() check
+    // and the final pump. Give that hand-off a short quiescence window so a
+    // bounded drain does not report a phantom pending request at an exact
+    // timeout boundary. This does not extend the provider deadline; it only
+    // drains a result that has already completed.
+    for (int settle = 0; settle < 20; ++settle) {
+        consumed += pumpAsyncTurns();
+        if (pendingAsyncTurns() == 0) break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
     return consumed;
 }
 

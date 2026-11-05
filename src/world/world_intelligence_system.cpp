@@ -525,7 +525,14 @@ std::size_t WorldIntelligenceSystem::waitForAsyncTurns(std::int64_t timeoutMilli
         if (world_.intelligence_->pending() == 0) break;
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
-    consumed += pumpAsyncTurns();
+    // Allow the worker-to-ready hand-off to settle after the bounded wait.
+    // Without this small grace window a result published just after the last
+    // pending() check can be left in ready_ and falsely reported as pending.
+    for (int settle = 0; settle < 20; ++settle) {
+        consumed += pumpAsyncTurns();
+        if (world_.intelligence_->pending() == 0) break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
     return consumed;
 }
 
