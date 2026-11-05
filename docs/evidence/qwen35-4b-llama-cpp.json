@@ -399,7 +399,8 @@
   "latest_live_smoke_2026_11_05": {
     "commands": [
       "./build/tide_marks_headless --profile data/intelligence-profile.json --provider profile --days 0",
-      "./build/tide_marks_headless --profile data/intelligence-profile.json --provider profile --days 0 --evolve level1"
+      "./build/tide_marks_headless --profile data/intelligence-profile.json --provider profile --days 0 --evolve level1",
+      "./build/tide_marks_headless --profile data/intelligence-profile.json --provider profile --days 0 --evolve level2"
     ],
     "provider": "llama.cpp",
     "model": "Huihui-Qwen3.5-4B-abliterated.Q4_K_M",
@@ -409,7 +410,12 @@
       "level1_operation": "overlay_strategy",
       "level1_status": "proposed",
       "level1_source_world_revision": 1,
-      "level1_source_world_mutated": false
+      "level1_source_world_mutated": false,
+      "level2_operation": "create_entity_archetype",
+      "level2_proposal_id": "ferry",
+      "level2_status": "proposed",
+      "level2_source_world_revision": 1,
+      "level2_source_world_mutated": false
     },
     "result": "passed"
   }
