@@ -1115,6 +1115,30 @@ void action_validator_enforces_unique_array_parameters() {
            "uniqueItems and minItems are enforced for configured array action parameters");
 }
 
+void action_validator_enforces_recursive_schema_constraints() {
+    DecisionContext context;
+    ActionCandidate candidate;
+    candidate.actionId = "recursive_action";
+    candidate.parameterSchema = Json{
+        {"type", "object"},
+        {"required", Json::array({"route"})},
+        {"properties", Json{{"route", Json{{"type", "object"}, {"additionalProperties", false},
+                                               {"required", Json::array({"kind", "stops"})},
+                                               {"properties", Json{
+                                                   {"kind", Json{{"const", "ferry"}}},
+                                                   {"stops", Json{{"type", "array"}, {"uniqueItems", true},
+                                                                    {"items", Json{{"type", "string"}, {"minLength", 2}}}}}}}}}}}};
+    context.candidates.push_back(candidate);
+    const auto accepted = ActionValidator::validate(
+        context, "recursive_action",
+        Json{{"route", Json{{"kind", "ferry"}, {"stops", Json::array({"dock", "cove"})}}}});
+    const auto rejected = ActionValidator::validate(
+        context, "recursive_action",
+        Json{{"route", Json{{"kind", "road"}, {"stops", Json::array({"dock", "dock"})}}}});
+    expect(accepted.valid && !rejected.valid && rejected.code == "invalid_action_parameter_value",
+           "nested object, const, item constraints, and uniqueItems are enforced recursively");
+}
+
 void llm_action_validation_returns_bounded_repair_feedback() {
     auto provider = std::make_unique<RepairingLlamaProvider>();
     auto* raw = provider.get();
@@ -2837,6 +2861,8 @@ int main() {
         action_validator_rejects_malformed_nested_schema_without_throwing);
     run("action_validator_enforces_unique_array_parameters",
         action_validator_enforces_unique_array_parameters);
+    run("action_validator_enforces_recursive_schema_constraints",
+        action_validator_enforces_recursive_schema_constraints);
     run("llm_action_validation_returns_bounded_repair_feedback",
         llm_action_validation_returns_bounded_repair_feedback);
     run("llm_expected_relief_validation_returns_bounded_repair_feedback",

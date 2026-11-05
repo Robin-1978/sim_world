@@ -388,10 +388,11 @@
   },
   "schema_contract_probe": {
     "runtime_change": "bounded behavior parameter schemas now accept uniqueItems only on array nodes and reject it on the root object; available_to actor scopes are checked for known, unique NPC ids",
-    "action_runtime_check": "configured uniqueItems and minItems are enforced when binding action parameters",
+    "action_runtime_check": "the same recursive binder enforces nested object/array constraints, const, enum, string length, minItems/maxItems, and uniqueItems when binding action parameters",
     "automated_tests": [
       "action_validator_enforces_unique_array_parameters",
-      "evolution_proposals_are_governed (nested uniqueItems and duplicate available_to)"
+      "evolution_proposals_are_governed (nested uniqueItems and duplicate available_to)",
+      "action_validator_enforces_recursive_schema_constraints"
     ],
     "provider_feedback_path": "invalid schema remains fail-closed and is eligible for the existing bounded structured repair"
   }

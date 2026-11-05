@@ -74,7 +74,7 @@
 - 嵌套配方失败只回滚自己的保存点，不会把所在世界时间步一起恢复；快照回滚不复制不可变事件历史。
 - 冲突与安全 operator 的 attack、sabotage、threaten、defend、evacuate、repair 均覆盖事实变化、主事件与 Snapshot；关闭的 authored topology 会阻止移动，生产输入不足或输出超重不会留下部分资源或事件。
 - Overlay 的 Behavior Recipe 只有在条件、元动作和节点 ID 都能解析时才可进入 Sandbox；多操作 Overlay 只有全部操作成功才整体交换内容视图。`CommandResult.event` 固定返回本次命令的主事件，不会被子事件或投射刺激覆盖。
-- 行为参数 schema 只接受受限的声明式 JSON Schema：`uniqueItems` 只能出现在数组节点并在实际参数绑定时检查，`minItems`/`maxItems` 以非负整数执行；行为能力的 `available_to` 传播范围必须引用已知且互不重复的 NPC。真实 Provider 仍通过结构化错误反馈修正，Runtime 不因模型输出而放宽边界。
+- 行为参数 schema 只接受受限的声明式 JSON Schema：对象、数组和嵌套属性由同一个递归绑定器执行，`const`、枚举、长度/数量边界与 `uniqueItems` 都在实际参数绑定时检查，`uniqueItems` 只能出现在数组节点；行为能力的 `available_to` 传播范围必须引用已知且互不重复的 NPC。真实 Provider 仍通过结构化错误反馈修正，Runtime 不因模型输出而放宽边界。
 - 核心测试、可执行程序构建和三个独立内容实例的 CLI 回归以当前机器实测耗时为准；单测耗时输出用于防止长期模拟回归。
 
 ## P0 工作顺序

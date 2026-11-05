@@ -1,16 +1,170 @@
 #include "npc/action_validator.hpp"
 
 #include <algorithm>
+#include <cstdint>
+#include <limits>
 #include <set>
 
 namespace tide_marks {
+namespace {
+
+bool typeMatches(const Json& value, const std::string& type) {
+    if (type == "string") return value.is_string();
+    if (type == "integer") return value.is_number_integer();
+    if (type == "number") return value.is_number();
+    if (type == "boolean") return value.is_boolean();
+    if (type == "object") return value.is_object();
+    if (type == "array") return value.is_array();
+    return false;
+}
+
+ValidationResult invalidSchema(const std::string& message) {
+    return {false, "invalid_action_parameter_schema", message};
+}
+
+ValidationResult invalidValue(const std::string& message) {
+    return {false, "invalid_action_parameter_value", message};
+}
+
+ValidationResult validateValue(const Json& value, const Json& schema, const std::string& path) {
+    if (!schema.is_object()) {
+        return invalidSchema("The authored behavior parameter schema must be an object: " + path);
+    }
+    const auto type = schema.value("type", "");
+    if (!type.empty() && !std::set<std::string>{"string", "integer", "number", "boolean", "object", "array"}.contains(type)) {
+        return invalidSchema("The authored behavior parameter type is unsupported: " + path);
+    }
+    if (schema.contains("items") && type != "array") {
+        return invalidSchema("The authored items rule is only valid for arrays: " + path);
+    }
+    if (schema.contains("uniqueItems") && type != "array") {
+        return invalidSchema("The authored uniqueItems rule is only valid for arrays: " + path);
+    }
+    if (!type.empty() && !typeMatches(value, type)) {
+        return {false, "invalid_action_parameter_type", "The behavior parameter has the wrong type: " + path};
+    }
+    if (schema.contains("enum")) {
+        const auto& values = schema.at("enum");
+        if (!values.is_array()) return invalidSchema("The authored enum must be an array: " + path);
+        if (std::none_of(values.begin(), values.end(), [&value](const auto& allowed) { return allowed == value; })) {
+            return invalidValue("The behavior parameter is outside its authored enum: " + path);
+        }
+    }
+    if (schema.contains("const") && schema.at("const") != value) {
+        return invalidValue("The behavior parameter does not match its authored const: " + path);
+    }
+    if (value.is_number()) {
+        const double number = value.get<double>();
+        if (schema.contains("minimum") &&
+            (!schema.at("minimum").is_number() || number < schema.at("minimum").get<double>())) {
+            return invalidValue("The behavior parameter is below its authored minimum: " + path);
+        }
+        if (schema.contains("maximum") &&
+            (!schema.at("maximum").is_number() || number > schema.at("maximum").get<double>())) {
+            return invalidValue("The behavior parameter exceeds its authored maximum: " + path);
+        }
+    }
+    if (value.is_string()) {
+        for (const auto* bound : {"minLength", "maxLength"}) {
+            if (!schema.contains(bound)) continue;
+            if (!schema.at(bound).is_number_integer() || schema.at(bound).get<std::int64_t>() < 0 ||
+                static_cast<std::uint64_t>(schema.at(bound).get<std::int64_t>()) >
+                    static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max())) {
+                return invalidSchema(std::string("The authored ") + bound +
+                                     " rule must be a non-negative integer: " + path);
+            }
+            const auto limit = static_cast<std::size_t>(schema.at(bound).get<std::int64_t>());
+            if (std::string(bound) == "minLength" && value.get<std::string>().size() < limit) {
+                return invalidValue("The behavior parameter is shorter than its authored minimum: " + path);
+            }
+            if (std::string(bound) == "maxLength" && value.get<std::string>().size() > limit) {
+                return invalidValue("The behavior parameter exceeds its authored maximum: " + path);
+            }
+        }
+    }
+    if (value.is_array()) {
+        for (const auto* bound : {"minItems", "maxItems"}) {
+            if (!schema.contains(bound)) continue;
+            if (!schema.at(bound).is_number_integer() || schema.at(bound).get<std::int64_t>() < 0 ||
+                static_cast<std::uint64_t>(schema.at(bound).get<std::int64_t>()) >
+                    static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max())) {
+                return invalidSchema(std::string("The authored ") + bound +
+                                     " rule must be a non-negative integer: " + path);
+            }
+            const auto limit = static_cast<std::size_t>(schema.at(bound).get<std::int64_t>());
+            if (std::string(bound) == "minItems" && value.size() < limit) {
+                return invalidValue("The behavior parameter array is shorter than its authored minimum: " + path);
+            }
+            if (std::string(bound) == "maxItems" && value.size() > limit) {
+                return invalidValue("The behavior parameter array exceeds its authored maximum: " + path);
+            }
+        }
+        if (schema.contains("uniqueItems")) {
+            if (!schema.at("uniqueItems").is_boolean()) {
+                return invalidSchema("The authored uniqueItems rule must be boolean: " + path);
+            }
+            if (schema.at("uniqueItems").get<bool>()) {
+                std::set<Json> seen;
+                for (const auto& entry : value) {
+                    if (!seen.insert(entry).second) {
+                        return invalidValue("The behavior parameter array contains duplicate items: " + path);
+                    }
+                }
+            }
+        }
+        if (schema.contains("items")) {
+            const auto& itemSchema = schema.at("items");
+            if (!itemSchema.is_object()) return invalidSchema("The authored array item schema must be an object: " + path);
+            for (std::size_t index = 0; index < value.size(); ++index) {
+                const auto result = validateValue(value.at(index), itemSchema,
+                                                  path + "[" + std::to_string(index) + "]");
+                if (!result.valid) return result;
+            }
+        }
+    }
+    if (value.is_object()) {
+        const auto properties = schema.value("properties", Json::object());
+        if (!properties.is_object()) return invalidSchema("The authored properties must be an object: " + path);
+        if (schema.contains("additionalProperties") && !schema.at("additionalProperties").is_boolean()) {
+            return invalidSchema("The authored additionalProperties rule must be boolean: " + path);
+        }
+        if (schema.contains("required")) {
+            if (!schema.at("required").is_array()) return invalidSchema("The authored required must be an array: " + path);
+            std::set<std::string> requiredNames;
+            for (const auto& item : schema.at("required")) {
+                if (!item.is_string() || !requiredNames.insert(item.get<std::string>()).second) {
+                    return invalidSchema("The authored required names must be unique strings: " + path);
+                }
+                if (!value.contains(item.get<std::string>())) {
+                    return {false, "missing_action_parameter",
+                            "A required behavior parameter is missing: " + path + "." + item.get<std::string>()};
+                }
+            }
+        }
+        for (auto item = value.begin(); item != value.end(); ++item) {
+            const auto definition = properties.find(item.key());
+            if (definition == properties.end()) {
+                if (schema.value("additionalProperties", true) == false) {
+                    return {false, "unknown_action_parameter",
+                            "The behavior parameter is not declared: " + path + "." + item.key()};
+                }
+                continue;
+            }
+            const auto result = validateValue(item.value(), definition.value(), path + "." + item.key());
+            if (!result.valid) return result;
+        }
+    }
+    return {true, "ok", "Action parameters satisfy the authored schema."};
+}
+
+}  // namespace
 
 ValidationResult ActionValidator::validate(const DecisionContext& context, const std::string& actionId,
                                           const Json& parameters) {
     for (const auto& candidate : context.candidates) {
         if (candidate.actionId != actionId) continue;
         if (!candidate.parameterSchema.is_object()) {
-            return {false, "invalid_action_parameter_schema", "The authored action parameter schema is not an object."};
+            return invalidSchema("The authored action parameter schema is not an object.");
         }
         // A recipe with no declared inputs is intentionally closed to model
         // parameters. This prevents a free-form target from becoming an
@@ -22,116 +176,7 @@ ValidationResult ActionValidator::validate(const DecisionContext& context, const
             return {true, "ok", "Candidate action is allowed."};
         }
         if (!parameters.is_object()) return {false, "invalid_action_parameters", "Action parameters must be an object."};
-        const auto required = candidate.parameterSchema.value("required", Json::array());
-        if (!required.is_array()) return {false, "invalid_action_parameter_schema", "Action parameter required must be an array."};
-        for (const auto& item : required) {
-            if (!item.is_string() || !parameters.contains(item.get<std::string>())) {
-                return {false, "missing_action_parameter", "A required behavior parameter is missing: " +
-                                                               (item.is_string() ? item.get<std::string>() : std::string("unknown"))};
-            }
-        }
-        const auto properties = candidate.parameterSchema.value("properties", Json::object());
-        if (!properties.is_object()) return {false, "invalid_action_parameter_schema", "Action parameter properties must be an object."};
-        const auto typeMatches = [](const Json& value, const std::string& type) {
-            if (type == "string") return value.is_string();
-            if (type == "integer") return value.is_number_integer();
-            if (type == "number") return value.is_number();
-            if (type == "boolean") return value.is_boolean();
-            if (type == "object") return value.is_object();
-            if (type == "array") return value.is_array();
-            return false;
-        };
-        for (auto item = parameters.begin(); item != parameters.end(); ++item) {
-            const auto definition = properties.find(item.key());
-            if (definition == properties.end()) {
-                if (candidate.parameterSchema.value("additionalProperties", true) == false) {
-                    return {false, "unknown_action_parameter", "The behavior parameter is not declared: " + item.key()};
-                }
-                continue;
-            }
-            if (!definition.value().is_object()) {
-                return {false, "invalid_action_parameter_schema",
-                        "The authored behavior parameter definition must be an object: " + item.key()};
-            }
-            const auto type = definition.value().value("type", "");
-            if (!type.empty() && !typeMatches(item.value(), type)) {
-                return {false, "invalid_action_parameter_type", "The behavior parameter has the wrong type: " + item.key()};
-            }
-            const auto& rules = definition.value();
-            if (rules.contains("enum")) {
-                const auto values = rules.at("enum");
-                if (!values.is_array() || std::none_of(values.begin(), values.end(),
-                                                       [&item](const auto& allowed) {
-                                                           return allowed == item.value();
-                                                       })) {
-                    return {false, "invalid_action_parameter_value",
-                            "The behavior parameter is outside its authored enum: " + item.key()};
-                }
-            }
-            if (item.value().is_number()) {
-                const double number = item.value().get<double>();
-                if (rules.contains("minimum") && (!rules.at("minimum").is_number() ||
-                                                    number < rules.at("minimum").get<double>())) {
-                    return {false, "invalid_action_parameter_value",
-                            "The behavior parameter is below its authored minimum: " + item.key()};
-                }
-                if (rules.contains("maximum") && (!rules.at("maximum").is_number() ||
-                                                    number > rules.at("maximum").get<double>())) {
-                    return {false, "invalid_action_parameter_value",
-                            "The behavior parameter exceeds its authored maximum: " + item.key()};
-                }
-            }
-            if (item.value().is_array() && rules.contains("items")) {
-                const auto itemSchema = rules.at("items");
-                if (!itemSchema.is_object()) {
-                    return {false, "invalid_action_parameter_schema",
-                            "The authored array item schema must be an object: " + item.key()};
-                }
-                const auto itemType = itemSchema.value("type", "");
-                if (itemType.empty() ||
-                    std::any_of(item.value().begin(), item.value().end(),
-                                [&itemType, &typeMatches](const auto& entry) {
-                                    return !typeMatches(entry, itemType);
-                                })) {
-                    return {false, "invalid_action_parameter_type",
-                            "The behavior parameter array contains an item with the wrong type: " + item.key()};
-                }
-            }
-            if (item.value().is_array()) {
-                if (rules.contains("uniqueItems")) {
-                    if (!rules.at("uniqueItems").is_boolean()) {
-                        return {false, "invalid_action_parameter_schema",
-                                "The authored uniqueItems rule must be boolean: " + item.key()};
-                    }
-                    if (rules.at("uniqueItems").get<bool>()) {
-                        std::set<Json> seen;
-                        for (const auto& entry : item.value()) {
-                            if (!seen.insert(entry).second) {
-                                return {false, "invalid_action_parameter_value",
-                                        "The behavior parameter array contains duplicate items: " + item.key()};
-                            }
-                        }
-                    }
-                }
-                for (const auto* bound : {"minItems", "maxItems"}) {
-                    if (!rules.contains(bound)) continue;
-                    if (!rules.at(bound).is_number_integer() || rules.at(bound).get<std::int64_t>() < 0) {
-                        return {false, "invalid_action_parameter_schema",
-                                std::string("The authored ") + bound + " rule must be a non-negative integer: " + item.key()};
-                    }
-                    const auto limit = static_cast<std::size_t>(rules.at(bound).get<std::int64_t>());
-                    if (std::string(bound) == "minItems" && item.value().size() < limit) {
-                        return {false, "invalid_action_parameter_value",
-                                "The behavior parameter array is shorter than its authored minimum: " + item.key()};
-                    }
-                    if (std::string(bound) == "maxItems" && item.value().size() > limit) {
-                        return {false, "invalid_action_parameter_value",
-                                "The behavior parameter array exceeds its authored maximum: " + item.key()};
-                    }
-                }
-            }
-        }
-        return {true, "ok", "Candidate action and its parameter contract are allowed."};
+        return validateValue(parameters, candidate.parameterSchema, "parameters");
     }
     return {false, "unknown_action_id", "The provider selected an action outside the authored candidate set."};
 }
