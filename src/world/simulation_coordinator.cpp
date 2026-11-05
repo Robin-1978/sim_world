@@ -32,7 +32,8 @@ void SimulationCoordinator::advanceMinutes(std::int64_t minutes) {
             world_.state_.now.minute = boundary;
             // TransactionScope commits one revision. Account for quiet logical
             // minutes coalesced before the final observable boundary.
-            world_.state_.revision += static_cast<std::uint64_t>(elapsedMinutes - 1);
+            world_.transactionManager_.addRevisions(
+                world_.state_, static_cast<std::uint64_t>(elapsedMinutes - 1));
             world_.simulationMetrics_.scheduledBoundaries++;
             world_.simulationMetrics_.simulatedMinutes += elapsedMinutes;
             StimulusSystem(world_).expire();

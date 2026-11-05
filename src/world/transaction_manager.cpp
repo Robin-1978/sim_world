@@ -89,6 +89,15 @@ void TransactionManager::markChanged(WorldState& state) {
     frames_.front().changed = true;
 }
 
+void TransactionManager::addRevisions(WorldState& state, std::uint64_t count) {
+    if (count == 0) return;
+    if (frames_.empty()) {
+        state.revision += count;
+        return;
+    }
+    state.revision += count;
+}
+
 std::string TransactionManager::currentCorrelation() const {
     return frames_.empty() ? std::string{} : frames_.back().correlationId;
 }

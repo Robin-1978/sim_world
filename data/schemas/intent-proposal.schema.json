@@ -2,7 +2,8 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "World Intelligence intent proposal",
   "type": "object",
-  "required": ["action_id", "intent", "motivation", "expected_outcome", "confidence", "world_revision", "npc_state_version"],
+  "description": "The structured payload returned by the decision provider. Runtime adds world and NPC versions from the captured context before validation and commit.",
+  "required": ["action_id", "intent", "motivation", "expected_outcome", "confidence", "dialogue", "cited_stimulus_ids", "tradeoffs", "expected_relief", "parameters"],
   "properties": {
     "action_id": {"type": "string"},
     "intent": {"type": "string"},
@@ -12,9 +13,8 @@
     "cited_stimulus_ids": {"type": "array", "items": {"type": "string"}},
     "tradeoffs": {"type": "array", "items": {"type": "string"}},
     "expected_relief": {"type": "object", "additionalProperties": {"type": "number", "minimum": 0, "maximum": 1}},
-    "world_revision": {"type": "integer", "minimum": 0},
-    "npc_state_version": {"type": "integer", "minimum": 0},
-    "dialogue": {"type": "string"}
+    "parameters": {"type": "object"},
+    "dialogue": {"type": "string", "minLength": 1}
   },
   "additionalProperties": false
 }

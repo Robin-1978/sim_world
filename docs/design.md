@@ -47,7 +47,7 @@ WorldState facts
 
 已有并获准的需求模型在运行时自动推进，不需要人工逐分钟批准。LLM 在已注册候选中选择交互意图，也不需要人工逐句批准，但必须通过版本、权限和业务规则校验。
 
-LLM 提出新的需求类型、驱动力曲线、集体指标、行为配方、内容实体或规则组合时，才进入演化治理：`Proposal -> Validate -> Sandbox/Replay -> Approval Policy -> Versioned Activate -> Measure -> Rollback/Retain`。当前由开发者/世界设计者明确批准；以后可以让低风险声明式提案按策略自动批准，高风险提案仍需人工批准。事务、权限、事件格式、存档、调度、组件存储和其他 Runtime Core 永远不能由 LLM 在线修改，只能由开发者改代码、测试、迁移和发布。
+LLM 提出新的需求类型、驱动力曲线、集体指标、行为配方、内容实体或规则组合时，才进入演化治理：`Proposal -> Validate -> Sandbox/Replay -> Independent Approval -> Versioned Activate -> Measure -> Rollback/Retain`。当前所有 Overlay 都必须由开发者或世界设计者独立批准；Runtime 不提供自动批准或自动激活开关。事务、权限、事件格式、存档、调度、组件存储和其他 Runtime Core 永远不能由 LLM 在线修改，只能由开发者改代码、测试、迁移和发布。
 
 ## 3. 世界实例与内容边界
 
@@ -93,7 +93,7 @@ JSON 是内容和提案的机器边界，C++ 类型是编译期契约，WorldSta
 
 Maslow 的五层图可以用于角色底稿和玩家可读的叙事提示，但不足以作为第一期 Runtime 的需求模型：其层级证据并不支持固定闸门，不能表示同一主体的并行需求，也不提供外部刺激、满足路径、学习、制度约束和可执行协议。当前实现从四个需求域中各定义至少一项具体需求，以验证通用链路；这些是小村庄的内容分类，不是 Runtime 的枚举。需求域是非空的内容标签，其他世界可以增加 `ecological`、`institutional` 或新的域，而无需修改 C++ 驱动力内核；受治理的演化提案仍必须为新域提供满足配方、来源和可验证结果。
 
-一项具体需求由 `NeedDefinition` 定义，运行时实例由 `NeedState` 保存。Definition 声明 `id`、`domain`、可选 `dimension`、初始缺口、基础变化率、临界阈值、基础权重与优先级、一个或多个满足配方以及来源/版本。State 保存当前缺口、最近更新时间、最近满足来源、有限度敏感度、预期满足和适应版本。这里的“五个驱动属性”是同一驱动状态的五个操作维度，不是五个人类需求：
+一项具体需求由 `NeedDefinition` 定义，运行时实例由 `NeedState` 保存。Definition 声明 `id`、`domain`、可选 `dimension`、初始缺口、基础变化率、临界阈值、基础权重与优先级、一个或多个满足配方以及来源/版本。State 保存当前缺口、最近更新时间、最近满足发生的 World Revision、有限度敏感度、预期满足和适应版本。这里的“五个驱动属性”是同一驱动状态的五个操作维度，不是五个人类需求：
 
 1. **缺口**：当前状态与目标状态的差异；
 2. **紧迫度**：缺口、临界阈值和时间窗口共同形成的行动压力；
@@ -104,10 +104,11 @@ Maslow 的五层图可以用于角色底稿和玩家可读的叙事提示，但�
 已经批准的定义由 DriveSystem 随游戏时间更新：
 
 ```text
-deficit(t + Δt) = clamp(deficit(t) + decay_per_hour × Δt - committed_relief, 0, 1)
+deficit_after_decay = clamp(deficit_before + decay_per_hour × Δt, 0, 1)
+deficit_after_action = clamp(deficit_after_decay - committed_relief, 0, 1)
 ```
 
-`DriveSystem::evaluate` 将这些维度投影为结构化 `DriveEvaluation`：`urgency` 把缺口和临界区间归一化，`effective_weight = priority + sensitivity × urgency`，`expected_relief` 取个体有来源的经验值（没有时使用内容包初值），`confidence` 取当前证据置信度，单个需求对候选行动的贡献为 `effective_weight × expected_relief × confidence`。`expected_relief` 本身不再乘置信度，避免在 GoalSelector 中重复惩罚同一份证据不确定性。`drive` 数值只是同一投影的压力摘要，不再承担第二套排序语义。
+`DriveSystem::evaluate` 将这些维度投影为结构化 `DriveEvaluation`。当前实现先计算 `base = deficit²`；当缺口超过临界阈值时，使用 `criticalMultiplier = 1 + 2 × (deficit - threshold) / (1 - threshold)`，再取 `urgency = clamp(base × criticalMultiplier / 3, 0, 1)`。随后 `effective_weight = priority + sensitivity × urgency`，`expected_relief` 取个体有来源的经验值（没有时使用内容包初值），`confidence` 取当前证据置信度，单个需求对候选行动的贡献为 `effective_weight × expected_relief × confidence`。`expected_relief` 本身不再乘置信度，避免在 GoalSelector 中重复惩罚同一份证据不确定性。`drive` 数值只是同一投影的压力摘要，不再承担第二套排序语义。
 
 ```text
 expected_relief(action, need) = learned_expectation
@@ -128,7 +129,7 @@ expected_relief(action, need) = learned_expectation
 外驱是平台从已提交事件、可观察环境和结构变化中投射给特定主体的刺激，不是另一份需求，也不是装饰性的长字符串。`StimulusState` 至少记录 `stimulus_id`、来源事实/事件、感知者、相关实体、类型、出现时间、到期时间、可见范围、来源置信度、强度、紧迫度、新颖性、正负效价和基础显著性。内部至少要区分生理变化、环境事件、社会请求/承诺、机会、威胁、制度变化和异常发现；具体类型仍由内容声明。
 
 ```text
-salience = clamp(exposure × relevance × intensity × urgency × novelty × source_confidence, 0, 1)
+salience = clamp(relevance × intensity × urgency × novelty × source_confidence, 0, 1)
 effective_salience = salience × adapted_sensitivity(source_type, actor)
 ```
 
@@ -155,19 +156,19 @@ StructureObservation
   -> retain / revise / rollback
 ```
 
-批准权属于平台治理策略，而不是提出提案的 LLM。当前，新的需求定义、规则、拓扑、能力、行为配方和结构 overlay 由开发者或世界设计者批准；LLM 可以创建提案、补充证据和比较候选，但不得批准自己的提案。低风险且可在沙箱中完整验证的声明式变化以后可以自动批准，核心事务、权限、事件格式、调度、存档和组件存储等 Runtime Core 只能由开发者通过代码、测试、迁移和发布审核演化。任何自动激活都必须记录提案、审批者/策略、内容版本、模拟版本、指标、激活 Revision 和回滚结果。
+批准权属于平台治理策略，而不是提出提案的 LLM。当前，新的需求定义、规则、拓扑、能力、行为配方和结构 overlay 都由开发者或世界设计者独立批准；LLM 可以创建提案、补充证据和比较候选，但不得批准自己的提案。Runtime 当前没有自动批准或自动激活路径；核心事务、权限、事件格式、调度、存档和组件存储等 Runtime Core 只能由开发者通过代码、测试、迁移和发布审核演化。每次批准和激活都记录提案、审批者、内容版本、模拟版本、指标、激活 Revision 和回滚结果。
 
 治理策略按风险分级而不是对所有提案执行同样重的流程：个体策略调整要求目标范围、Schema 和回放不变量；日程和行为配方要求沙箱与独立批准；实体原型和制度规则要求 baseline/scenario 指标比较、权限审查和人工批准；Runtime Core、任意脚本、权限模型和存档格式只能通过开发者代码发布。所有等级都保留同一 Proposal 契约和审计字段。
 
 ### 意图、目标与行动
 
-`GoalSelector` 用需求驱动力、预期满足、资源成本、风险、关系影响、长期目标连续性和时间约束对作者定义的候选行动排序。它提供可解释的候选空间，不要求每个决策都调用 LLM。LLM 在这个空间内进行情境解释、社会权衡、候选排序或提出已注册的 IntentProposal。状态机管理工作、移动、交谈、打断、休眠和不可用模式；行为树执行短计划并返回 Success/Failure/Running/Interrupted；WorldService 最终验证实际结果。
+`GoalSelector` 用需求驱动力、预期满足、资源成本、风险、关系影响、内容声明的未来价值和时间约束对作者定义的候选行动排序。它提供可解释的候选空间，不要求每个决策都调用 LLM。LLM 在这个空间内进行情境解释、社会权衡、候选排序或提出已注册的 IntentProposal。状态机管理工作、移动、交谈、打断、休眠和不可用模式；行为树执行短计划并返回 Success/Failure/Running/Interrupted；WorldService 最终验证实际结果。
 
 候选行动的效用可表达为：
 
 ```text
 utility(a) = Σ(DriveEvaluation.utilityContribution_i)
-             + goal_continuity + relationship_effect + future_value
+             + relationship_effect + future_value
              - resource_cost - risk_cost - constraint_penalty
 ```
 
@@ -362,11 +363,11 @@ flowchart TB
     Tx --> World
     Tx --> Journal[EventJournal]
     Journal --> Memory[Stimulus / Memory / Knowledge / Experience]
-    Journal --> Persist[JSON or static SQLite checkpoint]
+    Journal --> Persist[SQLite instance checkpoint]
     Evolution[EvolutionManager + Sandbox + Approval] --> Content
 ```
 
-`WorldService` 是应用入口，`WorldState` 是事实，`EntityRegistry` 是投影，Domain Systems 执行规则。`WorldCommandSystem` 只协调实体、拓扑、资源转移、交易、关系、组织成员和移动命令；它不拥有第二份状态，也不绕过 `WorldService` 的事务和事件边界。`EntityProjectionSystem` 只根据已提交 `WorldState + ContentPack` 重建和同步 `EntityRegistry`，不拥有可独立修改的实体事实；`DecisionContextProjector` 是只读的主体视图边界：它根据 `WorldState + ContentPack` 和主体身份生成位置、所有权、关系、需求、记忆、知识、经验、刺激、约束、候选计划和 BT 摘要；它不能提交命令，也不拥有事实。`ResourceSystem` 负责与 NPC/故事无关的资源数量、公共池/实体库存解析、转移、预留和释放校验；`SocialSystem` 负责关系轴、组织指标和成员关系的通用事实变换；`CognitionSystem` 负责 NPC 作用域的知识和经验写入、来源事件校验、置信度合并和审计事件，行为执行器不能直接改写这些容器；`StimulusSystem` 负责按内容声明把已提交事件投射为主体可见的外驱、重复刺激习惯化、容量淘汰和到期，不拥有事件事实；`NpcSimulationSystem` 负责内容声明的 Activity/ProcessExecution、预留抢占、挂起恢复和日界策略投影；`BehaviorExecutionSystem` 负责将候选计划解析为 BehaviorRecipe/BT、评估注册条件、绑定参数并调用有限元动作，同时把移动、资源、关系、合同和安全效果交给 WorldService 的高层命令；`CommandDispatcher` 只负责解析 Runtime 公共命令协议并路由到这些高层命令，不拥有事实或内容规则；`WorldIntelligenceSystem` 负责把按主体裁剪的 DecisionContext 交给 Provider、校验返回的意图、启动 ProcessExecution 并处理异步结果，`IntelligenceCoordinator` 只管理 Provider 队列和请求生命周期；`WorldEvolutionSystem` 负责 Level 1/2 提案所需的世界摘要、证据窗口、Provider 请求以及已批准 Overlay 的激活/回退协调，`EvolutionManager` 负责纯验证、沙箱和审批策略；`SecuritySystem` 负责内容声明的冲突、威胁、防守、撤离和修复参数，解析主体与目标并把安全事实交给统一事务入口；`SimulationCoordinator` 负责从当前游戏时间选择下一个调度边界、打开一次事实事务、协调活动/合同/日程系统、在提交后泵送 Provider 结果和 durable checkpoint；它不拥有资源或 NPC 事实，`SimulationScheduler` 仍是纯边界计算器。这些系统都不打开独立事实边界、不发布事件，由 `WorldService` 协调事务和审计。`MetaActionExecutor` 只接收内容绑定的 operator 定义和参数，执行已注册的有限 Primitive；需要创建 Promise、移动、交易或安全事实时只调用 `WorldService` 注入的高层命令回调。这样 JSON 可以组合 operator，LLM 可以提出新的 BT 配方，但不能由配置或模型直接执行任意代码。时间边界由纯函数式 `SimulationScheduler` 计算；被合并的安静分钟仍逐分钟计入 `world_revision` 与模拟时间，因此分段推进和一次大跳在无外部干预时保持相同事实。`TransactionManager` 独占保存点、Revision 和提交/回滚，`EventJournal` 独占事件身份、因果和提交后发布，`IntelligenceCoordinator` 独占异步 Provider 队列和挂起请求身份；这些模块都不拥有资源、NPC 或社会规则。`EventLog` 记录提交事实，`EventBus` 只通知已提交事件，View/Renderer 只读。Snapshot 与 JSONL Replay 通过可注入的 `IWorldPersistence` 写入；`JsonFilePersistence` 先写临时文件、刷新并完成后再替换目标路径，`SqlitePersistence`（由 CMake 固定构建的静态 SQLite 适配器）则把同名快照或 Replay 工件替换放在单个 SQLite 事务中。两者都只保存已提交表示，不产生第二份可写 WorldState。当前逻辑提交与 durable checkpoint 是明确的两层契约：内存事务保证 WorldState/EventLog 一致，显式 checkpoint 保证提交表示的一致替换；每个根事务自动 durable commit 和崩溃恢复协议属于后续生产化工作。创建实例时，`ContentPackLoader::readDocuments` 把 JSON 模板写入 `SqlitePersistence` 的内容文档表；`WorldService::loadSqliteInstance` 只从该内容快照和 durable checkpoint 恢复，原始 JSON 目录可以离线或不存在。SQLite 同一事务保存运行检查点，JSON 文件适配器仍仅用于开发/测试。视觉资产和 C++ Operator 属于不可变部署 bundle，不作为可执行内容写入数据库。
+`WorldService` 是应用入口，`WorldState` 是事实，`EntityRegistry` 是投影，Domain Systems 执行规则。`WorldCommandSystem` 只协调实体、拓扑、资源转移、交易、关系、组织成员和移动命令；它不拥有第二份状态，也不绕过 `WorldService` 的事务和事件边界。`EntityProjectionSystem` 只根据已提交 `WorldState + ContentPack` 重建和同步 `EntityRegistry`，不拥有可独立修改的实体事实；`DecisionContextProjector` 是只读的主体视图边界：它根据 `WorldState + ContentPack` 和主体身份生成位置、所有权、关系、需求、记忆、知识、经验、刺激、约束、候选计划和 BT 摘要；它不能提交命令，也不拥有事实。`ResourceSystem` 负责与 NPC/故事无关的资源数量、公共池/实体库存解析、转移、预留和释放校验；`SocialSystem` 负责关系轴、组织指标和成员关系的通用事实变换；`CognitionSystem` 负责 NPC 作用域的知识和经验写入、来源事件校验、置信度合并和审计事件，行为执行器不能直接改写这些容器；`StimulusSystem` 负责按内容声明把已提交事件投射为主体可见的外驱、重复刺激习惯化、容量淘汰和到期，不拥有事件事实；`NpcSimulationSystem` 负责内容声明的 Activity/ProcessExecution、预留抢占、挂起恢复和日界策略投影；`BehaviorExecutionSystem` 负责将候选计划解析为 BehaviorRecipe/BT、评估注册条件、绑定参数并调用有限元动作，同时把移动、资源、关系、合同和安全效果交给 WorldService 的高层命令；`CommandDispatcher` 只负责解析 Runtime 公共命令协议并路由到这些高层命令，不拥有事实或内容规则；`WorldIntelligenceSystem` 负责把按主体裁剪的 DecisionContext 交给 Provider、校验返回的意图、启动 ProcessExecution 并处理异步结果，`IntelligenceCoordinator` 只管理 Provider 队列和请求生命周期；`WorldEvolutionSystem` 负责 Level 1/2 提案所需的世界摘要、证据窗口、Provider 请求以及已批准 Overlay 的激活/回退协调，`EvolutionManager` 负责纯验证、沙箱和审批策略；`SecuritySystem` 负责内容声明的冲突、威胁、防守、撤离和修复参数，解析主体与目标并把安全事实交给统一事务入口；`SimulationCoordinator` 负责从当前游戏时间选择下一个调度边界、打开一次事实事务、协调活动/合同/日程系统、在提交后泵送 Provider 结果和 durable checkpoint；它不拥有资源或 NPC 事实，`SimulationScheduler` 仍是纯边界计算器。这些系统都不打开独立事实边界、不发布事件，由 `WorldService` 协调事务和审计。`MetaActionExecutor` 只接收内容绑定的 operator 定义和参数，执行已注册的有限 Primitive；需要创建 Promise、移动、交易或安全事实时只调用 `WorldService` 注入的高层命令回调。这样 JSON 可以组合 operator，LLM 可以提出新的 BT 配方，但不能由配置或模型直接执行任意代码。时间边界由纯函数式 `SimulationScheduler` 计算；被合并的安静分钟仍逐分钟计入 `world_revision` 与模拟时间，因此分段推进和一次大跳在无外部干预时保持相同事实。`TransactionManager` 独占保存点、Revision 和提交/回滚，EventJournal 独占事件身份、因果和提交后发布，且通过 `addRevisions` 统一处理合并分钟的版本增量；`IntelligenceCoordinator` 独占异步 Provider 队列和挂起请求身份；这些模块都不拥有资源、NPC 或社会规则。`EventLog` 记录提交事实，`EventBus` 只通知已提交事件，View/Renderer 只读。生产实例以 SQLite 为默认持久化边界：`SqlitePersistence` 由 CMake 固定构建为静态适配器，保存内容快照、WorldState、EventLog、Replay 和 Overlay。`JsonFilePersistence` 只用于开发、测试和显式检查点，不是产品实例的第二个事实来源。创建实例时，`ContentPackLoader::readDocuments` 把 JSON 模板写入 SQLite 内容文档表；`WorldService::loadSqliteInstance` 只从该内容快照和 durable checkpoint 恢复，原始 JSON 目录可以离线或不存在。视觉资产和 C++ Operator 属于不可变部署 bundle，不作为可执行内容写入数据库。
 
 Runtime Core 只保证实体、组件存储、事务、Revision、事件、持久化、回放、权限和调度基础原语；具体的 `SimulationScheduler`/`SimulationCoordinator` 推进策略，以及 Needs、Drive、Perception、Goal、Behavior、Resource 和 Relationship，都是可组合的 World Simulation Framework 能力。当前实现可以把这组能力编译在同一进程中，但不能把村庄角色或某一套心理模型写进 Core。这样同一 Runtime 才能加载不同内容实例，且 LLM 只能通过已注册能力提出变化。
 
@@ -415,7 +416,7 @@ Command / IntentProposal / EvolutionProposal
 
 ### 原子元动作与复合行为
 
-Runtime 只向内容和模型暴露一组可审计的原子元动作。元动作不是任意字段写入器，而是带有 `id`、参数 Schema、前置条件、目标范围、权限、资源成本、直接效果、产生事件的规则和失败码的注册执行器。注册表还必须标记 `implemented`；未实现的设计目录项不能被内容加载器接受。后续能力必须通过注册表和 C++ 执行器增加，不能由 JSON 指向任意函数或代码。
+Runtime 只向内容和模型暴露一组可审计的原子元动作。元动作不是任意字段写入器，而是带有 `id`、参数 Schema、前置条件、目标范围、权限、资源成本、直接效果、产生事件的规则和失败码的注册执行器。当前以注册表中存在的 operator 作为“已实现”判定，内容加载器拒绝未知 operator；不存在一个与代码同步的 `implemented` 布尔字段。后续能力必须通过注册表和 C++ 执行器增加，不能由 JSON 指向任意函数或代码。
 
 小村庄 的元动作目录分为“当前已实现的运行时能力”和“尚未实现、属于后续能力设计入口的能力”。设计目录不能被误读为已注册执行器：
 
@@ -467,13 +468,13 @@ IntentProposal + BehaviorRecipe
 
 ### 运行环境身份与性能观测
 
-每个 Snapshot 和 Replay 都记录可复现环境身份：Runtime/Simulation 版本、Content Pack 与 Game Instance 版本、Intelligence Profile/Prompt 版本、活动 Overlay 版本、随机源配置、Provider/模型和决策通道。模型输出不是事实，但必须作为决策审计输入保存；恢复和 Replay 不重新调用 Provider。
+每个 Snapshot 和 Replay 都记录可复现环境身份：Runtime/Simulation 版本、Content Pack 与 Game Instance 版本、Intelligence Profile/Prompt 版本、活动 Overlay 版本、Provider/模型和决策通道。当前模拟没有独立的随机数状态；如果未来引入随机过程，必须先把种子和状态加入 Snapshot 契约。模型输出不是事实，但必须作为决策审计输入保存；恢复和 Replay 不重新调用 Provider。
 
 持续运行的规模指标由 `SimulationMetrics` 和 Provider 队列指标记录：主体数量、每游戏日推进耗时、决策平均/P95 延迟和过期率、队列积压、DecisionContext token 预算、事件量、Snapshot/Replay 大小与耗时、资源竞争冲突率和演化沙箱耗时。当前共享模型槽位服务小世界；扩大主体数量前先测量这些指标，再决定并发和调度策略。
 
 ## 8. JSON 内容、行为和提案契约
 
-Content Pack、Game Instance、Intelligence Profile、Behavior DSL、Exchange Contract、Evolution/Scenario Proposal、Snapshot、EventLog 和 LLM 结构化输出统一使用 JSON，并带 `kind`、`schema_version`、版本身份和稳定 ID。当前 NPC 需求使用 `data/schemas/npc-content.schema.json`，LLM 意图使用 `data/schemas/intent-proposal.schema.json`，行为配方、节点、优先级和抢占策略使用 `data/schemas/behavior-pack.schema.json`，合同状态使用 `data/schemas/exchange-contract.schema.json`；WorldEvent 使用事件 schema 4，除时间、参与者、World Revision 和数据载荷外还包含 `event_id`、`correlation_id`、`causation_sequence`、`content_version` 与 `simulation_version`，契约位于 `data/schemas/world-event.schema.json`；世界拓扑、实体和可选 `scene_asset/camera` 表现配置使用 `data/schemas/village-content.schema.json`。`scene_asset` 相对于 Content Pack 根目录解析，客户端当前支持 `slanted_top_down` 与 `top_down` 两种相机模式。加载器检查重复 ID、缺失引用、连接端点、需求 satisfier 和 schema 版本；内容规则只能调用 Runtime 已注册的能力，不能加载任意脚本。客户端从当前内容包投影空间实体、连接、NPC 标记、资源 HUD 和可选场景资产，不按 `world_id` 或角色 ID 选择渲染代码。
+Content Pack、Game Instance、Intelligence Profile、Behavior DSL、Exchange Contract、Evolution/Scenario Proposal、Snapshot、EventLog 和 LLM 结构化输出统一使用 JSON，并带 `kind`、`schema_version`、版本身份和稳定 ID。NPC 需求、LLM 意图、行为配方、合同、WorldEvent、世界拓扑和表现配置分别以 `data/schemas/` 下对应文件为契约；运行时常量和版本身份以 `src/core/types.hpp` 为准，不在总设计重复固定数字。加载器检查重复 ID、缺失引用、连接端点、需求 satisfier 和 schema 版本；内容规则只能调用 Runtime 已注册的能力，不能加载任意脚本。客户端从当前内容包投影空间实体、连接、NPC 标记、资源 HUD 和可选场景资产，不按 `world_id` 或角色 ID 选择渲染代码。
 
 Behavior DSL 只组合注册节点、条件和元动作，例如：
 
@@ -564,17 +565,17 @@ Behavior DSL 只组合注册节点、条件和元动作，例如：
 
 ## 9. 存档、回放和调试
 
-Snapshot 包含 `save_schema_version`、`simulation_version`、`content_version/hash`、`world_id`、`instance_id`、`world_revision`、`event_sequence`、游戏时间、实体生命周期、需求状态、社会关系、组织成员与指标、承诺、交换合同、进行中的 `ProcessExecution`、NPC 的 `lastSimulationTick/lastDriveTick`、幂等键和需要的 RNG 状态。运行态 NPC 只保存 `definition_id`，不复制内容包里的角色定义；角色名、角色、公开/隐藏目标等静态数据在加载时从当前内容包解析。`instance_id` 与 `content_version` 共同锁定这次运行所使用的 Game Instance 和 Content Pack，任何一个不匹配都直接拒绝恢复。`event_sequence` 是快照截断点，后续 EventLog 从其后追加。加载时校验 `definition_id` 可解析且 `content_version`、`instance_id` 与当前内容一致，并验证事件序号、因果链和事件版本来源，任一不满足直接拒绝并报出差异，不回退到旧字段或静默重置。当前未发布，不保留旧存档兼容路径；schema 改变时同步更新存档读写、测试和文档。当前快照 schema 为 18，模拟版本为 `adaptive-runtime-1.20`；实体库存与公共资源池分开保存，资源转移只能通过注册 operator 改变两者。激活中的 overlay 以有序记录保存 proposal ID、基线内容版本、激活版本和类型化操作；恢复时从基线 Content Pack 重放这些已批准操作，回滚也由同一版本栈重建。已经提交的世界事实和 EventLog 不随 overlay 回退。需要显式 durable checkpoint 时，`WorldService::saveDurableCommit` 把已提交 Snapshot 与 Replay 交给当前持久化适配器；SQLite 在一个事务中保存状态载荷、事件载荷、Revision、幂等键和 Overlay 投影。`DurableCheckpointPolicy` 默认关闭，可选择在已提交调度边界按分钟周期或日边界写入；它不会把 I/O 放进每个 Tick 或打开的事务，逐根事务自动写盘仍需更高的生产化崩溃恢复契约。
+Snapshot 包含 `save_schema_version`、`simulation_version`、`content_version/hash`、`world_id`、`instance_id`、`world_revision`、`event_sequence`、游戏时间、实体生命周期、需求状态、社会关系、组织成员与指标、承诺、交换合同、进行中的 `ProcessExecution`、NPC 的 `lastSimulationTick/lastDriveTick` 和幂等键。运行态 NPC 只保存 `definition_id`，不复制内容包里的角色定义；角色名、角色、公开/隐藏目标等静态数据在加载时从当前内容包解析。`instance_id` 与 `content_version` 共同锁定这次运行所使用的 Game Instance 和 Content Pack，任何一个不匹配都直接拒绝恢复。`event_sequence` 是快照截断点，后续 EventLog 从其后追加。加载时校验 `definition_id` 可解析且 `content_version`、`instance_id` 与当前内容一致，并验证事件序号、因果链和事件版本来源，任一不满足直接拒绝并报出差异，不回退到旧字段或静默重置。当前未发布，不保留旧存档兼容路径；schema 改变时同步更新存档读写、测试和文档。快照、事件和模拟版本的当前常量见 `src/core/types.hpp`，具体 JSON 约束见 `data/schemas/`，不在本设计文档重复固定数字；实体库存与公共资源池分开保存，资源转移只能通过注册 operator 改变两者。激活中的 overlay 以有序记录保存 proposal ID、基线内容版本、激活版本和类型化操作；恢复时从基线 Content Pack 重放这些已批准操作，回滚也由同一版本栈重建。已经提交的世界事实和 EventLog 不随 overlay 回退。需要显式 durable checkpoint 时，`WorldService::saveDurableCommit` 把已提交 Snapshot 与 Replay 交给当前持久化适配器；SQLite 在一个事务中保存状态载荷、事件载荷、Revision、幂等键和 Overlay 投影。`DurableCheckpointPolicy` 默认关闭，可选择在已提交调度边界按分钟周期或日边界写入；它不会把 I/O 放进每个 Tick 或打开的事务，逐根事务自动写盘仍需更高的生产化崩溃恢复契约。
 
-当前实现同时支持两种产物：Snapshot 负责普通检查点恢复；可选 Replay Package 保存基线状态、从基线到当前状态的聚合 JSON Patch、事件范围、World Revision 和状态摘要。`replay()` 会实际应用该 Patch，追加事件并通过最终 Snapshot 校验，所以它能验证“这份审计包是否重建出同一事实”；它同时接受独立 JSONL Replay Package 和 `saveDurableCommit()` 生成的显式 checkpoint artifact。这仍不是 Event Sourcing：事件载荷尚未被定义为逐领域 reducer，不能声称仅靠事件从初始状态重建；Replay Package 是提交效果重放和因果审计。Replay 只在显式生成时做一次聚合 diff，不进入每个 tick 的运行路径。未来确定性模拟回放还要重跑命令、Provider 响应、上下文版本、RNG 和规则版本；不能把检查点恢复宣传成完整确定性重算。Bullet 只承诺固定环境下尽量复现，规则层和远端 LifeEvent 才是跨平台确定性目标。
+当前实现同时支持两种产物：Snapshot 负责普通检查点恢复；可选 Replay Package 保存基线状态、从基线到当前状态的聚合 JSON Patch、事件范围、World Revision 和状态摘要。`replay()` 会实际应用该 Patch，追加事件并通过最终 Snapshot 校验，所以它能验证“这份审计包是否重建出同一事实”；它同时接受独立 JSONL Replay Package 和 `saveDurableCommit()` 生成的显式 checkpoint artifact。这仍不是 Event Sourcing：事件载荷尚未被定义为逐领域 reducer，不能声称仅靠事件从初始状态重建；Replay Package 是提交效果重放和因果审计。Replay 只在显式生成时做一次聚合 diff，不进入每个 tick 的运行路径。未来如果引入随机过程，必须先把随机种子、状态和 Provider 响应契约纳入快照，再讨论全量确定性重算；不能把检查点恢复宣传成完整确定性重算。Bullet 只承诺固定环境下尽量复现，规则层和远端 LifeEvent 才是跨平台确定性目标。
 
 文本调试界面和事件检查器至少显示：当前时间、Revision、实体生命周期、NPC 需求缺口/驱动力、当前意图和目标、行为树节点、最近 Command/Proposal、拒绝原因、事件序列、Provider 响应分类、保存截断点和回放差异。所有诊断读取已提交状态，暂存提案必须明确标记。
 
-## 10. 当前能力、验收闭环和后续扩展
+## 10. 验收契约与扩展边界
 
-### 已经稳定的纵向闭环
+### 纵向闭环契约
 
-当前 Runtime 已经用三个内容实例验证同一条因果链：
+首个世界实例必须能够证明同一条因果链，而不是依赖预写剧情：
 
 ```text
 资源/环境变化 -> 需求缺口与外驱 -> LLM 理解和权衡
@@ -583,16 +584,15 @@ Snapshot 包含 `save_schema_version`、`simulation_version`、`content_version/
 -> 下一轮主体上下文与计划变化 -> EventLog/Snapshot 可审计
 ```
 
-已验证的能力包括：
+验收记录、运行状态和真实模型验证结果只写入 `release-continuation-plan.md`；本设计只规定闭环必须满足的契约。Runtime 必须保证：
 
-- 小村庄、潮门港和 Glass Orchard 使用同一 Runtime，角色、地点、动作和需求域来自 Content Pack；
-- 默认产品路径使用配置的本地 LLM。玩家对白先做话语行为理解，再生成回答；自驱决策选择一个已登记计划并启动跨 Tick 的 BT/ProcessExecution。模型不可用时规则时间和已经批准的过程仍可推进，但 Runtime 不伪造新的主体意图；
-- Goal、ProcessExecution、FSM 和 BT 由唯一 `NpcActivity` 生命周期统一，BT 每个 Tick 只报告 `Running/Success/Failure/Interrupted`，不直接写 Goal 或 WorldState；
-- 元动作、条件、行为树节点、参数和资源策略来自内容注册表；`goto` 等目标是运行时参数，不在 C++ 中写死角色或地点；
-- 需求、外驱、关系、资源、生产、承诺、交易、冲突/安全、知识/经验、近远场模拟和可替换实例均通过统一的校验、事务和事件路径；
-- Level 1 个体策略演化和 Level 2 世界底座演化都由真实 LLM 提案，经过证据校验、沙箱、独立审批和版本化 Overlay；它们不能改 Runtime Core，不能自我批准，也不能把私有经验直接传播给没有授权的主体；
-- Snapshot 用于读档，Replay Package 用于显式的提交效果验证和审计；Replay 不在每个 Tick 写盘，也不宣称已经实现仅靠事件 reducer 的完整 Event Sourcing；
-- CMake 固定下载并静态编译 SQLite amalgamation，`SqlitePersistence` 始终可用，不存在改变 Runtime 语义的 SQLite 编译开关。JSON 文件适配器仍保留为可读的开发/测试格式；两者都保存已提交表示，不拥有第二份 WorldState。
+- Content Pack 提供角色、地点、动作、行为树和需求定义，Runtime 不包含具体角色或故事分支；
+- 默认产品路径使用 Intelligence Profile 指定的真实 LLM，Mock 只用于测试、离线回归和沙箱；
+- Goal、ProcessExecution、FSM 和 BT 由唯一 `NpcActivity` 生命周期统一，BT Tick 不重复调用 LLM；
+- 需求、外驱、关系、资源、生产、承诺、交易、冲突/安全、知识/经验和可替换实例都经过统一的校验、事务和事件路径；
+- Level 1 个体策略演化和 Level 2 世界底座演化都必须经过证据校验、沙箱、独立批准和版本化 Overlay；
+- Snapshot 用于读档，Replay Package 用于显式提交效果验证和审计，不冒充完整 Event Sourcing；
+- SQLite 是产品实例的默认持久化边界，JSON 适配器只用于开发、测试和显式检查点。
 
 ### 首个体验的验收标准
 
@@ -636,9 +636,8 @@ Snapshot 包含 `save_schema_version`、`simulation_version`、`content_version/
 - Smith, *The Contract Net Protocol: High-Level Communication and Control in a Distributed Problem Solver*, IEEE Transactions on Computers C-29(12), 1980, DOI: 10.1109/TC.1980.1675516。用于区分任务公告、报价/提议、授予/接受和执行，支持交易与协作合同的显式状态。
 - Akerlof, *The Market for Lemons: Quality Uncertainty and the Market Mechanism*, Quarterly Journal of Economics 84(3), 1970, DOI: 10.2307/1879431。用于要求交易对象记录质量、信息不对称、来源和担保，不能只用数量表示商品。
 - Searle, *Speech Acts: An Essay in the Philosophy of Language*, 1969；结合 Clark & Brennan 的 grounding 研究。用于把聊天拆成话语行为、事实引用、共同确认和后续承诺，而不是把自然语言文本当作世界事实。
-- AgentSociety v1, *Large-Scale Simulation of LLM-Driven Generative Agents*, arXiv:2502.08691；AgentSociety 2, arXiv:2607.11895。借鉴其环境模块化、实验回放、工作区隔离和研究工作流；不把分布式执行框架直接带入 。
+- AgentSociety v1, *Large-Scale Simulation of LLM-Driven Generative Agents*, arXiv:2502.08691。仅作为环境模块化、实验回放和研究工作流的参考，不作为运行时依赖。
 - AgentTorch / Large Population Models 的公开架构。借鉴其组合式机制、LLM 与机制模型分离和跨领域泛化方向；不把可微分大规模训练作为小村庄 Runtime 的前置条件。
 - SimCity 系列的城市模拟实践。借鉴其资源流、交通、土地/设施约束和政策反馈必须由规则持续结算的思想；具体实现以本项目的事实、事务和事件契约为准。
-- GenSim、CUP 等名称对应多个不同项目或论文，待确认具体版本后再纳入正式依赖或引用；当前只采用可核验的公开机制，不以名称作为架构依据。
 
-这些研究用于需求分类、内稳态、社会动机、记忆和 Agent 设计的依据，不替代本项目的可验证 Runtime 契约。`robot_simu` 和 `BieTheirBed` 只作为固定时间、配置校验、工具副作用隔离、持久化和恢复语义的工程参考，不进入游戏运行时依赖。
+这些研究用于需求分类、内稳态、社会动机、记忆和 Agent 设计的依据，不替代本项目的可验证 Runtime 契约，也不进入游戏运行时依赖。

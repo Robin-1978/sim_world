@@ -21,6 +21,10 @@ public:
     void commit(WorldState& state, EventBus& eventBus, const RebuildCallback& rebuild);
     void rollback(WorldState& state, const RebuildCallback& rebuild);
     void markChanged(WorldState& state);
+    // A scheduler may coalesce quiet minutes into one transaction. The
+    // corresponding logical revisions are still accounted for here so domain
+    // systems never write WorldState::revision directly.
+    void addRevisions(WorldState& state, std::uint64_t count);
 
     [[nodiscard]] bool active() const { return !frames_.empty(); }
     [[nodiscard]] std::string currentCorrelation() const;

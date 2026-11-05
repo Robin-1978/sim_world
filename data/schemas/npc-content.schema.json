@@ -120,11 +120,25 @@
           },
           "weight": {
             "type": "number",
-            "minimum": 0
+            "minimum": 0,
+            "maximum": 100
           },
           "priority": {
             "type": "number",
-            "minimum": 0
+            "minimum": 0,
+            "maximum": 100
+          },
+          "source_kind": {
+            "type": "string",
+            "minLength": 1
+          },
+          "source_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "source_version": {
+            "type": "string",
+            "minLength": 1
           },
           "satisfiers": {
             "type": "object",
