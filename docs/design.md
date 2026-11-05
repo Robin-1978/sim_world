@@ -323,6 +323,8 @@ Provider 请求按“稳定前缀、动态尾部”组织：静态系统规则�
 
 模型可见的函数名使用语义范围，而不是 Runtime 的等级编号：`propose_npc_change` 只允许目标 NPC 的私有策略、日程和行为配方，`propose_world_change` 只允许共享实体原型和声明式行为配方，`daily_reflection` 只返回一次主体反思结果。每次请求只暴露一个强制函数，参数名保持短而明确（`id`、`kind`、`evidence_event_sequences`、`operations`、`tree`/`root`、`actors`/`available_to`）；模型不得把长解释塞进参数，提案理由不属于世界事实。运行时仍使用严格 JSON Schema、`additionalProperties=false`、枚举和数量上限校验；函数参数只是候选数据，提交前必须经过 Runtime 权限、Revision、引用、参数 Schema 和 Sandbox 校验。反思结果同样不包含自由文本事实，Runtime 只消费有来源的 Cognition、Goal、Strategy 和 Innovation 字段。
 
+Reflection 的 `source_sequence` 和 `evidence_event_sequences` 枚举由本次上下文的 `new_evidence.sequence` 动态生成；没有待处理创新时，Provider schema 直接把 `innovation_hypotheses` 和 `innovation_actions` 限制为空数组。这样模型不能凭空编造事件来源，也不会为了填满每日调用而生成创新。缺失 `reflection` purpose 的旧用户 profile 只在装配时继承显式 `world_evolution` policy，正式 profile 仍应声明独立 Reflection 预算。
+
 当前实现的结构化 `IntentProposal` 是短输出任务；玩家对白拆成独立的 `utterance_understanding` 和 `player_dialogue` 两次结构化调用。前者需要理解自然语言和歧义，默认使用约 128 token 的 thinking；后者只根据已解析的通信意图和当前事实生成简短回答，默认关闭 thinking。自驱审议没有玩家给出的明确目标，需要依据内驱、外驱和结构约束进行短权衡，因此默认开启约 128 token 的 thinking。Provider 通过顶层 `reasoning_budget_tokens` 限制思考段预算；该预算不等于最终 JSON 的总输出预算。无论是否开启 thinking，Runtime 只解析最终 JSON，`reasoning_content` 永远不进入对白、记忆或世界事实。
 
 小模型的 Provider 策略按决策价值分档，而不是固定追求最大思考预算：普通对白和低风险动作关闭 thinking；候选之间存在社会冲突、秘密或承诺权衡时使用约 128 token 的 reasoning budget；低置信度或校验失败才升级到 256。512 以上只用于演化提案、沙箱解释和离线分析，不进入每个 NPC Turn。预算升级必须记录原因、耗时、最终候选和校验结果，便于以后用真实回放重新校准。

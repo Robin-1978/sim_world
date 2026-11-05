@@ -861,9 +861,11 @@ ProviderResponse LlamaCppProvider::proposeReflection(const Json& context,
         "Every cognition update must cite one supplied evidence_event_sequences entry. Do not invent facts or event ids. "
         "Innovation is optional and must be a private Level 1 hypothesis using exactly one register_behavior_recipe operation "
         "whose available_to contains only target_npc. Do not claim that a proposal was applied or that an experiment succeeded. "
+        "Keep this reflection small: at most two belief updates, two experience updates, and two memory updates. "
+        "When pending_innovation_hypotheses is empty, return innovation_hypotheses=[] and innovation_actions=[]. "
         "If evidence is insufficient, return empty updates and preserve unresolved issues. "
         "If validation_feedback is present, repair only the reported field error and keep all other empty/default fields.";
-    const Json beliefItem{{"type", "object"}, {"additionalProperties", false},
+    Json beliefItem{{"type", "object"}, {"additionalProperties", false},
                           {"required", Json::array({"subject", "predicate", "value", "source_sequence", "confidence"})},
                           {"properties", Json{{"subject", Json{{"type", "string"}, {"minLength", 1}, {"maxLength", 128}}},
                                                 {"predicate", Json{{"type", "string"}, {"minLength", 1}, {"maxLength", 128}}},
@@ -871,7 +873,7 @@ ProviderResponse LlamaCppProvider::proposeReflection(const Json& context,
                                                 {"source_sequence", Json{{"type", "integer"}, {"minimum", 1}}},
                                                 {"scope", Json{{"type", "string"}, {"maxLength", 32}}},
                                                 {"confidence", Json{{"type", "number"}, {"minimum", 0.0}, {"maximum", 1.0}}}}}};
-    const Json experienceItem{{"type", "object"}, {"additionalProperties", false},
+    Json experienceItem{{"type", "object"}, {"additionalProperties", false},
                               {"required", Json::array({"domain", "trigger", "action", "outcome", "source_sequence", "confidence"})},
                               {"properties", Json{{"domain", Json{{"type", "string"}, {"minLength", 1}, {"maxLength", 128}}},
                                                     {"trigger", Json{{"type", "string"}, {"minLength", 1}, {"maxLength", 256}}},
@@ -880,12 +882,26 @@ ProviderResponse LlamaCppProvider::proposeReflection(const Json& context,
                                                     {"source_sequence", Json{{"type", "integer"}, {"minimum", 1}}},
                                                     {"confidence", Json{{"type", "number"}, {"minimum", 0.0}, {"maximum", 1.0}}},
                                                     {"personal", Json{{"type", "boolean"}}}}}};
-    const Json memoryItem{{"type", "object"}, {"additionalProperties", false},
+    Json memoryItem{{"type", "object"}, {"additionalProperties", false},
                           {"required", Json::array({"text", "source_sequence"})},
                           {"properties", Json{{"kind", Json{{"type", "string"}, {"maxLength", 32}}},
                                                 {"text", Json{{"type", "string"}, {"minLength", 1}, {"maxLength", 512}}},
                                                 {"source_sequence", Json{{"type", "integer"}, {"minimum", 1}}},
                                                 {"confidence", Json{{"type", "number"}, {"minimum", 0.0}, {"maximum", 1.0}}}}}};
+    Json sourceSequences = Json::array();
+    const auto newEvidence = context.value("new_evidence", Json::array());
+    if (newEvidence.is_array()) {
+        for (const auto& event : newEvidence) {
+            if (event.is_object() && event.contains("sequence") && event.at("sequence").is_number_unsigned()) {
+                sourceSequences.push_back(event.at("sequence"));
+            }
+        }
+    }
+    if (!sourceSequences.empty()) {
+        beliefItem["properties"]["source_sequence"]["enum"] = sourceSequences;
+        experienceItem["properties"]["source_sequence"]["enum"] = sourceSequences;
+        memoryItem["properties"]["source_sequence"]["enum"] = sourceSequences;
+    }
     Json schema{
         {"type", "object"}, {"additionalProperties", false},
         {"required", Json::array({"schema_version", "npc_id", "evidence_event_sequences", "cognition_updates",
@@ -895,13 +911,17 @@ ProviderResponse LlamaCppProvider::proposeReflection(const Json& context,
             {"schema_version", Json{{"const", 1}}},
             {"npc_id", Json{{"const", targetNpcId}}},
             {"evidence_event_sequences", Json{{"type", "array"}, {"maxItems", 32},
-                                                {"uniqueItems", true}, {"items", Json{{"type", "integer"}, {"minimum", 1}}}}},
+                                                {"uniqueItems", true}, {"items", [&sourceSequences] {
+                                                    Json item{{"type", "integer"}, {"minimum", 1}};
+                                                    if (!sourceSequences.empty()) item["enum"] = sourceSequences;
+                                                    return item;
+                                                }()}}},
             {"cognition_updates", Json{{"type", "object"}, {"additionalProperties", false},
                                         {"required", Json::array({"belief_updates", "experience_updates", "memory_updates"})},
                                         {"properties", Json{
-                                            {"belief_updates", Json{{"type", "array"}, {"maxItems", 8}, {"items", beliefItem}}},
-                                            {"experience_updates", Json{{"type", "array"}, {"maxItems", 8}, {"items", experienceItem}}},
-                                            {"memory_updates", Json{{"type", "array"}, {"maxItems", 8}, {"items", memoryItem}}}}}}},
+                                            {"belief_updates", Json{{"type", "array"}, {"maxItems", 2}, {"items", beliefItem}}},
+                                            {"experience_updates", Json{{"type", "array"}, {"maxItems", 2}, {"items", experienceItem}}},
+                                            {"memory_updates", Json{{"type", "array"}, {"maxItems", 2}, {"items", memoryItem}}}}}}},
             {"strategy_adjustment", Json{{"type", "object"}, {"additionalProperties", false},
                                            {"properties", Json{{"strategy", Json{{"type", "string"}, {"maxLength", 128}}}}}}},
             {"goal_adjustment", Json{{"type", "object"}, {"additionalProperties", false},
@@ -911,6 +931,11 @@ ProviderResponse LlamaCppProvider::proposeReflection(const Json& context,
             {"resolved_issues", Json{{"type", "array"}, {"maxItems", 16}, {"items", Json{{"type", "string"}, {"maxLength", 256}}}}},
             {"innovation_hypotheses", Json{{"type", "array"}, {"maxItems", 2}, {"items", Json{{"type", "object"}}}}},
             {"innovation_actions", Json{{"type", "array"}, {"maxItems", 8}, {"items", Json{{"type", "object"}}}}}}}};
+    const auto pendingHypotheses = context.value("pending_innovation_hypotheses", Json::array());
+    if (!pendingHypotheses.is_array() || pendingHypotheses.empty()) {
+        schema["properties"]["innovation_hypotheses"] = Json{{"type", "array"}, {"maxItems", 0}};
+        schema["properties"]["innovation_actions"] = Json{{"type", "array"}, {"maxItems", 0}};
+    }
     Json request{
         {"model", endpointConfig.model}, {"temperature", endpointConfig.temperature}, {"max_tokens", policy.maxTokens},
         {"messages", Json::array({Json{{"role", "system"}, {"content", systemPrompt}},
