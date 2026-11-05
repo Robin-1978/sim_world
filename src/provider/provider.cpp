@@ -647,8 +647,11 @@ ProviderResponse LlamaCppProvider::proposeEvolution(const Json& context,
     responseSchema["required"] = Json::array({"id", "proposal_kind", "evidence_event_sequences", "operations"});
     responseSchema["properties"] = Json::object();
     responseSchema["properties"]["id"] = Json{{"type", "string"}, {"minLength", 1}};
+    const Json proposalKinds = evolutionLevel == "level1"
+                                   ? Json::array({"strategy", "declarative_capability", "innovation"})
+                                   : Json::array({"content", "declarative_capability", "innovation"});
     responseSchema["properties"]["proposal_kind"] = Json{{"type", "string"},
-                                                             {"enum", Json::array({"content", "knowledge", "strategy", "declarative_capability", "innovation"})}};
+                                                             {"enum", proposalKinds}};
     // Evidence membership is captured data, not a tool-contract variant. A
     // stable integer shape lets llama.cpp reuse the static system/tool prefix;
     // EvolutionManager validates every cited sequence against EventLog.
