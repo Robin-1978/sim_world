@@ -286,12 +286,24 @@ Json LlamaCppProvider::runtimeMetadata(const std::string& purpose) const {
     } else {
         result["provider_id"] = "";
     }
-    const auto policies = purposeId == "decision" ? config_.decisionPolicies : config_.purposePolicies;
-    const auto selectedPolicy = policyId.empty() ? policies.begin() : policies.find(policyId);
-    if (selectedPolicy != policies.end()) {
-        result["thinking"] = selectedPolicy->second.enableThinking;
-        result["reasoning_budget_tokens"] = selectedPolicy->second.reasoningBudgetTokens;
-        result["max_tokens"] = selectedPolicy->second.maxTokens;
+    if (purposeId == "decision") {
+        const auto selectedPolicy = policyId.empty() ? config_.decisionPolicies.begin()
+                                                      : config_.decisionPolicies.find(policyId);
+        if (selectedPolicy != config_.decisionPolicies.end()) {
+            result["thinking"] = selectedPolicy->second.enableThinking;
+            result["reasoning_budget_tokens"] = selectedPolicy->second.reasoningBudgetTokens;
+            result["max_tokens"] = selectedPolicy->second.maxTokens;
+        }
+    } else {
+        // Evolution/reflection purposes each contain one policy named
+        // proposal. The policy id is part of the audit label, not a key in
+        // the top-level purposePolicies map.
+        const auto selectedPurposePolicy = config_.purposePolicies.find(purposeId);
+        if (selectedPurposePolicy != config_.purposePolicies.end()) {
+            result["thinking"] = selectedPurposePolicy->second.enableThinking;
+            result["reasoning_budget_tokens"] = selectedPurposePolicy->second.reasoningBudgetTokens;
+            result["max_tokens"] = selectedPurposePolicy->second.maxTokens;
+        }
     }
     return result;
 }

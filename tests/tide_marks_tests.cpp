@@ -3396,6 +3396,36 @@ void intelligence_profile_rejects_legacy_layout() {
     std::filesystem::remove(path, ignored);
 }
 
+void missing_reflection_policy_inherits_world_budget() {
+    const auto path = std::filesystem::temp_directory_path() /
+                      "tide_marks-reflection-fallback-profile.json";
+    const Json noReflection{
+        {"kind", "intelligence_profile"}, {"schema_version", 2}, {"id", "reflection-fallback"},
+        {"providers", Json{{"local", Json{{"type", "llama_cpp"},
+                                             {"base_url", "http://127.0.0.1:8192/v1"},
+                                             {"model", "test-model"}}}}},
+        {"purposes", Json{
+            {"decision", Json{{"provider", "local"},
+                                {"policies", Json{{"player_dialogue", Json{{"thinking", false}, {"max_tokens", 64}}},
+                                                     {"utterance_understanding", Json{{"thinking", false}, {"max_tokens", 64}}},
+                                                     {"autonomous_reappraisal", Json{{"thinking", false}, {"max_tokens", 64}}}}}}},
+            {"npc_evolution", Json{{"provider", "local"},
+                                      {"policy", Json{{"thinking", false}, {"max_tokens", 96}}}}},
+            {"world_evolution", Json{{"provider", "local"},
+                                        {"policy", Json{{"thinking", false}, {"max_tokens", 384}}}}}}}};
+    {
+        std::ofstream output(path);
+        output << noReflection.dump(2) << '\n';
+    }
+    const auto profile = loadIntelligenceProfile(path.string());
+    const auto provider = makeProviderFromProfile(profile, "llama_cpp");
+    const auto metadata = provider->runtimeMetadata("reflection:proposal");
+    expect(metadata.at("max_tokens") == 384,
+           "a profile without reflection inherits the configured world-evolution output budget");
+    std::error_code ignored;
+    std::filesystem::remove(path, ignored);
+}
+
 int main() {
     const auto run = [](const char* name, auto&& test) {
         const auto started = std::chrono::steady_clock::now();
@@ -3512,6 +3542,8 @@ int main() {
     run("intelligence_profile_configures_decision_budgets", intelligence_profile_configures_decision_budgets);
     run("intelligence_profile_decouples_models_from_api_keys",
         intelligence_profile_decouples_models_from_api_keys);
+    run("missing_reflection_policy_inherits_world_budget",
+        missing_reflection_policy_inherits_world_budget);
     run("intelligence_profile_rejects_legacy_layout", intelligence_profile_rejects_legacy_layout);
     if (failures != 0) {
         std::cerr << failures << " test assertion(s) failed\n";

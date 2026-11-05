@@ -273,10 +273,17 @@ std::unique_ptr<IProvider> makeProviderFromProfile(const IntelligenceProfile& pr
         config.decisionPolicies = decisionPurpose->second.policies;
         config.purposePolicies.emplace("npc_evolution",
                                       profile.purposes.at("npc_evolution").policies.at("proposal"));
-        const auto reflectionPurpose = profile.purposes.find("reflection");
-        const auto& reflectionPolicy = reflectionPurpose == profile.purposes.end()
-                                           ? config.fallbackPolicy
-                                           : reflectionPurpose->second.policies.at("proposal");
+    const auto reflectionPurpose = profile.purposes.find("reflection");
+    // Reflection is a first-class structured purpose. Older local profiles
+    // may omit it; inherit the explicitly configured world-evolution budget
+    // rather than the provider's 512-token construction default, which can
+    // silently truncate a daily reflection tool call.
+    const auto worldPurpose = profile.purposes.find("world_evolution");
+    const auto& reflectionPolicy = reflectionPurpose != profile.purposes.end()
+                                       ? reflectionPurpose->second.policies.at("proposal")
+                                       : worldPurpose != profile.purposes.end()
+                                             ? worldPurpose->second.policies.at("proposal")
+                                             : config.fallbackPolicy;
         config.purposePolicies.emplace("reflection", reflectionPolicy);
         config.purposePolicies.emplace("world_evolution",
                                       profile.purposes.at("world_evolution").policies.at("proposal"));
