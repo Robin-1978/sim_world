@@ -43,6 +43,30 @@ std::string requiredString(const Json& value, const char* key, const std::string
     return value.at(key).get<std::string>();
 }
 
+std::string boundedText(const Json& value, const char* key, const std::string& path,
+                        std::size_t maximum, bool required = false) {
+    if (!value.contains(key)) {
+        if (required) throw std::runtime_error("missing text '" + std::string(key) + "' in " + path);
+        return {};
+    }
+    if (!value.at(key).is_string()) {
+        throw std::runtime_error("text '" + std::string(key) + "' must be a string in " + path);
+    }
+    const auto result = value.at(key).get<std::string>();
+    if (required && result.empty()) {
+        throw std::runtime_error("text '" + std::string(key) + "' must not be empty in " + path);
+    }
+    if (result.size() > maximum) {
+        throw std::runtime_error("text '" + std::string(key) + "' exceeds its length limit in " + path);
+    }
+    for (const unsigned char character : result) {
+        if (character == 0 || (character < 0x20 && character != '\n' && character != '\r' && character != '\t')) {
+            throw std::runtime_error("text '" + std::string(key) + "' contains a forbidden control character in " + path);
+        }
+    }
+    return result;
+}
+
 int clockMinute(const std::string& value) {
     const auto separator = value.find(':');
     if (separator == std::string::npos) throw std::runtime_error("invalid schedule time: " + value);
@@ -115,7 +139,8 @@ void parseBehaviorPack(WorldContentPack& pack, const Json& document, const std::
         MetaActionDefinition definition;
         definition.id = requiredString(item, "id", path);
         definition.category = requiredString(item, "category", path);
-        definition.description = item.value("description", definition.id);
+        definition.description = boundedText(item, "description", path, 512);
+        if (definition.description.empty()) definition.description = definition.id;
         definition.operation = requiredString(item, "operator", path);
         definition.defaultArgs = item.value("args", Json::object());
         if (!MetaActionRegistry::isExecutableOperator(definition.operation)) {
@@ -515,11 +540,11 @@ LinkContent parseLink(const Json& value, const std::string& path) {
 NpcContent parseNpc(const Json& value, const Json& beats, const WorldContentPack& pack,
                     const std::string& path) {
     NpcContent result;
-    result.definition = NpcDefinition{requiredString(value, "id", path), requiredString(value, "name", path),
-                                      requiredString(value, "role", path), requiredString(value, "home", path),
-                                      requiredString(value, "workplace", path), requiredString(value, "public_goal", path),
-                                      requiredString(value, "hidden_goal", path), requiredString(value, "boundary", path),
-                                      value.value("voice", ""), {}};
+    result.definition = NpcDefinition{requiredString(value, "id", path), boundedText(value, "name", path, 256, true),
+                                      boundedText(value, "role", path, 512, true), boundedText(value, "home", path, 256, true),
+                                      boundedText(value, "workplace", path, 256, true), boundedText(value, "public_goal", path, 2048, true),
+                                      boundedText(value, "hidden_goal", path, 2048, true), boundedText(value, "boundary", path, 2048, true),
+                                      boundedText(value, "voice", path, 1024), {}};
     const auto privateTraits = value.value("private_traits", Json::object());
     if (!privateTraits.is_object()) throw std::runtime_error("private_traits must be an object in " + path);
     for (auto trait = privateTraits.begin(); trait != privateTraits.end(); ++trait) {
@@ -568,7 +593,8 @@ ActivityContent parseActivity(const Json& value, const std::string& path) {
     result.conditionResource = value.value("condition_resource", "");
     result.conditionBelow = value.value("condition_below", 0);
     result.eventType = requiredString(value, "event_type", path);
-    result.detail = value.value("detail", result.id);
+    result.detail = boundedText(value, "detail", path, 1024);
+    if (result.detail.empty()) result.detail = result.id;
     result.decisionChannel = value.value("decision_channel", "");
     if (!result.decisionChannel.empty() && result.actor == "world") {
         throw std::runtime_error("world activities cannot request an NPC decision channel in " + path);
@@ -662,6 +688,12 @@ WorldContentPack loadInternal(const std::string& rootPath, const Documents* docu
     }
     pack.contentVersion = requiredString(world, "content_version", worldPath);
     pack.worldId = requiredString(world, "id", worldPath);
+    const auto evolutionPrompts = world.value("evolution_prompts", Json::object());
+    if (!evolutionPrompts.is_object()) {
+        throw std::runtime_error("evolution_prompts must be an object in " + worldPath);
+    }
+    pack.npcEvolutionPrompt = boundedText(evolutionPrompts, "npc_strategy", worldPath, 4096);
+    pack.worldEvolutionPrompt = boundedText(evolutionPrompts, "world_substrate", worldPath, 4096);
     pack.sceneAsset = world.value("scene_asset", "");
     pack.cameraMode = world.value("camera", "slanted_top_down");
     if (pack.cameraMode.empty()) {
@@ -852,7 +884,7 @@ WorldContentPack loadInternal(const std::string& rootPath, const Documents* docu
             throw std::runtime_error("speech act world_action_allowed must be boolean: " + id);
         }
         rule.worldActionAllowed = item.at("world_action_allowed").get<bool>();
-        rule.description = requiredString(item, "description", worldPath);
+        rule.description = boundedText(item, "description", worldPath, 512, true);
         pack.conversationPolicy.rules.push_back(std::move(rule));
     }
     if (!world.contains("decision_channels") || !world.at("decision_channels").is_array()) {
@@ -1052,7 +1084,7 @@ WorldContentPack loadInternal(const std::string& rootPath, const Documents* docu
         rule.minPeerTrust = boundedNumber(item, "min_peer_trust", worldPath, 0.0, 1.0);
         rule.strategy = requiredString(item, "strategy", worldPath);
         rule.goalStage = item.value("goal_stage", 0);
-        rule.memory = requiredString(item, "memory", worldPath);
+        rule.memory = boundedText(item, "memory", worldPath, 2048, true);
         rule.eventType = requiredString(item, "event_type", worldPath);
         pack.strategyRules.push_back(std::move(rule));
     }
@@ -1088,7 +1120,8 @@ WorldContentPack loadInternal(const std::string& rootPath, const Documents* docu
         if (rule.severity != "info" && rule.severity != "warning" && rule.severity != "critical") {
             throw std::runtime_error("unsupported anomaly severity: " + rule.severity);
         }
-        rule.description = item.value("description", rule.id);
+        rule.description = boundedText(item, "description", worldPath, 1024);
+        if (rule.description.empty()) rule.description = rule.id;
         pack.anomalyRules.push_back(std::move(rule));
     }
     const auto dialogueRelativePath = requiredString(manifest, "dialogue", manifestPath);

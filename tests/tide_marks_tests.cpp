@@ -1636,7 +1636,9 @@ void sqlite_instance_imports_content_and_restores_without_source_root() {
                                                       std::make_unique<MockProvider>());
     const auto imported = SqlitePersistence(databasePath.string()).loadContentDocuments("instance");
     expect(imported.contains("content-pack.json") && imported.contains("world/village.json") &&
-               imported.contains("behaviors/village.json"),
+               imported.contains("behaviors/village.json") &&
+               imported.at("world/village.json").at("evolution_prompts").contains("npc_strategy") &&
+               imported.at("world/village.json").at("evolution_prompts").contains("world_substrate"),
            "a new SQLite instance imports the complete immutable content document bundle");
     const auto initialSummary = summarize(created.state());
     auto restored = WorldService::loadSqliteInstance(databasePath.string(), std::make_unique<MockProvider>());
@@ -2839,6 +2841,8 @@ void llm_proposes_level_one_and_level_two_evolution() {
     expect(providerRaw->observedLevel == "level1" &&
                providerRaw->observedContext.value("base_world_revision", 0ULL) == service.state().revision,
            "the Level 1 provider receives the current world revision and evidence context");
+    expect(providerRaw->observedContext.value("evolution_system_prompt", "").find("target subject") != std::string::npos,
+           "Level 1 receives the world-authored subject-scoped role prompt");
     const auto& miraContext = providerRaw->observedContext.at("npcs").at("mira");
     expect(miraContext.contains("memories") && miraContext.contains("knowledge") &&
                miraContext.contains("experiences") && miraContext.contains("relationships") &&
@@ -2849,6 +2853,8 @@ void llm_proposes_level_one_and_level_two_evolution() {
     expect(level2.accepted && level2.proposal.evolutionLevel == "level2" &&
                level2.proposal.operations.at(0).value("operation", "") == "create_entity_archetype",
            "Level 2 evolution is also an LLM proposal over declarative world content");
+    expect(providerRaw->observedContext.value("evolution_system_prompt", "").find("shared world substrate") != std::string::npos,
+           "Level 2 receives a distinct world-substrate role prompt");
     expect(service.snapshotJson() == before,
            "asking the LLM for evolution proposals never mutates the source world");
 

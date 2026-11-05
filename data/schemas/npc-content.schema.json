@@ -19,28 +19,36 @@
       "pattern": "^[a-z0-9_-]+$"
     },
     "name": {
-      "type": "string"
+      "type": "string",
+      "maxLength": 256
     },
     "role": {
-      "type": "string"
+      "type": "string",
+      "maxLength": 512
     },
     "home": {
-      "type": "string"
+      "type": "string",
+      "maxLength": 256
     },
     "workplace": {
-      "type": "string"
+      "type": "string",
+      "maxLength": 256
     },
     "public_goal": {
-      "type": "string"
+      "type": "string",
+      "maxLength": 2048
     },
     "hidden_goal": {
-      "type": "string"
+      "type": "string",
+      "maxLength": 2048
     },
     "boundary": {
-      "type": "string"
+      "type": "string",
+      "maxLength": 2048
     },
     "voice": {
-      "type": "string"
+      "type": "string",
+      "maxLength": 1024
     },
     "private_traits": {
       "type": "object",

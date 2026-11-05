@@ -288,6 +288,11 @@ struct WorldContentPack {
     std::string sceneAsset;
     std::string cameraMode{"slanted_top_down"};
     GameTime startTime;
+    // World-authored evolution roles are imported with the world document into
+    // each SQLite instance. They describe scope only; Runtime still owns the
+    // schema, operation registry, validation, sandbox and approval boundary.
+    std::string npcEvolutionPrompt;
+    std::string worldEvolutionPrompt;
     DriveAdaptationPolicy driveAdaptation;
     StimulusPolicy stimulusPolicy;
     DecisionContextPolicy decisionContextPolicy;

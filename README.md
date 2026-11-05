@@ -100,6 +100,8 @@ cmake --build build -j2
 
 `data/intelligence-profile.json` selects reusable providers and binds them to `purposes.decision`, `purposes.npc_evolution`, and `purposes.world_evolution`. Each purpose can use a different compatible model or endpoint, while `purposes.decision.policies` owns the three decision-stage budgets. Set `api_key_env` to the name of an environment variable when a remote endpoint requires a key; the secret value is never written to the profile, logs, Snapshot, or SQLite instance.
 
+The short Level 1 and Level 2 role prompts are world content in `data/world/village.json` under `evolution_prompts`. They are imported into a new instance with the world document and remain available when the instance is restored from SQLite; they are not provider credentials or deployment profile settings. Runtime function schemas and validators remain the authority.
+
 With llama.cpp serving OpenAI-compatible HTTP on `127.0.0.1:8192`:
 
 ```bash
@@ -144,7 +146,7 @@ An instance can be created and resumed as one SQLite file. Creation imports the 
   --database ~/.sim_world/instances/village/world.sqlite --days 1
 ```
 
-`WorldService::createSqliteInstance()` imports the world-content JSON documents and writes the initial durable checkpoint; `loadSqliteInstance()` reads the immutable content bundle and all mutable facts from that database. The original content directory can therefore be absent after initialization, and changing a template does not silently change an existing instance. The provider profile (including the name of an API-key environment variable), JSON Schemas, visual assets, and compiled C++ operators remain deployment concerns rather than world facts. JSON remains the inspectable development/test adapter. The SQLite checkpoint is written at configured committed boundaries and does not perform I/O inside every simulation minute.
+`WorldService::createSqliteInstance()` imports the world-content JSON documents, including the evolution role prompts, and writes the initial durable checkpoint; `loadSqliteInstance()` reads the immutable content bundle and all mutable facts from that database. The original content directory can therefore be absent after initialization, and changing a template does not silently change an existing instance. The provider profile (including the name of an API-key environment variable), JSON Schemas, visual assets, and compiled C++ operators remain deployment concerns rather than world facts. JSON remains the inspectable development/test adapter. The SQLite checkpoint is written at configured committed boundaries and does not perform I/O inside every simulation minute.
 
 The project goal is summarized in [`docs/goal.md`](docs/goal.md); architecture and continuation checkpoints are in [`docs/design.md`](docs/design.md) and [`docs/release-continuation-plan.md`](docs/release-continuation-plan.md).
 

@@ -195,6 +195,11 @@ Json WorldEvolutionSystem::proposalContext(const WorldService& world,
     return Json{{"trigger", trigger}, {"evolution_level", evolutionLevel},
                 {"target_npc", scopedTarget},
                 {"base_content_version", content.contentVersion},
+                {"evolution_system_prompt", evolutionLevel == "level1"
+                                                ? content.npcEvolutionPrompt
+                                                : content.worldEvolutionPrompt},
+                {"evolution_prompt_version", content.contentVersion + ":" +
+                                                  (evolutionLevel == "level1" ? "npc_strategy" : "world_substrate")},
                 {"base_world_revision", state.revision},
                 {"world_time", state.now.minute}, {"resources", resources},
                 {"npcs", npcs}, {"content", contentSummary},

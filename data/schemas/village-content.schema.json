@@ -36,6 +36,15 @@
     "content_version": {
       "type": "string"
     },
+    "evolution_prompts": {
+      "type": "object",
+      "description": "World-authored role prompts imported into each instance; Runtime still enforces the operation contract.",
+      "properties": {
+        "npc_strategy": {"type": "string", "minLength": 1, "maxLength": 4096},
+        "world_substrate": {"type": "string", "minLength": 1, "maxLength": 4096}
+      },
+      "additionalProperties": false
+    },
     "drive_adaptation": {
       "type": "object",
       "required": [
@@ -690,7 +699,8 @@
               },
               "description": {
                 "type": "string",
-                "minLength": 1
+                "minLength": 1,
+                "maxLength": 512
               }
             },
             "additionalProperties": false

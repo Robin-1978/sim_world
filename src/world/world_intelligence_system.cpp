@@ -78,11 +78,16 @@ TurnRequest WorldIntelligenceSystem::makeTurnRequest(const std::string& npcId, c
 DialogueTurn WorldIntelligenceSystem::executeTurn(const std::string& npcId, const std::string& input,
                                        const std::string& turnId, const std::string& channelId,
                                        const std::string& trigger) {
+    constexpr std::size_t kMaxPlayerInputBytes = 8192;
     DialogueTurn result;
     result.npcId = npcId;
     result.provider = world_.provider_->name();
     if (!world_.hasNpc(npcId)) {
         result.error = "unknown_npc";
+        return result;
+    }
+    if (input.size() > kMaxPlayerInputBytes) {
+        result.error = "input_too_long";
         return result;
     }
     if (!turnId.empty() && world_.state_.processedTurnIds.contains(turnId)) {
