@@ -511,5 +511,27 @@
     "provider_failures": 0,
     "runtime_result": "all three current-model proposals entered authored ProcessExecution state at the safe boundary; expected_relief contained only declared need IDs and no Provider wrote WorldState directly",
     "result": "passed"
+  },
+  "latest_three_day_v05_long_run": {
+    "command": "./build/tide_marks_headless --days 3 --provider profile --wait-llm-ms 60000 --replay /tmp/tide_marks-3d-real-v05.jsonl --dump-events",
+    "provider": "llama.cpp",
+    "model": "Huihui-Qwen3.5-4B-abliterated.Q4_K_M",
+    "content_version": "village-p0.5",
+    "elapsed_seconds": 1283.5,
+    "world_boundary": "day 4 6:00",
+    "pending_turns_after_final_drain": 0,
+    "event_counts": {
+      "reflection.committed": 9,
+      "evolution.proposal_ready": 1,
+      "npc.intent": 27,
+      "experience.recorded": 42,
+      "memory.reflected": 18,
+      "strategy.reflected": 9,
+      "npc.intent_rejected": 2,
+      "npc.intent_expired": 0
+    },
+    "governance_result": "the Level 2 proposal passed Runtime validation and deterministic sandbox after one bounded repair; no automatic approval or overlay activation was performed",
+    "runtime_result": "all three NPCs crossed three daily reflection boundaries with sourced cognition and strategy updates; long-running authored processes continued while the serial Qwen queue drained to zero",
+    "result": "passed"
   }
 }
