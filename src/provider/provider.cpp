@@ -511,22 +511,11 @@ ProviderResponse LlamaCppProvider::decide(const DecisionContext& context, const 
     // append the previous structured answer and Runtime observation as a
     // continuation instead of rebuilding the context from scratch.
     appendDecisionContinuation(messages, validationFeedback);
-    Json expectedReliefProperties = Json::object();
-    for (const auto& needId : needIds) {
-        expectedReliefProperties[needId] =
-            Json{{"type", "number"}, {"minimum", 0.0}, {"maximum", 1.0}};
-    }
-    Json parameterProperties = Json::object();
-    for (const auto& candidate : context.candidates) {
-        if (!candidate.availableNow || !candidate.parameterSchema.is_object()) continue;
-        const auto properties = candidate.parameterSchema.value("properties", Json::object());
-        if (!properties.is_object()) continue;
-        for (const auto& [key, value] : properties.items()) {
-            if (key.size() <= 64) parameterProperties[key] = value;
-        }
-    }
-    Json parametersSchema{{"type", "object"}, {"additionalProperties", false},
-                          {"properties", std::move(parameterProperties)}};
+    // Candidate actions, need IDs and parameter properties are dynamic
+    // Runtime data. Keep the response contract stable for llama.cpp prefix
+    // caching; ActionValidator still checks every key against the selected
+    // plan's authored schema and the current needs before committing facts.
+    Json parametersSchema{{"type", "object"}, {"additionalProperties", true}};
     const Json responseSchema{
         {"type", "object"}, {"additionalProperties", false},
         {"required", Json::array({"action_id", "intent", "motivation", "expected_outcome", "confidence",
@@ -540,8 +529,9 @@ ProviderResponse LlamaCppProvider::decide(const DecisionContext& context, const 
                              {"cited_stimulus_ids", Json{{"type", "array"}, {"items", Json{{"type", "string"}}}}},
                              {"tradeoffs", Json{{"type", "array"}, {"items", Json{{"type", "string"}}}}},
                              {"expected_relief", Json{{"type", "object"},
-                                                       {"additionalProperties", false},
-                                                       {"properties", expectedReliefProperties}}},
+                                                       {"additionalProperties", Json{{"type", "number"},
+                                                                                       {"minimum", 0.0},
+                                                                                       {"maximum", 1.0}}}}},
                              {"parameters", std::move(parametersSchema)}}}};
     Json request{{"model", endpointConfig.model}, {"temperature", endpointConfig.temperature}, {"max_tokens", policy.maxTokens},
                  {"messages", messages},
