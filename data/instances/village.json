@@ -4,7 +4,7 @@
   "id": "tide_marks.village.instance",
   "display_name": "Tidemark Village",
   "content_pack": "tide_marks.village",
-  "content_version": "village-p0.4",
+  "content_version": "village-p0.5",
   "world_id": "village_tidemark",
   "initial_time": {"day": 1, "hour": 6, "minute": 0},
   "npcs": {

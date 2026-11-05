@@ -485,7 +485,7 @@ ProviderResponse LlamaCppProvider::decide(const DecisionContext& context, const 
         "Each non-empty action_id selects one registered behavior plan: Runtime will execute its complete content-authored behavior tree. "
         "The behavior_tree shown in plan_catalog is descriptive context; do not invent or partially execute its nodes in this response. "
         "If the selected plan has a parameter_schema, fill only those declared parameters (for example destination); "
-        "parameters are proposals for Runtime validation, not direct world writes. Use an empty object when none are needed. "
+        "parameters are proposals for Runtime validation, not direct world writes. Plans without declared properties MUST use parameters={}; never copy a parameter from another candidate. "
         "A non-empty action_id starts an authored world process and may change world facts; it is never merely a dialogue style or answer type. "
         "For a conversation-only answer, action_id MUST be empty even when a candidate label sounds like 'explain' or 'report'. "
         "world_action_allowed is derived by Runtime from the selected_speech_act. If it is false, action_id MUST be empty and the dialogue must answer without promising or performing a world action. "
@@ -516,6 +516,17 @@ ProviderResponse LlamaCppProvider::decide(const DecisionContext& context, const 
         expectedReliefProperties[needId] =
             Json{{"type", "number"}, {"minimum", 0.0}, {"maximum", 1.0}};
     }
+    Json parameterProperties = Json::object();
+    for (const auto& candidate : context.candidates) {
+        if (!candidate.availableNow || !candidate.parameterSchema.is_object()) continue;
+        const auto properties = candidate.parameterSchema.value("properties", Json::object());
+        if (!properties.is_object()) continue;
+        for (const auto& [key, value] : properties.items()) {
+            if (key.size() <= 64) parameterProperties[key] = value;
+        }
+    }
+    Json parametersSchema{{"type", "object"}, {"additionalProperties", false},
+                          {"properties", std::move(parameterProperties)}};
     const Json responseSchema{
         {"type", "object"}, {"additionalProperties", false},
         {"required", Json::array({"action_id", "intent", "motivation", "expected_outcome", "confidence",
@@ -531,7 +542,7 @@ ProviderResponse LlamaCppProvider::decide(const DecisionContext& context, const 
                              {"expected_relief", Json{{"type", "object"},
                                                        {"additionalProperties", false},
                                                        {"properties", expectedReliefProperties}}},
-                             {"parameters", Json{{"type", "object"}}}}}};
+                             {"parameters", std::move(parametersSchema)}}}};
     Json request{{"model", endpointConfig.model}, {"temperature", endpointConfig.temperature}, {"max_tokens", policy.maxTokens},
                  {"messages", messages},
                  {"response_format", Json{{"type", "json_schema"},
@@ -864,7 +875,8 @@ ProviderResponse LlamaCppProvider::proposeReflection(const Json& context,
         "Innovation is optional and must be a private Level 1 hypothesis using exactly one register_behavior_recipe operation "
         "whose available_to contains only target_npc. Do not claim that a proposal was applied or that an experiment succeeded. "
         "Keep this reflection small: at most two belief updates, two experience updates, and two memory updates. "
-        "When pending_innovation_hypotheses is empty, return innovation_hypotheses=[] and innovation_actions=[]. "
+        "innovation_hypotheses is optional: when a persistent problem and a genuinely new bounded recipe are evidenced, return at most one small hypothesis; otherwise return []. "
+        "When pending_innovation_hypotheses is empty, return innovation_actions=[]; lifecycle actions may reference only persisted hypotheses. "
         "resolved_issues may contain only exact strings from unresolved_issues; when that list is empty, return resolved_issues=[]. "
         "When current_state.activity has no active goal, keep goal_adjustment={} and never request status=cancelled. "
         "If evidence is insufficient, return empty updates and preserve unresolved issues. "
@@ -937,7 +949,6 @@ ProviderResponse LlamaCppProvider::proposeReflection(const Json& context,
             {"innovation_actions", Json{{"type", "array"}, {"maxItems", 8}, {"items", Json{{"type", "object"}}}}}}}};
     const auto pendingHypotheses = context.value("pending_innovation_hypotheses", Json::array());
     if (!pendingHypotheses.is_array() || pendingHypotheses.empty()) {
-        schema["properties"]["innovation_hypotheses"] = Json{{"type", "array"}, {"maxItems", 0}};
         schema["properties"]["innovation_actions"] = Json{{"type", "array"}, {"maxItems", 0}};
     }
     const auto unresolvedIssues = context.value("unresolved_issues", Json::array());
