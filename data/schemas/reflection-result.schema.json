@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Adaptive World Daily Reflection Result",
   "type": "object",
-  "required": ["schema_version", "npc_id", "evidence_event_sequences", "cognition_updates", "strategy_adjustment", "goal_adjustment", "unresolved_issues", "resolved_issues", "innovation_hypotheses", "innovation_actions", "rationale"],
+  "required": ["schema_version", "npc_id", "evidence_event_sequences", "cognition_updates", "strategy_adjustment", "goal_adjustment", "unresolved_issues", "resolved_issues", "innovation_hypotheses", "innovation_actions"],
   "properties": {
     "schema_version": {"const": 1},
     "npc_id": {"type": "string", "minLength": 1},
@@ -22,8 +22,7 @@
     "unresolved_issues": {"type": "array", "maxItems": 16, "items": {"type": "string", "minLength": 1, "maxLength": 256}},
     "resolved_issues": {"type": "array", "maxItems": 16, "items": {"type": "string", "minLength": 1, "maxLength": 256}},
     "innovation_hypotheses": {"type": "array", "maxItems": 2, "items": {"$ref": "evolution-proposal.schema.json"}},
-    "innovation_actions": {"type": "array", "maxItems": 8, "items": {"type": "object", "required": ["proposal_id", "status"], "properties": {"proposal_id": {"type": "string", "minLength": 1}, "status": {"enum": ["refining", "evaluated", "accepted", "rejected", "abandoned"]}}, "additionalProperties": false}},
-    "rationale": {"type": "string", "maxLength": 1024}
+    "innovation_actions": {"type": "array", "maxItems": 8, "items": {"type": "object", "required": ["proposal_id", "status"], "properties": {"proposal_id": {"type": "string", "minLength": 1}, "status": {"enum": ["refining", "evaluated", "accepted", "rejected", "abandoned"]}}, "additionalProperties": false}}
   },
   "additionalProperties": false,
   "$defs": {
