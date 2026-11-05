@@ -197,6 +197,18 @@ public:
     [[nodiscard]] std::string name() const override { return "mock"; }
 };
 
+// Connection settings for one semantic workload. API keys are never stored
+// here; apiKeyEnv is only the name of an environment variable read at request
+// time by the HTTP adapter.
+struct ProviderEndpoint {
+    std::string baseUrl;
+    std::string model;
+    std::string apiKeyEnv;
+    bool apiKeyConfigured{false};
+    int timeoutMs{0};
+    double temperature{-1.0};
+};
+
 struct LlamaCppConfig {
     std::string baseUrl{"http://127.0.0.1:8192/v1"};
     std::string model{"local"};
@@ -205,6 +217,10 @@ struct LlamaCppConfig {
     double temperature{0.2};
     DecisionPolicy fallbackPolicy;
     std::map<std::string, DecisionPolicy> decisionPolicies;
+    // Optional workload overrides. Supported keys are decision,
+    // level1_evolution and level2_evolution. Missing fields inherit the
+    // top-level provider settings.
+    std::map<std::string, ProviderEndpoint> purposeEndpoints;
 };
 
 class LlamaCppProvider final : public IProvider {

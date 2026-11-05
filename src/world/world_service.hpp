@@ -95,6 +95,14 @@ public:
 
     static WorldService load(std::string contentRoot = ContentPackLoader::defaultRoot(),
                              std::unique_ptr<IProvider> provider = nullptr);
+    // A game instance owns one SQLite file. Creation imports the immutable
+    // content documents and writes the initial committed state; subsequent
+    // loads do not need the source JSON directory.
+    static WorldService createSqliteInstance(const std::string& databasePath,
+                                             std::string contentRoot = ContentPackLoader::defaultRoot(),
+                                             std::unique_ptr<IProvider> provider = nullptr);
+    static WorldService loadSqliteInstance(const std::string& databasePath,
+                                           std::unique_ptr<IProvider> provider = nullptr);
     static WorldService fromContent(const WorldContentPack& content,
                                     std::unique_ptr<IProvider> provider = nullptr);
     static WorldService fromSnapshot(const Json& json,

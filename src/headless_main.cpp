@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <memory>
@@ -16,6 +17,7 @@ void usage(const char* program) {
     std::cout << "Usage: " << program
               << " [--content-root PATH] [--days N] [--profile PATH]"
                  " [--provider mock|profile|llama_cpp] [--replay PATH] [--dump-events]"
+                 " [--database PATH]"
                  " [--anomalies] [--experiment PATH] [--evolve level1|level2]"
                  " [--wait-llm-ms N] [--durable-checkpoint PATH]"
                  " [--checkpoint-every-minutes N|--checkpoint-daily]\n";
@@ -33,6 +35,7 @@ int main(int argc, char** argv) {
     std::string profilePath = defaultIntelligenceProfilePath();
     std::int64_t waitLlmMilliseconds = 0;
     std::string durableCheckpointPath;
+    std::string databasePath;
     std::int64_t checkpointIntervalMinutes = 0;
     bool checkpointDaily = false;
     bool dumpEvents = false;
@@ -59,6 +62,8 @@ int main(int argc, char** argv) {
             providerName = argv[++i];
         } else if (argument == "--profile" && i + 1 < argc) {
             profilePath = argv[++i];
+        } else if (argument == "--database" && i + 1 < argc) {
+            databasePath = argv[++i];
         } else if (argument == "--wait-llm-ms" && i + 1 < argc) {
             waitLlmMilliseconds = std::max<std::int64_t>(0, std::atoll(argv[++i]));
         } else if (argument == "--durable-checkpoint" && i + 1 < argc) {
@@ -79,7 +84,13 @@ int main(int argc, char** argv) {
         const auto profile = loadIntelligenceProfile(profilePath);
         provider = makeProviderFromProfile(profile, providerName);
     }
-    auto service = WorldService::load(contentRoot, std::move(provider));
+    WorldService service = [&]() {
+        if (databasePath.empty()) return WorldService::load(contentRoot, std::move(provider));
+        const bool initialized = std::filesystem::exists(databasePath) &&
+                                  std::filesystem::file_size(databasePath) > 0;
+        if (initialized) return WorldService::loadSqliteInstance(databasePath, std::move(provider));
+        return WorldService::createSqliteInstance(databasePath, contentRoot, std::move(provider));
+    }();
     if (checkpointIntervalMinutes > 0 && durableCheckpointPath.empty()) {
         std::cerr << "--checkpoint-every-minutes requires --durable-checkpoint PATH\n";
         return 2;

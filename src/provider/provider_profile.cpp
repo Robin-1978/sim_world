@@ -1,6 +1,8 @@
 #include "provider/provider_profile.hpp"
 
 #include <fstream>
+#include <filesystem>
+#include <cstdlib>
 #include <stdexcept>
 
 namespace tide_marks {
@@ -53,14 +55,75 @@ DecisionPolicy readPolicy(const Json& profile, const std::string& key, const std
     return result;
 }
 
+ProviderEndpoint readPurposeEndpoint(const Json& value, const std::string& purpose,
+                                     const std::string& path) {
+    if (!value.is_object()) {
+        throw std::runtime_error("provider.purpose_endpoints." + purpose + " must be an object: " + path);
+    }
+    ProviderEndpoint result;
+    if (value.contains("base_url")) {
+        if (!value.at("base_url").is_string() || value.at("base_url").get<std::string>().empty()) {
+            throw std::runtime_error("provider.purpose_endpoints." + purpose +
+                                     ".base_url must be a non-empty string: " + path);
+        }
+        result.baseUrl = value.at("base_url").get<std::string>();
+    }
+    if (value.contains("model")) {
+        if (!value.at("model").is_string() || value.at("model").get<std::string>().empty()) {
+            throw std::runtime_error("provider.purpose_endpoints." + purpose +
+                                     ".model must be a non-empty string: " + path);
+        }
+        result.model = value.at("model").get<std::string>();
+    }
+    if (value.contains("api_key_env")) {
+        result.apiKeyConfigured = true;
+        if (!value.at("api_key_env").is_null()) {
+            if (!value.at("api_key_env").is_string()) {
+                throw std::runtime_error("provider.purpose_endpoints." + purpose +
+                                         ".api_key_env must be a string or null: " + path);
+            }
+            result.apiKeyEnv = value.at("api_key_env").get<std::string>();
+        }
+    }
+    if (value.contains("timeout_ms")) {
+        if (!value.at("timeout_ms").is_number_integer() || value.at("timeout_ms").get<int>() <= 0) {
+            throw std::runtime_error("provider.purpose_endpoints." + purpose +
+                                     ".timeout_ms must be positive: " + path);
+        }
+        result.timeoutMs = value.at("timeout_ms").get<int>();
+    }
+    if (value.contains("temperature")) {
+        if (!value.at("temperature").is_number() || value.at("temperature").get<double>() < 0.0 ||
+            value.at("temperature").get<double>() > 2.0) {
+            throw std::runtime_error("provider.purpose_endpoints." + purpose +
+                                     ".temperature must be between 0 and 2: " + path);
+        }
+        result.temperature = value.at("temperature").get<double>();
+    }
+    return result;
+}
+
 }  // namespace
 
 std::string defaultIntelligenceProfilePath() {
+    const auto userProfile = std::filesystem::path(defaultRuntimeDirectory()) /
+                             "config" / "intelligence-profile.json";
+    if (std::filesystem::exists(userProfile)) return userProfile.string();
 #ifdef TIDE_MARKS_DATA_DIR
     return std::string(TIDE_MARKS_DATA_DIR) + "/intelligence-profile.json";
 #else
     return "data/intelligence-profile.json";
 #endif
+}
+
+std::string defaultRuntimeDirectory() {
+    if (const char* configured = std::getenv("SIM_WORLD_HOME"); configured != nullptr && *configured != '\0') {
+        return configured;
+    }
+    if (const char* home = std::getenv("HOME"); home != nullptr && *home != '\0') {
+        return (std::filesystem::path(home) / ".sim_world").string();
+    }
+    return ".sim_world";
 }
 
 IntelligenceProfile loadIntelligenceProfile(const std::string& path) {
@@ -98,6 +161,17 @@ IntelligenceProfile loadIntelligenceProfile(const std::string& path) {
     }
     if (result.providerType != "mock" && (result.llama.model.empty() || result.llama.baseUrl.empty())) {
         throw std::runtime_error("non-mock provider requires model and base_url: " + path);
+    }
+    if (provider.contains("purpose_endpoints")) {
+        if (!provider.at("purpose_endpoints").is_object()) {
+            throw std::runtime_error("provider.purpose_endpoints must be an object: " + path);
+        }
+        for (const auto& [purpose, value] : provider.at("purpose_endpoints").items()) {
+            if (purpose != "decision" && purpose != "level1_evolution" && purpose != "level2_evolution") {
+                throw std::runtime_error("unsupported provider purpose endpoint '" + purpose + "': " + path);
+            }
+            result.llama.purposeEndpoints.emplace(purpose, readPurposeEndpoint(value, purpose, path));
+        }
     }
     if (!root.contains("decision_policy") || !root.at("decision_policy").is_object() ||
         root.at("decision_policy").empty()) {

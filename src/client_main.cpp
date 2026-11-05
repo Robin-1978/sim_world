@@ -207,11 +207,13 @@ int main(int argc, char** argv) {
     std::string profilePath = tide_marks::defaultIntelligenceProfilePath();
     std::string providerOverride = "profile";
     std::string contentRoot = tide_marks::ContentPackLoader::defaultRoot();
+    std::string databasePath;
     for (int index = 1; index < argc; ++index) {
         const std::string argument = argv[index];
         if (argument == "--profile" && index + 1 < argc) profilePath = argv[++index];
         else if (argument == "--provider" && index + 1 < argc) providerOverride = argv[++index];
         else if (argument == "--content-root" && index + 1 < argc) contentRoot = argv[++index];
+        else if (argument == "--database" && index + 1 < argc) databasePath = argv[++index];
     }
     std::unique_ptr<tide_marks::IProvider> provider;
     if (providerOverride == "mock") {
@@ -220,7 +222,13 @@ int main(int argc, char** argv) {
         const auto profile = tide_marks::loadIntelligenceProfile(profilePath);
         provider = tide_marks::makeProviderFromProfile(profile, providerOverride);
     }
-    auto world = tide_marks::WorldService::load(contentRoot, std::move(provider));
+    tide_marks::WorldService world = [&]() {
+        if (databasePath.empty()) return tide_marks::WorldService::load(contentRoot, std::move(provider));
+        const bool initialized = std::filesystem::exists(databasePath) &&
+                                  std::filesystem::file_size(databasePath) > 0;
+        if (initialized) return tide_marks::WorldService::loadSqliteInstance(databasePath, std::move(provider));
+        return tide_marks::WorldService::createSqliteInstance(databasePath, contentRoot, std::move(provider));
+    }();
     const auto worldName = world.content().instance ? world.content().instance->displayName : world.content().worldId;
 #if defined(__linux__)
     const char* display = std::getenv("DISPLAY");
@@ -318,10 +326,18 @@ int main(int argc, char** argv) {
 // client milestone; no gameplay code depends on a renderer.
 int main(int argc, char** argv) {
     std::string contentRoot = tide_marks::ContentPackLoader::defaultRoot();
+    std::string databasePath;
     for (int index = 1; index < argc; ++index) {
         if (std::string(argv[index]) == "--content-root" && index + 1 < argc) contentRoot = argv[++index];
+        else if (std::string(argv[index]) == "--database" && index + 1 < argc) databasePath = argv[++index];
     }
-    auto world = tide_marks::WorldService::load(contentRoot);
+    tide_marks::WorldService world = [&]() {
+        if (databasePath.empty()) return tide_marks::WorldService::load(contentRoot);
+        const bool initialized = std::filesystem::exists(databasePath) &&
+                                  std::filesystem::file_size(databasePath) > 0;
+        if (initialized) return tide_marks::WorldService::loadSqliteInstance(databasePath);
+        return tide_marks::WorldService::createSqliteInstance(databasePath, contentRoot);
+    }();
     const auto worldName = world.content().instance ? world.content().instance->displayName : world.content().worldId;
     std::cout << "Tide Marks " << worldName << " client (headless scene preview)\n";
     std::cout << "Renderer disabled. Reconfigure build with -DTIDE_MARKS_FETCH_RAYLIB=ON for the 3D window.\n";

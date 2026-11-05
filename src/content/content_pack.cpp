@@ -22,6 +22,20 @@ Json readJson(const std::string& path) {
     return value;
 }
 
+using Documents = ContentPackLoader::Documents;
+
+Json readDocument(const std::string& rootPath, const std::string& relativePath,
+                  const Documents* documents) {
+    if (documents != nullptr) {
+        const auto found = documents->find(relativePath);
+        if (found == documents->end()) {
+            throw std::runtime_error("content document is missing from instance bundle: " + relativePath);
+        }
+        return found->second;
+    }
+    return readJson(rootPath + "/" + relativePath);
+}
+
 std::string requiredString(const Json& value, const char* key, const std::string& path) {
     if (!value.contains(key) || !value.at(key).is_string()) {
         throw std::runtime_error("missing string '" + std::string(key) + "' in " + path);
@@ -626,9 +640,9 @@ std::string ContentPackLoader::defaultRoot() {
 #endif
 }
 
-WorldContentPack ContentPackLoader::load(const std::string& rootPath) {
+WorldContentPack loadInternal(const std::string& rootPath, const Documents* documents) {
     const auto manifestPath = rootPath + "/content-pack.json";
-    const auto manifest = readJson(manifestPath);
+    const auto manifest = readDocument(rootPath, "content-pack.json", documents);
     if (manifest.value("kind", "") != "world_content_pack" || manifest.value("schema_version", 0) != 1) {
         throw std::runtime_error("unsupported content-pack manifest schema: " + manifestPath);
     }
@@ -636,11 +650,13 @@ WorldContentPack ContentPackLoader::load(const std::string& rootPath) {
     pack.id = requiredString(manifest, "id", manifestPath);
     pack.version = requiredString(manifest, "version", manifestPath);
     if (manifest.contains("behaviors")) {
-        const auto behaviorPath = rootPath + "/" + requiredString(manifest, "behaviors", manifestPath);
-        parseBehaviorPack(pack, readJson(behaviorPath), behaviorPath);
+        const auto behaviorRelativePath = requiredString(manifest, "behaviors", manifestPath);
+        const auto behaviorPath = rootPath + "/" + behaviorRelativePath;
+        parseBehaviorPack(pack, readDocument(rootPath, behaviorRelativePath, documents), behaviorPath);
     }
-    const auto worldPath = rootPath + "/" + requiredString(manifest, "world", manifestPath);
-    const auto world = readJson(worldPath);
+    const auto worldRelativePath = requiredString(manifest, "world", manifestPath);
+    const auto worldPath = rootPath + "/" + worldRelativePath;
+    const auto world = readDocument(rootPath, worldRelativePath, documents);
     if (world.value("kind", "") != "world") {
         throw std::runtime_error("world content must declare kind=world: " + worldPath);
     }
@@ -1075,15 +1091,16 @@ WorldContentPack ContentPackLoader::load(const std::string& rootPath) {
         rule.description = item.value("description", rule.id);
         pack.anomalyRules.push_back(std::move(rule));
     }
-    const auto dialoguePath = rootPath + "/" + requiredString(manifest, "dialogue", manifestPath);
-    const auto beats = readJson(dialoguePath);
+    const auto dialogueRelativePath = requiredString(manifest, "dialogue", manifestPath);
+    const auto dialoguePath = rootPath + "/" + dialogueRelativePath;
+    const auto beats = readDocument(rootPath, dialogueRelativePath, documents);
     for (const auto& recipe : pack.behaviorRecipes) {
         validateBehaviorNodeReferences(recipe.root, pack, manifestPath);
     }
     for (const auto& npcPathValue : manifest.at("npcs")) {
         const auto relativePath = npcPathValue.get<std::string>();
         const auto path = rootPath + "/" + relativePath;
-        auto npc = parseNpc(readJson(path), beats, pack, path);
+        auto npc = parseNpc(readDocument(rootPath, relativePath, documents), beats, pack, path);
         if (npc.actions.empty()) throw std::runtime_error("NPC has no authored actions: " + npc.definition.id);
         pack.npcs.push_back(std::move(npc));
     }
@@ -1200,8 +1217,9 @@ WorldContentPack ContentPackLoader::load(const std::string& rootPath) {
         }
     }
     if (manifest.contains("instance")) {
-        const auto instancePath = rootPath + "/" + requiredString(manifest, "instance", manifestPath);
-        const auto instanceJson = readJson(instancePath);
+        const auto instanceRelativePath = requiredString(manifest, "instance", manifestPath);
+        const auto instancePath = rootPath + "/" + instanceRelativePath;
+        const auto instanceJson = readDocument(rootPath, instanceRelativePath, documents);
         if (instanceJson.value("kind", "") != "game_instance") {
             throw std::runtime_error("instance file must declare kind=game_instance: " + instancePath);
         }
@@ -1294,6 +1312,36 @@ WorldContentPack ContentPackLoader::load(const std::string& rootPath) {
         pack.instance = std::move(instance);
     }
     return pack;
+}
+
+WorldContentPack ContentPackLoader::load(const std::string& rootPath) {
+    return loadInternal(rootPath, nullptr);
+}
+
+ContentPackLoader::Documents ContentPackLoader::readDocuments(const std::string& rootPath) {
+    Documents documents;
+    const auto manifest = readJson(rootPath + "/content-pack.json");
+    documents.emplace("content-pack.json", manifest);
+    const auto add = [&documents, &rootPath](const std::string& relativePath) {
+        if (relativePath.empty()) return;
+        documents.emplace(relativePath, readJson(rootPath + "/" + relativePath));
+    };
+    if (manifest.contains("behaviors")) add(requiredString(manifest, "behaviors", rootPath + "/content-pack.json"));
+    add(requiredString(manifest, "world", rootPath + "/content-pack.json"));
+    add(requiredString(manifest, "dialogue", rootPath + "/content-pack.json"));
+    if (!manifest.contains("npcs") || !manifest.at("npcs").is_array()) {
+        throw std::runtime_error("content-pack manifest requires an npcs array: " + rootPath + "/content-pack.json");
+    }
+    for (const auto& npc : manifest.at("npcs")) {
+        if (!npc.is_string()) throw std::runtime_error("content-pack NPC path must be a string");
+        add(npc.get<std::string>());
+    }
+    if (manifest.contains("instance")) add(requiredString(manifest, "instance", rootPath + "/content-pack.json"));
+    return documents;
+}
+
+WorldContentPack ContentPackLoader::loadFromDocuments(const Documents& documents) {
+    return loadInternal("<sqlite-content>", &documents);
 }
 
 }  // namespace tide_marks

@@ -16,7 +16,16 @@
         "model": {"type": "string"},
         "api_key_env": {"type": ["string", "null"]},
         "timeout_ms": {"type": "integer", "minimum": 1},
-        "temperature": {"type": "number", "minimum": 0, "maximum": 2}
+        "temperature": {"type": "number", "minimum": 0, "maximum": 2},
+        "purpose_endpoints": {
+          "type": "object",
+          "properties": {
+            "decision": {"$ref": "#/$defs/provider_endpoint"},
+            "level1_evolution": {"$ref": "#/$defs/provider_endpoint"},
+            "level2_evolution": {"$ref": "#/$defs/provider_endpoint"}
+          },
+          "additionalProperties": false
+        }
       },
       "additionalProperties": false
     },
@@ -35,6 +44,17 @@
         "thinking": {"type": "boolean"},
         "reasoning_budget_tokens": {"type": "integer", "minimum": 0},
         "max_tokens": {"type": "integer", "minimum": 1}
+      },
+      "additionalProperties": false
+    },
+    "provider_endpoint": {
+      "type": "object",
+      "properties": {
+        "base_url": {"type": "string", "minLength": 1},
+        "model": {"type": "string", "minLength": 1},
+        "api_key_env": {"type": ["string", "null"]},
+        "timeout_ms": {"type": "integer", "minimum": 1},
+        "temperature": {"type": "number", "minimum": 0, "maximum": 2}
       },
       "additionalProperties": false
     }

@@ -2,6 +2,7 @@
 
 #include <cstdlib>
 #include <fstream>
+#include <filesystem>
 #include <iostream>
 #include <map>
 #include <sstream>
@@ -278,14 +279,23 @@ int main(int argc, char** argv) {
     std::string contentRoot = ContentPackLoader::defaultRoot();
     std::string profilePath = defaultIntelligenceProfilePath();
     std::string providerOverride = "profile";
+    std::string databasePath;
     for (int index = 1; index < argc; ++index) {
         const std::string argument = argv[index];
         if (argument == "--script" && index + 1 < argc) scriptPath = argv[++index];
         else if (argument == "--content-root" && index + 1 < argc) contentRoot = argv[++index];
         else if (argument == "--profile" && index + 1 < argc) profilePath = argv[++index];
         else if (argument == "--provider" && index + 1 < argc) providerOverride = argv[++index];
+        else if (argument == "--database" && index + 1 < argc) databasePath = argv[++index];
     }
-    auto service = WorldService::load(contentRoot, providerFromProfile(profilePath, providerOverride));
+    auto provider = providerFromProfile(profilePath, providerOverride);
+    WorldService service = [&]() {
+        if (databasePath.empty()) return WorldService::load(contentRoot, std::move(provider));
+        const bool initialized = std::filesystem::exists(databasePath) &&
+                                  std::filesystem::file_size(databasePath) > 0;
+        if (initialized) return WorldService::loadSqliteInstance(databasePath, std::move(provider));
+        return WorldService::createSqliteInstance(databasePath, contentRoot, std::move(provider));
+    }();
     const auto worldName = service.content().instance
                                ? service.content().instance->displayName
                                : service.content().worldId;

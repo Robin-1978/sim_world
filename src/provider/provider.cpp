@@ -26,6 +26,19 @@ struct ProviderJsonResult {
     std::string error;
 };
 
+LlamaCppConfig configForPurpose(const LlamaCppConfig& base, const std::string& purpose) {
+    const auto found = base.purposeEndpoints.find(purpose);
+    if (found == base.purposeEndpoints.end()) return base;
+    auto selected = base;
+    const auto& endpoint = found->second;
+    if (!endpoint.baseUrl.empty()) selected.baseUrl = endpoint.baseUrl;
+    if (!endpoint.model.empty()) selected.model = endpoint.model;
+    if (endpoint.apiKeyConfigured) selected.apiKeyEnv = endpoint.apiKeyEnv;
+    if (endpoint.timeoutMs > 0) selected.timeoutMs = endpoint.timeoutMs;
+    if (endpoint.temperature >= 0.0) selected.temperature = endpoint.temperature;
+    return selected;
+}
+
 ProviderJsonResult requestProviderJson(const LlamaCppConfig& config, const Json& request,
                                        const std::string& stage) {
     const auto temp = std::filesystem::temp_directory_path() /
@@ -35,20 +48,53 @@ ProviderJsonResult requestProviderJson(const LlamaCppConfig& config, const Json&
         std::ofstream output(temp);
         if (!output) return {false, {}, "provider_temp_file_failed"};
         output << request.dump();
+        output.flush();
+        output.close();
+        std::error_code permissionError;
+        std::filesystem::permissions(
+            temp,
+            std::filesystem::perms::owner_read | std::filesystem::perms::owner_write,
+            std::filesystem::perm_options::replace, permissionError);
+        if (permissionError) {
+            std::filesystem::remove(temp);
+            return {false, {}, "provider_temp_file_failed"};
+        }
+    }
+    std::filesystem::path authHeader;
+    if (!config.apiKeyEnv.empty()) {
+        if (const char* key = std::getenv(config.apiKeyEnv.c_str()); key != nullptr && *key != '\0') {
+            authHeader = temp.parent_path() /
+                         (temp.filename().string() + ".header");
+            std::ofstream header(authHeader, std::ios::trunc);
+            if (!header) {
+                std::filesystem::remove(temp);
+                return {false, {}, "provider_temp_file_failed"};
+            }
+            header << "Authorization: Bearer " << key << "\n";
+            header.flush();
+            header.close();
+            std::error_code permissionError;
+            std::filesystem::permissions(
+                authHeader,
+                std::filesystem::perms::owner_read | std::filesystem::perms::owner_write,
+                std::filesystem::perm_options::replace, permissionError);
+            if (permissionError) {
+                std::filesystem::remove(temp);
+                std::filesystem::remove(authHeader);
+                return {false, {}, "provider_temp_file_failed"};
+            }
+        }
     }
     std::string command = "curl --silent --show-error --max-time " +
                           std::to_string(std::max(1, config.timeoutMs / 1000)) +
                           " -H 'Content-Type: application/json'";
-    if (!config.apiKeyEnv.empty()) {
-        if (const char* key = std::getenv(config.apiKeyEnv.c_str()); key != nullptr && *key != '\0') {
-            command += " -H " + shellQuote("Authorization: Bearer " + std::string(key));
-        }
-    }
+    if (!authHeader.empty()) command += " -H " + shellQuote("@" + authHeader.string());
     command += " --data-binary @" + shellQuote(temp.string()) + " " +
                shellQuote(config.baseUrl + "/chat/completions");
     FILE* pipe = popen(command.c_str(), "r");
     if (pipe == nullptr) {
         std::filesystem::remove(temp);
+        if (!authHeader.empty()) std::filesystem::remove(authHeader);
         return {false, {}, "curl_unavailable"};
     }
     std::string response;
@@ -58,6 +104,7 @@ ProviderJsonResult requestProviderJson(const LlamaCppConfig& config, const Json&
     }
     const int result = pclose(pipe);
     std::filesystem::remove(temp);
+    if (!authHeader.empty()) std::filesystem::remove(authHeader);
     if (result != 0 || response.empty()) return {false, {}, "provider_request_failed"};
     try {
         const Json outer = Json::parse(response);
@@ -160,6 +207,7 @@ ProviderResponse LlamaCppProvider::decide(const DecisionContext& context, const 
 ProviderResponse LlamaCppProvider::decide(const DecisionContext& context, const std::string& playerInput,
                                           const Json& validationFeedback) {
     std::lock_guard lock(callMutex_);
+    const auto endpointConfig = configForPurpose(config_, "decision");
     Json candidates = Json::array();
     for (const auto& candidate : context.candidates) {
         candidates.push_back(Json{{"action_id", candidate.actionId}, {"plan_id", candidate.planId},
@@ -258,7 +306,7 @@ ProviderResponse LlamaCppProvider::decide(const DecisionContext& context, const 
                                                                {"items", Json{{"type", "string"}}}}},
                                  {"ambiguity", Json{{"type", "string"}}}}}};
         Json understandingRequest{
-            {"model", config_.model}, {"temperature", config_.temperature},
+            {"model", endpointConfig.model}, {"temperature", endpointConfig.temperature},
             {"max_tokens", understandingPolicy->second.maxTokens},
             {"messages", Json::array({Json{{"role", "system"}, {"content", understandingPrompt}},
                                       Json{{"role", "user"}, {"content", understandingUser.dump()}}})},
@@ -266,7 +314,7 @@ ProviderResponse LlamaCppProvider::decide(const DecisionContext& context, const 
                                       {"json_schema", Json{{"name", "tide_marks_utterance_understanding"},
                                                             {"strict", true}, {"schema", understandingSchema}}}}}};
         configureDecoding(understandingRequest, understandingPolicy->second);
-        auto understood = requestProviderJson(config_, understandingRequest, "understanding");
+        auto understood = requestProviderJson(endpointConfig, understandingRequest, "understanding");
         if (!understood.ok) return ProviderResponse{false, {}, {}, understood.error};
         utteranceUnderstanding = std::move(understood.value);
         if (!utteranceUnderstanding.contains("speech_act") ||
@@ -283,6 +331,9 @@ ProviderResponse LlamaCppProvider::decide(const DecisionContext& context, const 
         worldActionPermitted = permission->worldActionAllowed;
     }
 
+    std::vector<std::string> needIds;
+    needIds.reserve(context.drives.size());
+    for (const auto& drive : context.drives) needIds.push_back(drive.id);
     const Json userContent{{"npc_id", context.npcId}, {"time", context.now.toString()},
                            {"runtime_metadata", context.runtimeMetadata},
                            {"decision_channel", context.channel}, {"decision_trigger", context.trigger},
@@ -298,6 +349,7 @@ ProviderResponse LlamaCppProvider::decide(const DecisionContext& context, const 
                            {"private_character", context.privateCharacter},
                            {"private_traits", context.privateTraits},
                            {"drives", drives},
+                           {"valid_expected_relief_keys", needIds},
                            {"external_stimuli", context.externalStimuli},
                            {"stimuli", stimuli},
                            {"structural_constraints", context.structuralConstraints},
@@ -309,9 +361,6 @@ ProviderResponse LlamaCppProvider::decide(const DecisionContext& context, const 
     std::vector<std::string> stimulusIds;
     stimulusIds.reserve(context.stimuli.size());
     for (const auto& stimulus : context.stimuli) stimulusIds.push_back(stimulus.id);
-    std::vector<std::string> needIds;
-    needIds.reserve(context.drives.size());
-    for (const auto& drive : context.drives) needIds.push_back(drive.id);
     const std::string systemPrompt =
         "Return one JSON object only. The utterance_understanding stage has already classified the player's communication. "
         "runtime_metadata is an audit envelope containing identifiers and versions; do not treat it as observable world state "
@@ -333,8 +382,9 @@ ProviderResponse LlamaCppProvider::decide(const DecisionContext& context, const 
         "Do not ask the player to repeat information already present in player_input. "
         "cited_stimulus_ids may contain only IDs from the supplied stimuli array; the valid stimulus IDs for this request are " +
         Json(stimulusIds).dump() + ". If that list is empty, cited_stimulus_ids MUST be []. Never use a drive or need ID as a stimulus ID. "
-        "expected_relief may contain only need IDs from the supplied drives array; the valid need IDs for this request are " +
-        Json(needIds).dump() + ". Use empty arrays/objects when none are supplied, and expected_relief MUST be empty when action_id is empty. "
+        "expected_relief is a map of predicted need relief, not a copy of utility_contributions or utility terms. It may contain only need IDs from the supplied drives array; the valid need IDs for this request are " +
+        Json(needIds).dump() + ". Never put resource_cost, risk, future_value, relationship_effect, trait terms, or any other utility label in expected_relief. Use an empty object when none are supplied, and expected_relief MUST be empty when action_id is empty. " +
+        "expected_outcome is a short natural-language outcome sentence; do not serialize utility terms or JSON into it. "
         "confidence and expected_relief values must be numbers from 0 to 1. dialogue must be one or two natural first-person sentences spoken by the NPC, never a dump of context fields. "
         "knowledge and experiences are NPC-scoped, sourced context; they may guide a proposal but never authorize bypassing current facts or constraints. "
         "If validation_feedback is non-empty, repair only the reported action, parameter, or expected relief field problem in one response. "
@@ -343,6 +393,11 @@ ProviderResponse LlamaCppProvider::decide(const DecisionContext& context, const 
     Json messages = Json::array();
     messages.push_back(Json{{"role", "system"}, {"content", systemPrompt}});
     messages.push_back(Json{{"role", "user"}, {"content", userContent.dump()}});
+    Json expectedReliefProperties = Json::object();
+    for (const auto& needId : needIds) {
+        expectedReliefProperties[needId] =
+            Json{{"type", "number"}, {"minimum", 0.0}, {"maximum", 1.0}};
+    }
     const Json responseSchema{
         {"type", "object"}, {"additionalProperties", false},
         {"required", Json::array({"action_id", "intent", "motivation", "expected_outcome", "confidence",
@@ -356,15 +411,16 @@ ProviderResponse LlamaCppProvider::decide(const DecisionContext& context, const 
                              {"cited_stimulus_ids", Json{{"type", "array"}, {"items", Json{{"type", "string"}}}}},
                              {"tradeoffs", Json{{"type", "array"}, {"items", Json{{"type", "string"}}}}},
                              {"expected_relief", Json{{"type", "object"},
-                                                       {"additionalProperties", Json{{"type", "number"}, {"minimum", 0.0}, {"maximum", 1.0}}}}},
+                                                       {"additionalProperties", false},
+                                                       {"properties", expectedReliefProperties}}},
                              {"parameters", Json{{"type", "object"}}}}}};
-    Json request{{"model", config_.model}, {"temperature", config_.temperature}, {"max_tokens", policy.maxTokens},
+    Json request{{"model", endpointConfig.model}, {"temperature", endpointConfig.temperature}, {"max_tokens", policy.maxTokens},
                  {"messages", messages},
                  {"response_format", Json{{"type", "json_schema"},
                                            {"json_schema", Json{{"name", "tide_marks_intent_proposal"},
                                                                   {"strict", true}, {"schema", responseSchema}}}}}};
     configureDecoding(request, policy);
-    auto completed = requestProviderJson(config_, request, "decision");
+    auto completed = requestProviderJson(endpointConfig, request, "decision");
     if (!completed.ok) return ProviderResponse{false, {}, {}, completed.error};
     try {
         const Json& answer = completed.value;
@@ -410,6 +466,8 @@ ProviderResponse LlamaCppProvider::proposeEvolution(const Json& context,
                                                      const std::string& evolutionLevel,
                                                      const Json& validationFeedback) {
     std::lock_guard lock(callMutex_);
+    const auto endpointConfig = configForPurpose(
+        config_, evolutionLevel == "level1" ? "level1_evolution" : "level2_evolution");
     const auto configuredPolicy = config_.decisionPolicies.find("evolution_proposal");
     if (configuredPolicy == config_.decisionPolicies.end()) {
         return ProviderResponse{false, {}, {}, "missing_provider_policy:evolution_proposal", Json::object()};
@@ -567,8 +625,8 @@ ProviderResponse LlamaCppProvider::proposeEvolution(const Json& context,
     responseSchema["properties"]["operations"]["items"] = std::move(operationItems);
     responseSchema["properties"]["rationale"] = Json{{"type", "string"}};
     Json request = Json::object();
-    request["model"] = config_.model;
-    request["temperature"] = config_.temperature;
+    request["model"] = endpointConfig.model;
+    request["temperature"] = endpointConfig.temperature;
     request["max_tokens"] = policy.maxTokens;
     request["messages"] = Json::array({
         Json{{"role", "system"}, {"content", systemPrompt}},
@@ -598,7 +656,7 @@ ProviderResponse LlamaCppProvider::proposeEvolution(const Json& context,
         }
     };
     configureDecoding(request, policy);
-    auto completed = requestProviderJson(config_, request, "evolution_" + evolutionLevel);
+    auto completed = requestProviderJson(endpointConfig, request, "evolution_" + evolutionLevel);
     if (!completed.ok) return ProviderResponse{false, {}, {}, completed.error, Json::object()};
     if (!completed.value.is_object()) {
         return ProviderResponse{false, {}, {}, "invalid_evolution_proposal", Json::object()};

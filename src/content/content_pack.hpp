@@ -319,8 +319,15 @@ struct WorldContentPack {
 
 class ContentPackLoader {
 public:
+    using Documents = std::map<std::string, Json>;
+
     [[nodiscard]] static std::string defaultRoot();
     [[nodiscard]] static WorldContentPack load(const std::string& rootPath);
+    // Reads the immutable JSON template files into a portable document bundle.
+    // A runtime instance may persist this bundle beside its SQLite facts so a
+    // later restore does not depend on the original source directory.
+    [[nodiscard]] static Documents readDocuments(const std::string& rootPath);
+    [[nodiscard]] static WorldContentPack loadFromDocuments(const Documents& documents);
 };
 
 }  // namespace tide_marks

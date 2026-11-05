@@ -157,6 +157,7 @@ Evolution Proposal Schema、提案库、EventLog 来源事实、回放沙箱、�
 |---|---|---|
 | Runtime Core：事实、事务、Revision、事件、调度、实体生命周期、快照/回放 | 纵向完成 | 继续保持单一 WorldState 写入边界；JSON 与静态 SQLite durable checkpoint 已接入，逐根事务自动 durable commit 仍需更强的崩溃恢复策略 |
 | Content Pack / Game Instance / World Runtime State 分离 | 纵向完成 | `data/README.md` 固定静态输入与运行存档边界；继续用第二、第三实例验证可替换性 |
+| 单实例 SQLite 内容快照 | 已完成原型闭环 | `WorldService::createSqliteInstance` 在新游戏时导入全部 JSON 内容文档和初始 durable checkpoint；`loadSqliteInstance` 只从 SQLite 内容表与事实检查点恢复，原始内容目录可离线；每个实例使用独立数据库 |
 | 内驱：需求衰减、临界、满足、预期适应、多需求排序 | 纵向完成 | `DriveEvaluation` 已进入排序和 LLM 上下文；后续增加成本/风险的通用内容字段 |
 | 外驱与结构：Stimulus、Constraint、权限、异常和安全事实 | 纵向完成 | 继续扩展可声明事实类型，不用文本关键词代替模型理解 |
 | NPC 活动生命周期：Goal / ProcessExecution / FSM / BT 单一活动槽 | 纵向完成 | 保持 `NpcActivity` 为唯一阶段所有者；候选 Goal 集合是后续扩展 |
@@ -217,7 +218,7 @@ ctest --test-dir build --output-on-failure
 
 当前基准的推荐档位是：话语理解使用 `reasoning_budget_tokens=128`，普通回答关闭 thinking；有社会权衡的自驱决策使用 `reasoning_budget_tokens=128`；低置信度才升级到 256；512 以上留给演化分析。该分档基于同一模型的三类村庄提示实测，而不是单看生成长度。
 
-Provider、模型和三档预算现在由 `data/intelligence-profile.json` 配置，并通过 `--profile` 加载。真实自驱验证中，玩家对白使用 `utterance_understanding` + `player_dialogue` 两阶段；当 Lorn 的 crossing safety 越过临界阈值后，`high_salience_context` 自动进入 `autonomous_reappraisal` 档，模型选择 `repair_ferry` 并提交了资源变化和过程完成事件。最新三 NPC 回归使用 `docs/examples/llm-self-drive-session.txt`：一次 `advance 60` 后，Eve、Lorn、Mira 各收到一次真实 Qwen 请求，均在安全边界进入内容声明的 `ProcessExecution`，未由 Provider 直接写入事实。最新 Level 1/Level 2 回归分别耗时约 26.18 秒和 21.08 秒，返回 `overlay_strategy` 与 `create_entity_archetype` 提案，均保持 `status=proposed`，未自动激活 Overlay；行为 schema 契约和该次模型结果记录在 [`qwen35-4b-llama-cpp.json`](evidence/qwen35-4b-llama-cpp.json)。
+Provider、模型和三档预算现在由 `data/intelligence-profile.json` 配置，并通过 `--profile` 加载。`provider.purpose_endpoints` 允许决策、Level 1 演化和 Level 2 演化分别选择模型/端点/温度/超时；`api_key_env` 只保存环境变量名，真实密钥通过 owner-only 临时 header 文件发送并在请求后删除。真实自驱验证中，玩家对白使用 `utterance_understanding` + `player_dialogue` 两阶段；当 Lorn 的 crossing safety 越过临界阈值后，`high_salience_context` 自动进入 `autonomous_reappraisal` 档，模型选择 `repair_ferry` 并提交了资源变化和过程完成事件。最新三 NPC 回归使用 `docs/examples/llm-self-drive-session.txt`：一次 `advance 60` 后，Eve、Lorn、Mira 各收到一次真实 Qwen 请求，均在安全边界进入内容声明的 `ProcessExecution`，未由 Provider 直接写入事实；一次信息型对白误选动作后也通过 `speech_act_disallows_world_action` 的有界结构化修正成功关闭动作。最新 Level 1/Level 2 回归分别返回 `overlay_strategy` 与 `register_behavior_recipe` 提案，均保持 `status=proposed`，未自动激活 Overlay；行为 schema 契约和该次模型结果记录在 [`qwen35-4b-llama-cpp.json`](evidence/qwen35-4b-llama-cpp.json)。
 
 ## 恢复工作入口
 

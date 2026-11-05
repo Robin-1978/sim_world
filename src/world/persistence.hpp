@@ -19,6 +19,13 @@ public:
     // committed Snapshot and its Replay artifact visible as one checkpoint.
     virtual void saveDurableCommit(const std::string& path, const Json& snapshot,
                                    const std::vector<Json>& replayLines) const = 0;
+    // A SQLite instance may carry the immutable content bundle used to create
+    // it. File persistence keeps this optional artifact out of the ordinary
+    // snapshot path.
+    virtual void saveContentDocuments(const std::string& path, const Json& documents) const {
+        (void)path;
+        (void)documents;
+    }
 };
 
 // Prototype file adapter. SQLite implements the same boundary without
@@ -29,6 +36,7 @@ public:
     void saveReplay(const std::string& path, const std::vector<Json>& lines) const override;
     void saveDurableCommit(const std::string& path, const Json& snapshot,
                            const std::vector<Json>& replayLines) const override;
+    void saveContentDocuments(const std::string& path, const Json& documents) const override;
 
 private:
     static void replaceFile(const std::string& path, const std::string& bytes);
@@ -50,6 +58,8 @@ public:
     [[nodiscard]] Json loadSnapshot(const std::string& path) const;
     [[nodiscard]] std::vector<Json> loadReplay(const std::string& path) const;
     [[nodiscard]] Json loadDurableCommit(const std::string& path) const;
+    void saveContentDocuments(const std::string& path, const Json& documents) const override;
+    [[nodiscard]] Json loadContentDocuments(const std::string& path) const;
 
 private:
     std::string databasePath_;

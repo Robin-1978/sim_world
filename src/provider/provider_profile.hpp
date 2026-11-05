@@ -17,6 +17,7 @@ struct IntelligenceProfile {
 };
 
 [[nodiscard]] std::string defaultIntelligenceProfilePath();
+[[nodiscard]] std::string defaultRuntimeDirectory();
 [[nodiscard]] IntelligenceProfile loadIntelligenceProfile(const std::string& path);
 [[nodiscard]] std::unique_ptr<IProvider> makeProviderFromProfile(
     const IntelligenceProfile& profile, const std::string& providerOverride = {});

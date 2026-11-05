@@ -1627,6 +1627,24 @@ void sqlite_persistence_roundtrips_versioned_artifacts() {
     std::filesystem::remove(path);
 }
 
+void sqlite_instance_imports_content_and_restores_without_source_root() {
+    const auto databasePath = std::filesystem::temp_directory_path() / "tide_marks_instance_bundle.sqlite";
+    std::error_code ignored;
+    std::filesystem::remove(databasePath, ignored);
+    auto created = WorldService::createSqliteInstance(databasePath.string(),
+                                                      ContentPackLoader::defaultRoot(),
+                                                      std::make_unique<MockProvider>());
+    const auto imported = SqlitePersistence(databasePath.string()).loadContentDocuments("instance");
+    expect(imported.contains("content-pack.json") && imported.contains("world/village.json") &&
+               imported.contains("behaviors/village.json"),
+           "a new SQLite instance imports the complete immutable content document bundle");
+    const auto initialSummary = summarize(created.state());
+    auto restored = WorldService::loadSqliteInstance(databasePath.string(), std::make_unique<MockProvider>());
+    expect(summarize(restored.state()) == initialSummary && restored.content().id == created.content().id,
+           "an instance restores its content and committed facts from SQLite without a content-root argument");
+    std::filesystem::remove(databasePath, ignored);
+}
+
 void event_history_has_causal_identity() {
     auto service = WorldService::load(ContentPackLoader::defaultRoot(), std::make_unique<MockProvider>());
     service.converse("mira", "please offer a ration", "causal-ration");
@@ -2948,6 +2966,14 @@ void intelligence_profile_configures_decision_budgets() {
     expect(profile.llama.decisionPolicies.at("evolution_proposal").enableThinking &&
                profile.llama.decisionPolicies.at("evolution_proposal").reasoningBudgetTokens == 256,
            "Level 1 and Level 2 evolution use a separate bounded thinking policy");
+    expect(profile.llama.purposeEndpoints.contains("decision") &&
+               profile.llama.purposeEndpoints.contains("level1_evolution") &&
+               profile.llama.purposeEndpoints.contains("level2_evolution"),
+           "the profile exposes independent endpoints for decisions and both evolution levels");
+    expect(profile.llama.purposeEndpoints.at("decision").apiKeyConfigured &&
+               profile.llama.purposeEndpoints.at("decision").apiKeyEnv.empty() &&
+               profile.llama.purposeEndpoints.at("level1_evolution").model == profile.llama.model,
+           "purpose endpoint credentials are represented by optional environment-variable names");
     const auto provider = makeProviderFromProfile(profile, "mock");
     expect(provider->name() == "mock", "the profile provider can be overridden for offline tests");
 }
@@ -3017,6 +3043,8 @@ int main() {
         durable_checkpoint_policy_is_boundary_driven_and_opt_in);
     run("sqlite_persistence_roundtrips_versioned_artifacts",
         sqlite_persistence_roundtrips_versioned_artifacts);
+    run("sqlite_instance_imports_content_and_restores_without_source_root",
+        sqlite_instance_imports_content_and_restores_without_source_root);
     run("event_history_has_causal_identity", event_history_has_causal_identity);
     run("physics_events_are_deterministic_and_drained", physics_events_are_deterministic_and_drained);
     run("event_bus_is_ordered_and_filterable", event_bus_is_ordered_and_filterable);

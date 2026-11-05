@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <filesystem>
 #include <fstream>
 #include <map>
 #include <sstream>
@@ -13,6 +14,28 @@
 namespace tide_marks {
 
 namespace {
+constexpr const char* kSqliteInstanceArtifact = "instance";
+
+Json contentDocumentsJson(const ContentPackLoader::Documents& documents) {
+    Json result = Json::object();
+    for (const auto& [name, document] : documents) result[name] = document;
+    return result;
+}
+
+ContentPackLoader::Documents contentDocumentsFromJson(const Json& documents) {
+    if (!documents.is_object() || documents.empty()) {
+        throw std::runtime_error("SQLite instance has no content document bundle");
+    }
+    ContentPackLoader::Documents result;
+    for (auto item = documents.begin(); item != documents.end(); ++item) {
+        if (!item.value().is_object()) {
+            throw std::runtime_error("SQLite content document is not an object: " + item.key());
+        }
+        result.emplace(item.key(), item.value());
+    }
+    return result;
+}
+
 Json replayFactJson(const WorldState& state, std::size_t eventSequence) {
     Json json = worldStateToJson(state);
     json.erase("events");
@@ -69,6 +92,44 @@ void validateEventHistory(const WorldState& state) {
         }
     }
 }
+}
+
+WorldService WorldService::createSqliteInstance(const std::string& databasePath,
+                                                std::string contentRoot,
+                                                std::unique_ptr<IProvider> provider) {
+    if (databasePath.empty()) throw std::invalid_argument("SQLite instance database path must not be empty");
+    if (std::filesystem::exists(databasePath) && std::filesystem::file_size(databasePath) > 0) {
+        SqlitePersistence existing(databasePath);
+        try {
+            static_cast<void>(existing.loadContentDocuments(kSqliteInstanceArtifact));
+            throw std::runtime_error("SQLite instance is already initialized: " + databasePath);
+        } catch (const std::runtime_error& error) {
+            const std::string message = error.what();
+            if (!message.starts_with("SQLite content bundle does not exist:")) throw;
+        }
+    }
+    const auto content = ContentPackLoader::load(contentRoot);
+    const auto documents = ContentPackLoader::readDocuments(contentRoot);
+    WorldService service = WorldService::fromContent(content, std::move(provider));
+    service.persistence_ = std::make_unique<SqlitePersistence>(databasePath);
+    service.persistence_->saveContentDocuments(kSqliteInstanceArtifact, contentDocumentsJson(documents));
+    service.saveDurableCommit(kSqliteInstanceArtifact);
+    service.configureDurableCheckpoint(
+        DurableCheckpointPolicy{DurableCheckpointMode::DayBoundary, kSqliteInstanceArtifact, 0});
+    return service;
+}
+
+WorldService WorldService::loadSqliteInstance(const std::string& databasePath,
+                                              std::unique_ptr<IProvider> provider) {
+    SqlitePersistence persistence(databasePath);
+    const auto documents = contentDocumentsFromJson(persistence.loadContentDocuments(kSqliteInstanceArtifact));
+    const auto content = ContentPackLoader::loadFromDocuments(documents);
+    const auto snapshot = persistence.loadDurableCommit(kSqliteInstanceArtifact);
+    WorldService service = WorldService::fromContentSnapshot(content, snapshot, std::move(provider));
+    service.persistence_ = std::make_unique<SqlitePersistence>(databasePath);
+    service.configureDurableCheckpoint(
+        DurableCheckpointPolicy{DurableCheckpointMode::DayBoundary, kSqliteInstanceArtifact, 0});
+    return service;
 }
 
 Json WorldService::snapshotJson() const { return worldStateToJson(state_); }

@@ -105,14 +105,17 @@ DialogueTurn WorldIntelligenceSystem::executeTurn(const std::string& npcId, cons
         return code == "missing_action_parameter" || code == "unknown_action_parameter" ||
                code == "invalid_action_parameter_type" || code == "unexpected_action_parameters" ||
                code == "invalid_action_parameters" || code == "invalid_action_parameter_value" ||
-               code == "invalid_expected_relief" || code == "missing_dialogue";
+               code == "invalid_expected_relief" || code == "missing_dialogue" ||
+               code == "speech_act_disallows_world_action";
     };
     if (!turnResult.accepted && response.ok && world_.provider_->name() == "llama.cpp" && retryable(turnResult.error)) {
         const Json feedback{{"attempt", 1},
                             {"code", turnResult.error},
                             {"message", turnResult.error == "missing_dialogue"
                                              ? "A conversation response must contain a concise player-facing dialogue sentence."
-                                             : "Runtime rejected a structured proposal field; repair only the declared plan input or expected relief keys."},
+                                             : turnResult.error == "speech_act_disallows_world_action"
+                                                 ? "The utterance was classified as information-only; set action_id to an empty string, world_action_requested to false, expected_relief to {}, and answer from observable context."
+                                                 : "Runtime rejected a structured proposal field; repair only the declared plan input or expected relief keys."},
                             {"previous_action_id", response.proposal.actionId},
                             {"previous_parameters", response.proposal.parameters},
                             {"previous_dialogue", response.dialogue}};

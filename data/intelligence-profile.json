@@ -8,7 +8,30 @@
     "model": "Huihui-Qwen3.5-4B-abliterated.Q4_K_M",
     "api_key_env": null,
     "timeout_ms": 120000,
-    "temperature": 0.2
+    "temperature": 0.2,
+    "purpose_endpoints": {
+      "decision": {
+        "base_url": "http://127.0.0.1:8192/v1",
+        "model": "Huihui-Qwen3.5-4B-abliterated.Q4_K_M",
+        "api_key_env": null,
+        "timeout_ms": 120000,
+        "temperature": 0.2
+      },
+      "level1_evolution": {
+        "base_url": "http://127.0.0.1:8192/v1",
+        "model": "Huihui-Qwen3.5-4B-abliterated.Q4_K_M",
+        "api_key_env": null,
+        "timeout_ms": 120000,
+        "temperature": 0.2
+      },
+      "level2_evolution": {
+        "base_url": "http://127.0.0.1:8192/v1",
+        "model": "Huihui-Qwen3.5-4B-abliterated.Q4_K_M",
+        "api_key_env": null,
+        "timeout_ms": 120000,
+        "temperature": 0.2
+      }
+    }
   },
   "decision_policy": {
     "player_dialogue": {

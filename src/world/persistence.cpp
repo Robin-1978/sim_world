@@ -2,6 +2,7 @@
 
 #include <filesystem>
 #include <fstream>
+#include <cstdint>
 #include <stdexcept>
 
 namespace tide_marks {
@@ -53,6 +54,11 @@ void JsonFilePersistence::saveDurableCommit(const std::string& path, const Json&
     replaceFile(path, artifact.dump(2) + "\n");
 }
 
+void JsonFilePersistence::saveContentDocuments(const std::string&, const Json&) const {
+    // The JSON adapter deliberately keeps the immutable template beside the
+    // run directory instead of copying it into an artifact file.
+}
+
 SqlitePersistence::SqlitePersistence(std::string databasePath) : databasePath_(std::move(databasePath)) {
     if (databasePath_.empty()) throw std::invalid_argument("SQLite database path must not be empty");
     const auto parent = std::filesystem::path(databasePath_).parent_path();
@@ -84,6 +90,9 @@ void SqlitePersistence::initialize(sqlite3* database) {
         "path TEXT NOT NULL, line_no INTEGER NOT NULL, payload TEXT NOT NULL,"
         "PRIMARY KEY(path, line_no));"
         "CREATE INDEX IF NOT EXISTS replay_lines_path_idx ON replay_lines(path, line_no);"
+        "CREATE TABLE IF NOT EXISTS content_documents("
+        "path TEXT NOT NULL, document_name TEXT NOT NULL, payload TEXT NOT NULL,"
+        "PRIMARY KEY(path, document_name));"
         "CREATE TABLE IF NOT EXISTS durable_commits("
         "path TEXT PRIMARY KEY, world_id TEXT NOT NULL, instance_id TEXT NOT NULL,"
         "content_version TEXT NOT NULL, world_revision INTEGER NOT NULL, event_sequence INTEGER NOT NULL,"
@@ -91,6 +100,52 @@ void SqlitePersistence::initialize(sqlite3* database) {
         "processed_turns_payload TEXT NOT NULL, overlays_payload TEXT NOT NULL,"
         "updated_at INTEGER NOT NULL DEFAULT 0);";
     check(sqlite3_exec(database, schema, nullptr, nullptr, nullptr), database, "initialize schema");
+}
+
+void SqlitePersistence::saveContentDocuments(const std::string& path, const Json& documents) const {
+    if (!documents.is_object()) throw std::invalid_argument("content documents must be a JSON object");
+    sqlite3* database = open();
+    try {
+        initialize(database);
+        check(sqlite3_exec(database, "BEGIN IMMEDIATE;", nullptr, nullptr, nullptr), database,
+              "begin content bundle transaction");
+        sqlite3_stmt* deleteStatement = nullptr;
+        check(sqlite3_prepare_v2(database, "DELETE FROM content_documents WHERE path=?;", -1,
+                                  &deleteStatement, nullptr), database, "prepare content bundle delete");
+        check(sqlite3_bind_text(deleteStatement, 1, path.c_str(), -1, SQLITE_TRANSIENT), database,
+              "bind content bundle path");
+        check(sqlite3_step(deleteStatement), database, "delete content bundle");
+        sqlite3_finalize(deleteStatement);
+
+        sqlite3_stmt* insertStatement = nullptr;
+        check(sqlite3_prepare_v2(database,
+                                  "INSERT INTO content_documents(path,document_name,payload) VALUES(?,?,?);",
+                                  -1, &insertStatement, nullptr), database, "prepare content bundle insert");
+        for (auto item = documents.begin(); item != documents.end(); ++item) {
+            if (!item.value().is_object()) {
+                sqlite3_finalize(insertStatement);
+                throw std::invalid_argument("content document must be a JSON object: " + item.key());
+            }
+            sqlite3_reset(insertStatement);
+            sqlite3_clear_bindings(insertStatement);
+            check(sqlite3_bind_text(insertStatement, 1, path.c_str(), -1, SQLITE_TRANSIENT), database,
+                  "bind content bundle path");
+            check(sqlite3_bind_text(insertStatement, 2, item.key().c_str(), -1, SQLITE_TRANSIENT), database,
+                  "bind content document name");
+            const auto payload = item.value().dump();
+            check(sqlite3_bind_text(insertStatement, 3, payload.c_str(), -1, SQLITE_TRANSIENT), database,
+                  "bind content document payload");
+            check(sqlite3_step(insertStatement), database, "write content document");
+        }
+        sqlite3_finalize(insertStatement);
+        check(sqlite3_exec(database, "COMMIT;", nullptr, nullptr, nullptr), database,
+              "commit content bundle transaction");
+    } catch (...) {
+        sqlite3_exec(database, "ROLLBACK;", nullptr, nullptr, nullptr);
+        close(database);
+        throw;
+    }
+    close(database);
 }
 
 void SqlitePersistence::close(sqlite3* database) noexcept {
@@ -268,6 +323,36 @@ std::vector<Json> SqlitePersistence::loadReplay(const std::string& path) const {
     }
 }
 
+Json SqlitePersistence::loadContentDocuments(const std::string& path) const {
+    sqlite3* database = open();
+    try {
+        initialize(database);
+        sqlite3_stmt* statement = nullptr;
+        check(sqlite3_prepare_v2(database,
+                                 "SELECT document_name,payload FROM content_documents WHERE path=? ORDER BY document_name;",
+                                 -1, &statement, nullptr), database, "prepare content bundle read");
+        check(sqlite3_bind_text(statement, 1, path.c_str(), -1, SQLITE_TRANSIENT), database,
+              "bind content bundle read path");
+        Json result = Json::object();
+        while (true) {
+            const int step = sqlite3_step(statement);
+            if (step == SQLITE_DONE) break;
+            check(step, database, "read content document");
+            const auto* name = reinterpret_cast<const char*>(sqlite3_column_text(statement, 0));
+            const auto* payload = reinterpret_cast<const char*>(sqlite3_column_text(statement, 1));
+            if (name == nullptr || payload == nullptr) throw std::runtime_error("SQLite content document is null");
+            result[name] = Json::parse(payload);
+        }
+        sqlite3_finalize(statement);
+        close(database);
+        if (result.empty()) throw std::runtime_error("SQLite content bundle does not exist: " + path);
+        return result;
+    } catch (...) {
+        close(database);
+        throw;
+    }
+}
+
 Json SqlitePersistence::loadDurableCommit(const std::string& path) const {
     sqlite3* database = open();
     try {
@@ -295,8 +380,10 @@ Json SqlitePersistence::loadDurableCommit(const std::string& path) const {
         snapshot["world_id"] = text(0);
         snapshot["instance_id"] = text(1);
         snapshot["content_version"] = text(2);
-        snapshot["world_revision"] = sqlite3_column_int64(statement, 3);
-        snapshot["event_sequence"] = sqlite3_column_int64(statement, 4);
+        snapshot["world_revision"] =
+            static_cast<std::uint64_t>(sqlite3_column_int64(statement, 3));
+        snapshot["event_sequence"] =
+            static_cast<std::uint64_t>(sqlite3_column_int64(statement, 4));
         snapshot["events"] = Json::parse(text(6));
         snapshot["processed_turn_ids"] = Json::parse(text(8));
         snapshot["active_overlays"] = Json::parse(text(9));

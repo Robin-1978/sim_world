@@ -98,11 +98,18 @@ cmake --build build -j2
 
 ## Local LLM
 
-`data/intelligence-profile.json` selects the local llama.cpp endpoint, model, and per-decision token policy. With llama.cpp serving OpenAI-compatible HTTP on `127.0.0.1:8192`:
+`data/intelligence-profile.json` selects the local llama.cpp endpoint, model, per-decision token policy, and optional purpose-specific endpoints. `decision`, `level1_evolution`, and `level2_evolution` can each use a different compatible model or endpoint. Set `api_key_env` to the name of an environment variable when a remote endpoint requires a key; the secret value is never written to the profile, logs, Snapshot, or SQLite instance.
+
+With llama.cpp serving OpenAI-compatible HTTP on `127.0.0.1:8192`:
 
 ```bash
 ./build/tide_marks_headless --profile data/intelligence-profile.json --provider profile --days 0
 ```
+
+Installed runs first look for a user profile at
+`~/.sim_world/config/intelligence-profile.json` (or under `SIM_WORLD_HOME`),
+then fall back to the repository's sample profile. Keep remote credentials in
+the environment variables named by that profile.
 
 Player dialogue uses two model stages: semantic utterance understanding with a bounded thinking budget, then a fast answer/action decision. Autonomous reappraisal, which weighs drives and external stimuli without a user turn, uses a short reasoning budget.
 
@@ -128,7 +135,16 @@ The village content pack also enables automatic, asynchronous evolution proposal
 
 The resulting `evolution.proposal_ready` event contains the validated proposal and deterministic sandbox result. A developer or world designer must approve and activate it through the normal overlay governance path.
 
-An explicit durable checkpoint can be requested from the C++ API with `WorldService::saveDurableCommit(path)`. JSON remains the default inspectable artifact; when SQLite is discovered at configure time, `SqlitePersistence` stores the checkpoint transactionally. This checkpoint operation is explicit and does not write the database on every simulation minute.
+An instance can be created and resumed as one SQLite file. Creation imports the complete JSON content bundle once; the second command restores from SQLite without the source content directory:
+
+```bash
+./build/tide_marks_headless --provider profile --content-root data \
+  --database ~/.sim_world/instances/village/world.sqlite --days 0
+./build/tide_marks_headless --provider profile \
+  --database ~/.sim_world/instances/village/world.sqlite --days 1
+```
+
+`WorldService::createSqliteInstance()` imports the template and writes the initial durable checkpoint; `loadSqliteInstance()` reads the content snapshot and all mutable facts from that database. JSON remains the inspectable development/test adapter. The SQLite checkpoint is written at configured committed boundaries and does not perform I/O inside every simulation minute.
 
 The project goal is summarized in [`docs/goal.md`](docs/goal.md); architecture and continuation checkpoints are in [`docs/design.md`](docs/design.md) and [`docs/release-continuation-plan.md`](docs/release-continuation-plan.md).
 
@@ -183,9 +199,11 @@ but it still goes through the same Runtime validation path. LLM proposals cannot
 code or write facts directly.
 
 `data/` is immutable Content Pack input: world rules, NPC archetypes, behavior recipes, dialogue,
-instances, schemas and the Intelligence Profile. It is never a save directory. Snapshots, Replay
-packages, evolution proposals and sandbox reports belong outside it, for example:
-`var/runs/<instance-id>/<run-id>/`. See [`data/README.md`](data/README.md) for the full split.
+instances, schemas and the Intelligence Profile. It is never a save directory. A product instance
+imports these documents into one SQLite file, for example
+`~/.sim_world/instances/<instance-id>/world.sqlite`; JSON snapshots and Replay packages remain
+available outside it for inspection, tests, proposals and sandbox reports. See
+[`data/README.md`](data/README.md) for the full split.
 
 An explicit durable checkpoint can be configured without an environment variable. The default is
 no automatic durable write:
@@ -198,7 +216,7 @@ no automatic durable write:
   --checkpoint-every-minutes 60
 ```
 
-JSON is the inspectable default; SQLite is a statically compiled adapter for the same committed
-Snapshot/Replay boundary. CMake downloads the pinned SQLite amalgamation, so deployment does not
-require a system sqlite3 package. Replay is an explicit verification artifact, not per-tick
-persistence and not full Event Sourcing.
+The JSON adapter is inspectable development/test infrastructure; SQLite is the product instance
+store and is statically compiled. CMake downloads the pinned SQLite amalgamation, so deployment
+does not require a system sqlite3 package. Replay is an explicit verification artifact, not
+per-tick persistence and not full Event Sourcing.

@@ -326,23 +326,25 @@
     "level1": {
       "command": "./build/tide_marks_headless --profile data/intelligence-profile.json --provider profile --days 0 --evolve level1",
       "provider": "llama.cpp",
-      "elapsed_seconds": 8.55,
-      "proposal_kind": "strategy",
+      "model": "Huihui-Qwen3.5-4B-abliterated.Q4_K_M",
       "operation": "overlay_strategy",
       "target_npc": "mira",
-      "proposal_id": "mira_routine_update",
+      "proposal_id": "mira_food_strategy",
       "status": "proposed",
-      "runtime_result": "accepted as a validated proposal; no overlay activation and no source-world mutation"
+      "source_world_revision": 1,
+      "source_world_mutated": false,
+      "result": "passed"
     },
     "level2": {
       "command": "./build/tide_marks_headless --profile data/intelligence-profile.json --provider profile --days 0 --evolve level2",
       "provider": "llama.cpp",
-      "elapsed_seconds": 8.09,
-      "proposal_kind": "content",
-      "operation": "create_entity_archetype",
-      "proposal_id": "new_granary_facility",
+      "model": "Huihui-Qwen3.5-4B-abliterated.Q4_K_M",
+      "operation": "register_behavior_recipe",
+      "proposal_id": "new_facility",
       "status": "proposed",
-      "runtime_result": "accepted as a validated proposal; no overlay activation and no source-world mutation"
+      "source_world_revision": 1,
+      "source_world_mutated": false,
+      "result": "passed"
     },
     "result": "passed"
   },
@@ -435,10 +437,79 @@
       "elapsed_seconds": 26.12,
       "context_contract": "private_traits are supplied to the model as confidential NPC context; Runtime still ranks authored candidates and validates the returned action",
       "dialogue": "I’m at the granary, and I’ll tell you what I’m up to right now. I’m not in an active process right now; I am at the granary.",
-      "world_revision_before_after": [1, 2],
+      "world_revision_before_after": [
+        1,
+        2
+      ],
       "world_fact_boundary": "the dialogue response produced no action_id and no non-dialogue world mutation",
       "result": "passed"
     },
+    "result": "passed"
+  },
+  "provider_purpose_endpoints": {
+    "decision": {
+      "profile_key": "provider.purpose_endpoints.decision",
+      "model": "Huihui-Qwen3.5-4B-abliterated.Q4_K_M",
+      "base_url": "http://127.0.0.1:8192/v1",
+      "api_key_source": "environment variable name only; null for local llama.cpp"
+    },
+    "level1_evolution": {
+      "profile_key": "provider.purpose_endpoints.level1_evolution",
+      "model": "Huihui-Qwen3.5-4B-abliterated.Q4_K_M",
+      "base_url": "http://127.0.0.1:8192/v1",
+      "api_key_source": "environment variable name only; null for local llama.cpp"
+    },
+    "level2_evolution": {
+      "profile_key": "provider.purpose_endpoints.level2_evolution",
+      "model": "Huihui-Qwen3.5-4B-abliterated.Q4_K_M",
+      "base_url": "http://127.0.0.1:8192/v1",
+      "api_key_source": "environment variable name only; null for local llama.cpp"
+    }
+  },
+  "api_key_handling": {
+    "profile_stores": "environment variable name only",
+    "request_transport": "owner-only temporary curl header file, deleted after request",
+    "logs_and_artifacts": "secret value is not written to logs, prompts, snapshots, replay, or SQLite"
+  },
+  "latest_dialogue_retry_probe": {
+    "command": "./build/tide_marks_headless --profile data/intelligence-profile.json --provider profile --days 0",
+    "provider": "llama.cpp",
+    "understanding": "information_request; action_requested=false",
+    "initial_decision": "model returned offer_ration despite information-only speech act",
+    "runtime_feedback": "speech_act_disallows_world_action; bounded repair requested action_id=\"\" and expected_relief={}",
+    "runtime_result": "conversation accepted after one structured repair; no world action or resource change from dialogue",
+    "result": "passed"
+  },
+  "latest_self_drive_probe": {
+    "command": "./build/tide_marks_text --provider profile --script docs/examples/llm-self-drive-session.txt",
+    "provider": "llama.cpp",
+    "model": "Huihui-Qwen3.5-4B-abliterated.Q4_K_M",
+    "elapsed_seconds": 40.67,
+    "world_boundary": "day 1 7:00 after advance 60",
+    "queued_npcs": [
+      "eve",
+      "lorn",
+      "mira"
+    ],
+    "consumed_turns": 3,
+    "pending_turns": 0,
+    "intent_events": [
+      "npc.intent eve",
+      "npc.intent lorn",
+      "npc.intent mira"
+    ],
+    "npc_modes_after_drain": {
+      "eve": "executing",
+      "lorn": "executing",
+      "mira": "executing"
+    },
+    "selected_actions": {
+      "eve": "reveal_clue",
+      "lorn": "repair_ferry",
+      "mira": "offer_ration"
+    },
+    "provider_failures": 0,
+    "runtime_result": "all three current-model proposals entered authored ProcessExecution state at the safe boundary; expected_relief contained only declared need IDs and no Provider wrote WorldState directly",
     "result": "passed"
   }
 }
