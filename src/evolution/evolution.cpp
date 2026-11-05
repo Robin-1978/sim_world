@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <fstream>
+#include <limits>
 #include <set>
 #include <stdexcept>
 
@@ -67,29 +68,106 @@ bool hasNpc(const WorldContentPack& content, const std::string& id) {
 }
 
 EvolutionValidation validateParameterSchema(const Json& schema) {
+    // This is deliberately a small, closed subset of JSON Schema.  The
+    // provider may describe data needed by a recipe, but it cannot smuggle a
+    // general schema interpreter or executable expression into an overlay.
+    const auto validateNode = [&schema](const auto& self, const Json& node, bool root,
+                                        const std::string& path) -> EvolutionValidation {
+        if (!node.is_object()) {
+            return {false, "invalid_behavior_parameters",
+                    "Behavior recipe parameter schema node must be an object at " + path + "."};
+        }
+        if (root && !node.empty() && node.value("type", "") != "object") {
+            return {false, "invalid_behavior_parameters",
+                    "Behavior recipe parameters must declare type=object."};
+        }
+        static const std::set<std::string> fields{
+            "type", "properties", "required", "additionalProperties", "title", "description",
+            "items", "enum", "const", "minimum", "maximum", "minLength", "maxLength",
+            "minItems", "maxItems", "uniqueItems"};
+        for (auto it = node.begin(); it != node.end(); ++it) {
+            if (!fields.contains(it.key())) {
+                return {false, "invalid_behavior_parameters",
+                        "Unknown JSON Schema keyword in behavior parameters: " + it.key()};
+            }
+        }
+        if (node.contains("type") && !node.at("type").is_string()) {
+            return {false, "invalid_behavior_parameters", "Behavior parameter schema type must be a string at " + path + "."};
+        }
+        const auto type = node.value("type", "");
+        static const std::set<std::string> types{"object", "array", "string", "integer", "number", "boolean"};
+        if (!type.empty() && !types.contains(type)) {
+            return {false, "invalid_behavior_parameters", "Unsupported behavior parameter type at " + path + "."};
+        }
+        if (node.contains("properties")) {
+            if (!node.at("properties").is_object()) {
+                return {false, "invalid_behavior_parameters",
+                        "Behavior recipe parameter properties must be an object at " + path + "."};
+            }
+            for (auto it = node.at("properties").begin(); it != node.at("properties").end(); ++it) {
+                const auto result = self(self, it.value(), false, path + ".properties." + it.key());
+                if (!result.valid) return result;
+            }
+        }
+        if (node.contains("required")) {
+            if (!node.at("required").is_array()) {
+                return {false, "invalid_behavior_parameters", "Behavior parameter required must be an array at " + path + "."};
+            }
+            std::set<std::string> names;
+            for (const auto& item : node.at("required")) {
+                if (!item.is_string() || item.get<std::string>().empty() ||
+                    !names.insert(item.get<std::string>()).second) {
+                    return {false, "invalid_behavior_parameters",
+                            "Behavior parameter required must contain unique non-empty names at " + path + "."};
+                }
+            }
+        }
+        if (node.contains("additionalProperties") && !node.at("additionalProperties").is_boolean()) {
+            return {false, "invalid_behavior_parameters",
+                    "Behavior recipe additionalProperties must be boolean at " + path + "."};
+        }
+        if (node.contains("items")) {
+            if (type != "array") {
+                return {false, "invalid_behavior_parameters",
+                        "Behavior parameter items is only valid for an array at " + path + "."};
+            }
+            const auto result = self(self, node.at("items"), false, path + ".items");
+            if (!result.valid) return result;
+        }
+        if (node.contains("uniqueItems") && !node.at("uniqueItems").is_boolean()) {
+            return {false, "invalid_behavior_parameters",
+                    "Behavior parameter uniqueItems must be boolean at " + path + "."};
+        }
+        if (node.contains("uniqueItems") && type != "array") {
+            return {false, "invalid_behavior_parameters",
+                    "Behavior parameter uniqueItems is only valid for an array at " + path + "."};
+        }
+        for (const auto* key : {"minimum", "maximum"}) {
+            if (node.contains(key) && !node.at(key).is_number()) {
+                return {false, "invalid_behavior_parameters",
+                        std::string("Behavior parameter ") + key + " must be numeric at " + path + "."};
+            }
+        }
+        for (const auto* key : {"minLength", "maxLength", "minItems", "maxItems"}) {
+            if (node.contains(key) &&
+                (!node.at(key).is_number_integer() || node.at(key).template get<std::int64_t>() < 0 ||
+                 static_cast<std::uint64_t>(node.at(key).template get<std::int64_t>()) >
+                     static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max()))) {
+                return {false, "invalid_behavior_parameters",
+                        std::string("Behavior parameter ") + key + " must be a non-negative integer at " + path + "."};
+            }
+        }
+        if (node.contains("enum") && !node.at("enum").is_array()) {
+            return {false, "invalid_behavior_parameters", "Behavior parameter enum must be an array at " + path + "."};
+        }
+        return {true, "ok", "Behavior recipe parameter schema is bounded."};
+    };
+
     if (!schema.is_object()) {
         return {false, "invalid_behavior_parameters", "Behavior recipe parameters must be a JSON Schema object."};
     }
     if (schema.empty()) return {true, "ok", "The behavior recipe declares no decision parameters."};
-    if (schema.value("type", "") != "object") {
-        return {false, "invalid_behavior_parameters", "Behavior recipe parameters must declare type=object."};
-    }
-    if (schema.contains("properties") && !schema.at("properties").is_object()) {
-        return {false, "invalid_behavior_parameters", "Behavior recipe parameter properties must be an object."};
-    }
-    if (schema.contains("required") && !schema.at("required").is_array()) {
-        return {false, "invalid_behavior_parameters", "Behavior recipe parameter required must be an array."};
-    }
-    if (schema.contains("additionalProperties") && !schema.at("additionalProperties").is_boolean()) {
-        return {false, "invalid_behavior_parameters", "Behavior recipe additionalProperties must be boolean."};
-    }
-    static const std::set<std::string> fields{"type", "properties", "required", "additionalProperties", "title", "description"};
-    for (auto it = schema.begin(); it != schema.end(); ++it) {
-        if (!fields.contains(it.key())) {
-            return {false, "invalid_behavior_parameters", "Unknown JSON Schema keyword in behavior parameters: " + it.key()};
-        }
-    }
-    return {true, "ok", "Behavior recipe parameter schema is bounded."};
+    return validateNode(validateNode, schema, true, "parameters");
 }
 
 EvolutionValidation applyOperations(WorldContentPack& content, const EvolutionProposal& proposal) {
@@ -158,11 +236,16 @@ EvolutionValidation applyOperations(WorldContentPack& content, const EvolutionPr
                 return {false, "behavior_recipe_actors_missing",
                         "An evolved behavior recipe must declare a non-empty available_to actor scope."};
             }
+            std::set<std::string> actorIds;
             for (const auto& actor : actors) {
                 if (!actor.is_string() || actor.get<std::string>().empty() ||
                     !hasNpc(content, actor.get<std::string>())) {
                     return {false, "unknown_behavior_recipe_actor",
                             "An evolved behavior recipe references an unknown available_to NPC."};
+                }
+                if (!actorIds.insert(actor.get<std::string>()).second) {
+                    return {false, "duplicate_behavior_recipe_actor",
+                            "An evolved behavior recipe must reference each available_to NPC exactly once."};
                 }
                 recipe.allowedActors.push_back(actor.get<std::string>());
             }
@@ -481,11 +564,16 @@ EvolutionValidation EvolutionManager::validate(const EvolutionProposal& proposal
                     return {false, "behavior_recipe_actors_missing",
                             "An evolved behavior recipe must declare a non-empty available_to actor scope."};
                 }
+                std::set<std::string> actorIds;
                 for (const auto& actor : actors) {
                     if (!actor.is_string() || actor.get<std::string>().empty() ||
                         !hasNpc(content, actor.get<std::string>())) {
                         return {false, "unknown_behavior_recipe_actor",
-                                "An evolved behavior recipe references an unknown available_to NPC."};
+                            "An evolved behavior recipe references an unknown available_to NPC."};
+                    }
+                    if (!actorIds.insert(actor.get<std::string>()).second) {
+                        return {false, "duplicate_behavior_recipe_actor",
+                                "An evolved behavior recipe must reference each available_to NPC exactly once."};
                     }
                 }
                 recipe.root = behaviorNodeFromJson(operation.at("root"));

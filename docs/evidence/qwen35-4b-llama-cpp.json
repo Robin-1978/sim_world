@@ -283,8 +283,9 @@
       "./build/tide_marks_headless --profile data/intelligence-profile.json --provider profile --days 0 --evolve level2"
     ],
     "provider": "llama.cpp",
+    "model": "Huihui-Qwen3.5-4B-abliterated.Q4_K_M",
     "level1": {
-      "elapsed_seconds": 11.13,
+      "elapsed_seconds": 26.175,
       "proposal_kind": "strategy",
       "operation": "overlay_strategy",
       "status": "proposed",
@@ -292,7 +293,7 @@
       "runtime_result": "accepted as a validated proposal; no overlay activation and no source-world mutation"
     },
     "level2": {
-      "elapsed_seconds": 17.75,
+      "elapsed_seconds": 21.08,
       "proposal_kind": "content",
       "operation": "create_entity_archetype",
       "status": "proposed",
@@ -322,19 +323,22 @@
     "level1": {
       "command": "./build/tide_marks_headless --profile data/intelligence-profile.json --provider profile --days 0 --evolve level1",
       "provider": "llama.cpp",
+      "elapsed_seconds": 26.175,
       "proposal_kind": "strategy",
-      "operation": "register_behavior_recipe",
+      "operation": "overlay_strategy",
       "status": "proposed",
-      "runtime_result": "validated; sandbox and independent approval still required"
+      "runtime_result": "accepted as a validated proposal; no overlay activation and no source-world mutation"
     },
     "level2": {
       "command": "./build/tide_marks_headless --profile data/intelligence-profile.json --provider profile --days 0 --evolve level2",
       "provider": "llama.cpp",
+      "elapsed_seconds": 21.08,
       "proposal_kind": "content",
-      "operation": "register_behavior_recipe",
+      "operation": "create_entity_archetype",
       "status": "proposed",
-      "runtime_result": "first tool payload repaired once with structured validation feedback, then validated; no source world mutation"
-    }
+      "runtime_result": "accepted as a validated proposal; no overlay activation and no source-world mutation"
+    },
+    "result": "passed"
   },
   "latest_context_budget_self_drive": {
     "command": "./build/tide_marks_text --provider profile --script docs/examples/llm-self-drive-session.txt",
@@ -381,5 +385,14 @@
     "elapsed_seconds": 75.1,
     "runtime_result": "all three real Qwen proposals committed through the authored ProcessExecution path; one invalid expected_relief field was repaired once and no Provider wrote WorldState directly",
     "result": "passed"
+  },
+  "schema_contract_probe": {
+    "runtime_change": "bounded behavior parameter schemas now accept uniqueItems only on array nodes and reject it on the root object; available_to actor scopes are checked for known, unique NPC ids",
+    "action_runtime_check": "configured uniqueItems and minItems are enforced when binding action parameters",
+    "automated_tests": [
+      "action_validator_enforces_unique_array_parameters",
+      "evolution_proposals_are_governed (nested uniqueItems and duplicate available_to)"
+    ],
+    "provider_feedback_path": "invalid schema remains fail-closed and is eligible for the existing bounded structured repair"
   }
 }

@@ -1,6 +1,7 @@
 #include "npc/action_validator.hpp"
 
 #include <algorithm>
+#include <set>
 
 namespace tide_marks {
 
@@ -94,6 +95,39 @@ ValidationResult ActionValidator::validate(const DecisionContext& context, const
                                 })) {
                     return {false, "invalid_action_parameter_type",
                             "The behavior parameter array contains an item with the wrong type: " + item.key()};
+                }
+            }
+            if (item.value().is_array()) {
+                if (rules.contains("uniqueItems")) {
+                    if (!rules.at("uniqueItems").is_boolean()) {
+                        return {false, "invalid_action_parameter_schema",
+                                "The authored uniqueItems rule must be boolean: " + item.key()};
+                    }
+                    if (rules.at("uniqueItems").get<bool>()) {
+                        std::set<Json> seen;
+                        for (const auto& entry : item.value()) {
+                            if (!seen.insert(entry).second) {
+                                return {false, "invalid_action_parameter_value",
+                                        "The behavior parameter array contains duplicate items: " + item.key()};
+                            }
+                        }
+                    }
+                }
+                for (const auto* bound : {"minItems", "maxItems"}) {
+                    if (!rules.contains(bound)) continue;
+                    if (!rules.at(bound).is_number_integer() || rules.at(bound).get<std::int64_t>() < 0) {
+                        return {false, "invalid_action_parameter_schema",
+                                std::string("The authored ") + bound + " rule must be a non-negative integer: " + item.key()};
+                    }
+                    const auto limit = static_cast<std::size_t>(rules.at(bound).get<std::int64_t>());
+                    if (std::string(bound) == "minItems" && item.value().size() < limit) {
+                        return {false, "invalid_action_parameter_value",
+                                "The behavior parameter array is shorter than its authored minimum: " + item.key()};
+                    }
+                    if (std::string(bound) == "maxItems" && item.value().size() > limit) {
+                        return {false, "invalid_action_parameter_value",
+                                "The behavior parameter array exceeds its authored maximum: " + item.key()};
+                    }
                 }
             }
         }

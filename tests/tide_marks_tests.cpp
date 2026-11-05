@@ -1095,6 +1095,26 @@ void action_validator_rejects_malformed_nested_schema_without_throwing() {
            "malformed nested parameter schemas fail closed with structured validation feedback");
 }
 
+void action_validator_enforces_unique_array_parameters() {
+    DecisionContext context;
+    ActionCandidate candidate;
+    candidate.actionId = "fixture_action";
+    candidate.parameterSchema = Json{
+        {"type", "object"},
+        {"additionalProperties", false},
+        {"required", Json::array({"destinations"})},
+        {"properties", Json{{"destinations", Json{{"type", "array"}, {"minItems", 1},
+                                                       {"uniqueItems", true},
+                                                       {"items", Json{{"type", "string"}}}}}}}};
+    context.candidates.push_back(candidate);
+    const auto accepted = ActionValidator::validate(
+        context, "fixture_action", Json{{"destinations", Json::array({"archive", "dock"})}});
+    const auto rejected = ActionValidator::validate(
+        context, "fixture_action", Json{{"destinations", Json::array({"archive", "archive"})}});
+    expect(accepted.valid && !rejected.valid && rejected.code == "invalid_action_parameter_value",
+           "uniqueItems and minItems are enforced for configured array action parameters");
+}
+
 void llm_action_validation_returns_bounded_repair_feedback() {
     auto provider = std::make_unique<RepairingLlamaProvider>();
     auto* raw = provider.get();
@@ -2379,6 +2399,25 @@ void evolution_proposals_are_governed() {
     proposal.evidenceEventSequences = {service.state().events.back().sequence};
     const auto valid = EvolutionManager::validate(proposal, service.content(), service.state());
     expect(valid.valid, "declarative evolution proposal passes structural and evidence validation");
+
+    auto parameterized = proposal;
+    parameterized.id = "proposal.recipe.parameterized";
+    parameterized.operations.at(0)["parameters"] = Json{
+        {"type", "object"},
+        {"additionalProperties", false},
+        {"properties", Json{{"destinations", Json{{"type", "array"}, {"minItems", 1},
+                                                       {"uniqueItems", true},
+                                                       {"items", Json{{"type", "string"}}}}}}}};
+    const auto parameterizedValidation = EvolutionManager::validate(parameterized, service.content(), service.state());
+    expect(parameterizedValidation.valid,
+           "evolved behavior parameters accept the bounded uniqueItems JSON Schema subset");
+    auto duplicateActors = parameterized;
+    duplicateActors.id = "proposal.recipe.duplicate_actors";
+    duplicateActors.operations.at(0)["available_to"] = Json::array({"mira", "mira"});
+    const auto duplicateActorValidation = EvolutionManager::validate(duplicateActors, service.content(), service.state());
+    expect(duplicateActorValidation.code == "duplicate_behavior_recipe_actor",
+           "evolved behavior propagation scopes reject duplicate actor identities");
+
     const auto proposalJson = EvolutionManager::toJson(proposal);
     expect(proposalJson.at("schema_version") == 1 &&
                EvolutionManager::fromJson(proposalJson).evidenceEventSequences == proposal.evidenceEventSequences,
@@ -2796,6 +2835,8 @@ int main() {
         decision_context_obeys_authored_visibility_budgets);
     run("action_validator_rejects_malformed_nested_schema_without_throwing",
         action_validator_rejects_malformed_nested_schema_without_throwing);
+    run("action_validator_enforces_unique_array_parameters",
+        action_validator_enforces_unique_array_parameters);
     run("llm_action_validation_returns_bounded_repair_feedback",
         llm_action_validation_returns_bounded_repair_feedback);
     run("llm_expected_relief_validation_returns_bounded_repair_feedback",

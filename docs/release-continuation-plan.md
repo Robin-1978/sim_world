@@ -29,7 +29,7 @@
 | 社会关系与组织 | 已实现 NPC/玩家/组织四轴关系、声明式社会组成员与指标、交易和快照恢复；港区与 Glass Orchard 分别使用自己的组织、阵营和制度事实，没有 Runtime 特例 | `NpcState.relationships`, `WorldState.socialGroups`, `SocialGroupContent`, `relationship.adjust`, `trade.execute`, `tests/fixtures/port-pack`, `tests/fixtures/glass-orchard-pack` |
 | 元动作语义目录 | 已冻结；故事动作 ID 由内容包绑定到通用 operator，行为配方在运行时编译为 BT；Recipe 可声明参数 Schema，`IntentProposal.parameters` 经校验后绑定到通用能力（含动态移动目标）并随过程保存 | `src/world/meta_actions.*`, `src/npc/behavior_recipe.*`, `src/npc/action_validator.*`, `data/behaviors/village.json` |
 | NPC 基线日程与策略演化 | 已实现确定性小时边界投影；Level 1 的 `overlay_schedule` 经过验证、沙箱、独立审批和版本化 Overlay 后才生效，临时偏离仍通过行动表达 | `NpcContent.schedule`, `NpcState.location/scheduleLabel`, `WorldService::processHourBoundary`, `EvolutionManager::applyOperations` |
-| World Intelligence 演化提案 | 提案持久化、来源事件证据、验证、沙箱、版本化 overlay 激活/恢复/栈式回滚、内容声明异常检测和反事实场景实验已完成；配方节点引用和整批 overlay 原子性均由 Runtime 校验 | `src/evolution/evolution.*`, `src/evolution/anomaly.*`, `src/evolution/scenario.*`, `src/world/world_service.*`, `data/schemas/evolution-proposal.schema.json`, `data/schemas/scenario-proposal.schema.json`; 校验白名单、EventLog 来源、治理类别、禁止 Core mutation、独立审批、快照重放和结果 JSON 审计已覆盖 |
+| World Intelligence 演化提案 | 提案持久化、来源事件证据、验证、沙箱、版本化 overlay 激活/恢复/栈式回滚、内容声明异常检测和反事实场景实验已完成；配方节点引用、整批 overlay 原子性、行为参数 JSON Schema 子集和 `available_to` 唯一传播范围均由 Runtime 校验 | `src/evolution/evolution.*`, `src/evolution/anomaly.*`, `src/evolution/scenario.*`, `src/world/world_service.*`, `src/npc/action_validator.*`, `data/schemas/evolution-proposal.schema.json`, `data/schemas/scenario-proposal.schema.json`; 校验白名单、数组 `uniqueItems`/边界、EventLog 来源、治理类别、禁止 Core mutation、独立审批、快照重放和结果 JSON 审计已覆盖 |
 | 3D 表现和 Blender 场景 | 已完成内容化投影 | `src/client_main.cpp` 从当前内容包读取空间实体、连接、NPC、资源、场景资产与相机模式，无村庄 `world_id` 或角色分支；Xvfb 烟雾测试覆盖村庄和 Glass Orchard |
 
 ## Runtime 契约收敛队列
@@ -74,6 +74,7 @@
 - 嵌套配方失败只回滚自己的保存点，不会把所在世界时间步一起恢复；快照回滚不复制不可变事件历史。
 - 冲突与安全 operator 的 attack、sabotage、threaten、defend、evacuate、repair 均覆盖事实变化、主事件与 Snapshot；关闭的 authored topology 会阻止移动，生产输入不足或输出超重不会留下部分资源或事件。
 - Overlay 的 Behavior Recipe 只有在条件、元动作和节点 ID 都能解析时才可进入 Sandbox；多操作 Overlay 只有全部操作成功才整体交换内容视图。`CommandResult.event` 固定返回本次命令的主事件，不会被子事件或投射刺激覆盖。
+- 行为参数 schema 只接受受限的声明式 JSON Schema：`uniqueItems` 只能出现在数组节点并在实际参数绑定时检查，`minItems`/`maxItems` 以非负整数执行；行为能力的 `available_to` 传播范围必须引用已知且互不重复的 NPC。真实 Provider 仍通过结构化错误反馈修正，Runtime 不因模型输出而放宽边界。
 - 核心测试、可执行程序构建和三个独立内容实例的 CLI 回归以当前机器实测耗时为准；单测耗时输出用于防止长期模拟回归。
 
 ## P0 工作顺序
@@ -216,7 +217,7 @@ ctest --test-dir build --output-on-failure
 
 当前基准的推荐档位是：话语理解使用 `reasoning_budget_tokens=128`，普通回答关闭 thinking；有社会权衡的自驱决策使用 `reasoning_budget_tokens=128`；低置信度才升级到 256；512 以上留给演化分析。该分档基于同一模型的三类村庄提示实测，而不是单看生成长度。
 
-Provider、模型和三档预算现在由 `data/intelligence-profile.json` 配置，并通过 `--profile` 加载。真实自驱验证中，玩家对白使用 `utterance_understanding` + `player_dialogue` 两阶段；当 Lorn 的 crossing safety 越过临界阈值后，`high_salience_context` 自动进入 `autonomous_reappraisal` 档，模型选择 `repair_ferry` 并提交了资源变化和过程完成事件。最新三 NPC 回归使用 `docs/examples/llm-self-drive-session.txt`：一次 `advance 60` 后，Eve、Lorn、Mira 各收到一次真实 Qwen 请求，均在安全边界进入内容声明的 `ProcessExecution`，未由 Provider 直接写入事实；运行耗时和结果记录在 [`qwen35-4b-llama-cpp.json`](evidence/qwen35-4b-llama-cpp.json)。
+Provider、模型和三档预算现在由 `data/intelligence-profile.json` 配置，并通过 `--profile` 加载。真实自驱验证中，玩家对白使用 `utterance_understanding` + `player_dialogue` 两阶段；当 Lorn 的 crossing safety 越过临界阈值后，`high_salience_context` 自动进入 `autonomous_reappraisal` 档，模型选择 `repair_ferry` 并提交了资源变化和过程完成事件。最新三 NPC 回归使用 `docs/examples/llm-self-drive-session.txt`：一次 `advance 60` 后，Eve、Lorn、Mira 各收到一次真实 Qwen 请求，均在安全边界进入内容声明的 `ProcessExecution`，未由 Provider 直接写入事实。最新 Level 1/Level 2 回归分别耗时约 26.18 秒和 21.08 秒，返回 `overlay_strategy` 与 `create_entity_archetype` 提案，均保持 `status=proposed`，未自动激活 Overlay；行为 schema 契约和该次模型结果记录在 [`qwen35-4b-llama-cpp.json`](evidence/qwen35-4b-llama-cpp.json)。
 
 ## 恢复工作入口
 
