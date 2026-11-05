@@ -2788,6 +2788,10 @@ void level_one_evolution_is_scoped_to_target_npc() {
     auto provider = std::make_unique<EvolutionProposalProvider>();
     auto* providerRaw = provider.get();
     auto service = WorldService::load(ContentPackLoader::defaultRoot(), std::move(provider));
+    const auto sourceSequence = service.state().events.back().sequence;
+    expect(service.recordExperience("mira", "private", "peer_observation", "withhold", "kept private",
+                                    sourceSequence, 0.8, true, "mira").accepted,
+           "the fixture can create a committed peer-private experience for projection testing");
     const auto result = EvolutionManager::propose(service, "level1", "targeted_reflection", "lorn");
     expect(result.accepted && result.proposal.targetNpcId == "lorn",
            "Level 1 proposals retain the NPC target used to build their context");
@@ -2796,6 +2800,12 @@ void level_one_evolution_is_scoped_to_target_npc() {
                !providerRaw->observedContext.at("npcs").at("mira").contains("knowledge") &&
                !providerRaw->observedContext.at("npcs").at("mira").contains("experiences"),
            "Level 1 exposes private cognitive evidence only for the target NPC");
+    expect(std::none_of(providerRaw->observedContext.at("evidence_events").begin(),
+                        providerRaw->observedContext.at("evidence_events").end(), [](const auto& event) {
+                            return event.value("type", "") == "experience.recorded" &&
+                                   event.value("actor", "") == "mira";
+                        }),
+           "Level 1 evidence history filters a peer's private cognitive event");
 
     const auto roundTrip = EvolutionManager::fromJson(EvolutionManager::toJson(result.proposal));
     expect(roundTrip.targetNpcId == "lorn" && roundTrip.evolutionLevel == "level1",

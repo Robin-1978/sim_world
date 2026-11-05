@@ -85,6 +85,24 @@ Json stimulusEvidence(const NpcState& npc) {
     }
     return result;
 }
+
+bool isPrivateCognitiveEvent(const std::string& type) {
+    // These event families are projections of one NPC's cognition.  Other
+    // world facts remain public evolution evidence, while private cognitive
+    // evidence is visible only to the subject that owns it (or to a world
+    // event explicitly addressed to that subject).
+    return type.rfind("memory.", 0) == 0 || type.rfind("knowledge.", 0) == 0 ||
+           type.rfind("experience.", 0) == 0 || type == "drive.adapted";
+}
+
+bool visibleInEvolutionContext(const WorldEvent& event, const std::string& evolutionLevel,
+                               const std::string& targetNpcId) {
+    if (evolutionLevel != "level1" || targetNpcId.empty() || !isPrivateCognitiveEvent(event.type)) {
+        return true;
+    }
+    return event.actor == targetNpcId || event.target == targetNpcId ||
+           event.target == npcEntityId(targetNpcId);
+}
 }  // namespace
 
 Json WorldEvolutionSystem::proposalContext(const WorldService& world,
@@ -95,10 +113,15 @@ Json WorldEvolutionSystem::proposalContext(const WorldService& world,
     const auto& state = world.state_;
     const auto& content = world.content_;
     if (evolutionLevel != "level1" && evolutionLevel != "level2") return Json::object();
+    std::string scopedTarget = targetNpcId;
+    if (evolutionLevel == "level1" && scopedTarget.empty() && !content.npcs.empty()) {
+        scopedTarget = content.npcs.front().definition.id;
+    }
     Json events = Json::array();
     const std::size_t first = state.events.size() > 32 ? state.events.size() - 32 : 0;
     for (std::size_t index = first; index < state.events.size(); ++index) {
         const auto& event = state.events[index];
+        if (!visibleInEvolutionContext(event, evolutionLevel, scopedTarget)) continue;
         events.push_back(Json{{"sequence", event.sequence}, {"at", event.at.minute},
                               {"type", event.type}, {"actor", event.actor}, {"target", event.target},
                               {"detail", event.detail}, {"data", event.data}});
@@ -106,10 +129,6 @@ Json WorldEvolutionSystem::proposalContext(const WorldService& world,
     Json resources = Json::object();
     for (const auto& [id, resource] : state.resources) {
         resources[id] = Json{{"amount", resource.amount}, {"reserved", resource.reserved}};
-    }
-    std::string scopedTarget = targetNpcId;
-    if (evolutionLevel == "level1" && scopedTarget.empty() && !content.npcs.empty()) {
-        scopedTarget = content.npcs.front().definition.id;
     }
     Json npcs = Json::object();
     for (const auto& [id, npc] : state.npcs) {
