@@ -659,16 +659,10 @@ ProviderResponse LlamaCppProvider::proposeEvolution(const Json& context,
     responseSchema["properties"]["id"] = Json{{"type", "string"}, {"minLength", 1}};
     responseSchema["properties"]["proposal_kind"] = Json{{"type", "string"},
                                                              {"enum", Json::array({"content", "knowledge", "strategy", "declarative_capability", "innovation"})}};
+    // Evidence membership is captured data, not a tool-contract variant. A
+    // stable integer shape lets llama.cpp reuse the static system/tool prefix;
+    // EvolutionManager validates every cited sequence against EventLog.
     Json evidenceItem = Json{{"type", "integer"}, {"minimum", 1}};
-    if (context.contains("evidence_events") && context.at("evidence_events").is_array()) {
-        Json validSequences = Json::array();
-        for (const auto& event : context.at("evidence_events")) {
-            if (event.is_object() && event.contains("sequence") && event.at("sequence").is_number_unsigned()) {
-                validSequences.push_back(event.at("sequence"));
-            }
-        }
-        if (!validSequences.empty()) evidenceItem["enum"] = std::move(validSequences);
-    }
     responseSchema["properties"]["evidence_event_sequences"] =
         Json{{"type", "array"}, {"minItems", 1}, {"items", std::move(evidenceItem)}};
     Json innovationPlan = Json::object();
@@ -859,6 +853,7 @@ ProviderResponse LlamaCppProvider::proposeReflection(const Json& context,
                                                      const std::string& targetNpcId,
                                                      const Json& validationFeedback) {
     std::lock_guard lock(callMutex_);
+    (void)targetNpcId;  // Target membership is validated from the captured context and Runtime result.
     const auto endpointConfig = configForPurpose(config_, "reflection");
     const auto policyFound = config_.purposePolicies.find("reflection");
     const DecisionPolicy policy = policyFound == config_.purposePolicies.end()
@@ -904,20 +899,6 @@ ProviderResponse LlamaCppProvider::proposeReflection(const Json& context,
                                                 {"text", Json{{"type", "string"}, {"minLength", 1}, {"maxLength", 512}}},
                                                 {"source_sequence", Json{{"type", "integer"}, {"minimum", 1}}},
                                                 {"confidence", Json{{"type", "number"}, {"minimum", 0.0}, {"maximum", 1.0}}}}}};
-    Json sourceSequences = Json::array();
-    const auto newEvidence = context.value("new_evidence", Json::array());
-    if (newEvidence.is_array()) {
-        for (const auto& event : newEvidence) {
-            if (event.is_object() && event.contains("sequence") && event.at("sequence").is_number_unsigned()) {
-                sourceSequences.push_back(event.at("sequence"));
-            }
-        }
-    }
-    if (!sourceSequences.empty()) {
-        beliefItem["properties"]["source_sequence"]["enum"] = sourceSequences;
-        experienceItem["properties"]["source_sequence"]["enum"] = sourceSequences;
-        memoryItem["properties"]["source_sequence"]["enum"] = sourceSequences;
-    }
     Json schema{
         {"type", "object"}, {"additionalProperties", false},
         {"required", Json::array({"schema_version", "npc_id", "evidence_event_sequences", "cognition_updates",
@@ -925,13 +906,14 @@ ProviderResponse LlamaCppProvider::proposeReflection(const Json& context,
                                    "innovation_hypotheses", "innovation_actions"})},
         {"properties", Json{
             {"schema_version", Json{{"const", 1}}},
-            {"npc_id", Json{{"const", targetNpcId}}},
+            // Subject and evidence membership are dynamic facts in the
+            // captured context. Keep this tool contract stable so llama.cpp
+            // can reuse its KV prefix across NPCs and days; the Runtime still
+            // enforces the exact target and committed event sequences.
+            {"npc_id", Json{{"type", "string"}, {"minLength", 1}, {"maxLength", 64}}},
             {"evidence_event_sequences", Json{{"type", "array"}, {"maxItems", 32},
-                                                {"uniqueItems", true}, {"items", [&sourceSequences] {
-                                                    Json item{{"type", "integer"}, {"minimum", 1}};
-                                                    if (!sourceSequences.empty()) item["enum"] = sourceSequences;
-                                                    return item;
-                                                }()}}},
+                                                {"uniqueItems", true},
+                                                {"items", Json{{"type", "integer"}, {"minimum", 1}}}}},
             {"cognition_updates", Json{{"type", "object"}, {"additionalProperties", false},
                                         {"required", Json::array({"belief_updates", "experience_updates", "memory_updates"})},
                                         {"properties", Json{
@@ -982,7 +964,9 @@ ProviderResponse LlamaCppProvider::proposeReflection(const Json& context,
     recipeOperation["properties"]["priority"] = Json{{"type", "integer"}, {"minimum", 0}};
     recipeOperation["properties"]["preemption_policy"] = Json{{"enum", Json::array({"none", "lower_priority"})}};
     recipeOperation["properties"]["parameters"] = Json{{"type", "object"}};
-    recipeOperation["properties"]["available_to"] = Json{{"type", "array"}, {"minItems", 1}, {"maxItems", 1}, {"items", Json{{"const", targetNpcId}}}};
+    recipeOperation["properties"]["available_to"] = Json{{"type", "array"}, {"minItems", 1}, {"maxItems", 1},
+                                                            {"uniqueItems", true},
+                                                            {"items", Json{{"type", "string"}, {"minLength", 1}, {"maxLength", 64}}}};
     recipeOperation["properties"]["root"] = std::move(recipeRoot);
 
     Json testPlan = Json::object();
@@ -1022,29 +1006,13 @@ ProviderResponse LlamaCppProvider::proposeReflection(const Json& context,
     innovationHypothesis["properties"]["evidence_event_sequences"] = Json{{"type", "array"}, {"minItems", 1}, {"uniqueItems", true}};
     innovationHypothesis["properties"]["operations"] = Json{{"type", "array"}, {"minItems", 1}, {"maxItems", 1}, {"items", std::move(recipeOperation)}};
     innovationHypothesis["properties"]["innovation"] = std::move(innovation);
-    if (!sourceSequences.empty()) {
-        innovationHypothesis["properties"]["evidence_event_sequences"]["items"] =
-            Json{{"type", "integer"}, {"minimum", 1}, {"enum", sourceSequences}};
-    } else {
-        innovationHypothesis["properties"]["evidence_event_sequences"]["items"] =
-            Json{{"type", "integer"}, {"minimum", 1}};
-    }
+    innovationHypothesis["properties"]["evidence_event_sequences"]["items"] =
+        Json{{"type", "integer"}, {"minimum", 1}};
     schema["properties"]["innovation_hypotheses"] =
         Json{{"type", "array"}, {"maxItems", 1}, {"items", std::move(innovationHypothesis)}};
-    const auto pendingHypotheses = context.value("pending_innovation_hypotheses", Json::array());
-    if (!pendingHypotheses.is_array() || pendingHypotheses.empty()) {
-        schema["properties"]["innovation_actions"] = Json{{"type", "array"}, {"maxItems", 0}};
-    }
-    const auto unresolvedIssues = context.value("unresolved_issues", Json::array());
-    Json resolvedIssueItem{{"type", "string"}, {"maxLength", 256}};
-    if (unresolvedIssues.is_array() && !unresolvedIssues.empty()) {
-        resolvedIssueItem["enum"] = unresolvedIssues;
-    } else {
-        schema["properties"]["resolved_issues"] = Json{{"type", "array"}, {"maxItems", 0}};
-    }
-    if (unresolvedIssues.is_array() && !unresolvedIssues.empty()) {
-        schema["properties"]["resolved_issues"]["items"] = std::move(resolvedIssueItem);
-    }
+    // Pending hypothesis IDs and unresolved issue membership are dynamic
+    // facts. Keep their shape stable for prompt caching; the Runtime rejects
+    // unknown lifecycle transitions and issue resolutions deterministically.
     Json modelContext = context;
     // The authored role prompt belongs in the trusted system prefix. Keeping
     // a second copy in the dynamic user projection wastes tokens and invites
