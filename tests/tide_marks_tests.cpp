@@ -329,6 +329,7 @@ public:
     ProviderResponse proposeEvolution(const Json& context, const std::string& level) override {
         observedLevel = level;
         observedContext = context;
+        observedTargets.push_back(context.value("target_npc", ""));
         const auto evidence = context.at("evidence_events").at(0).at("sequence");
         const auto targetNpc = context.value("target_npc", "mira");
         Json proposal;
@@ -360,6 +361,7 @@ public:
     [[nodiscard]] std::string name() const override { return "evolution-test-llm"; }
     std::string observedLevel;
     Json observedContext = Json::object();
+    std::vector<std::string> observedTargets;
 };
 
 void village_has_three_independent_npcs() {
@@ -2825,8 +2827,10 @@ void automatic_evolution_uses_async_llm_and_audits_sandbox() {
     const auto toBoundary = kMinutesPerDay - (service.state().now.minute % kMinutesPerDay);
     service.advanceMinutes(toBoundary);
     service.waitForAsyncTurns(1000);
-    expect(providerRaw->observedLevel == "level1",
-           "a configured day boundary enqueues a Level 1 request on the real provider queue");
+    expect(providerRaw->observedLevel == "level1" && providerRaw->observedTargets.size() == 3 &&
+               std::set<std::string>(providerRaw->observedTargets.begin(), providerRaw->observedTargets.end()) ==
+                   std::set<std::string>{"eve", "lorn", "mira"},
+           "a configured day boundary enqueues one scoped Level 1 request for every active NPC");
     expect(std::any_of(service.state().events.begin(), service.state().events.end(),
                        [](const auto& event) { return event.type == "evolution.proposal_ready"; }),
            "an asynchronous LLM evolution proposal is validated, sandboxed, and audited");
