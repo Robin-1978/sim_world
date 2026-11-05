@@ -9,6 +9,7 @@
 #include "world/cognition_system.hpp"
 #include "world/stimulus_system.hpp"
 #include "world/entity_projection_system.hpp"
+#include "world/world_bootstrap.hpp"
 #include "world/simulation_coordinator.hpp"
 #include "world/schedule_system.hpp"
 #include "world/world_command_system.hpp"
@@ -16,7 +17,6 @@
 #include "world/social_system.hpp"
 #include "world/meta_action_executor.hpp"
 #include "world/world_state_json.hpp"
-#include "npc/drive_system.hpp"
 #include "world/ids.hpp"
 #include "world/meta_actions.hpp"
 #include "provider/provider_profile.hpp"
@@ -90,78 +90,8 @@ WorldService WorldService::fromContent(const WorldContentPack& content,
     WorldService service(std::move(provider));
     service.baseContent_ = content;
     service.content_ = content;
+    service.state_ = WorldBootstrap::createState(content);
     const auto* instance = content.instance ? &*content.instance : nullptr;
-    service.state_.worldId = instance != nullptr && !instance->worldId.empty() ? instance->worldId : content.worldId;
-    service.state_.instanceId = instance != nullptr ? instance->id : "default";
-    service.state_.contentVersion = content.contentVersion;
-    service.state_.now = instance != nullptr && instance->startTime ? *instance->startTime : content.startTime;
-    for (const auto& [id, resource] : content.resources) {
-        int initial = resource.initial;
-        if (instance != nullptr) {
-            if (const auto override = instance->resourceInitial.find(id); override != instance->resourceInitial.end()) {
-                initial = override->second;
-            }
-        }
-        service.state_.resources[id] = ResourceState{initial, 0};
-    }
-    service.state_.entities[kPlayerId] = WorldEntityState{kPlayerId, "actor", EntityLifecycle::Active, Json::object()};
-    service.state_.inventories.try_emplace(kPlayerId);
-    for (const auto& spatial : content.spatialEntities) {
-        service.state_.entities[spatialEntityId(spatial.id)] =
-            WorldEntityState{spatialEntityId(spatial.id), spatial.kind, EntityLifecycle::Active, Json::object()};
-    }
-    for (const auto& link : content.links) {
-        service.state_.entities[linkEntityId(link.id)] =
-            WorldEntityState{linkEntityId(link.id), link.kind, EntityLifecycle::Active, Json::object()};
-        service.state_.links[link.id] = RuntimeLinkState{link.link.traversable, link.link.locked};
-    }
-    for (const auto& authored : content.npcs) {
-        NpcState npc;
-        npc.definitionId = authored.definition.id;
-        npc.location = authored.initialLocation;
-        npc.scheduleLabel = authored.initialScheduleLabel;
-        npc.goalStage = authored.initialGoalStage;
-        npc.strategy = authored.initialStrategy;
-        npc.relationships[kPlayerId] = RelationshipAxes{};
-        for (const auto& [peer, trust] : authored.initialPeerTrust) {
-            npc.relationships[peer].trust = trust;
-        }
-        if (instance != nullptr) {
-            if (const auto override = instance->npcs.find(authored.definition.id); override != instance->npcs.end()) {
-                if (!override->second.location.empty()) npc.location = override->second.location;
-                if (!override->second.scheduleLabel.empty()) npc.scheduleLabel = override->second.scheduleLabel;
-                npc.goalStage = override->second.goalStage;
-                if (!override->second.strategy.empty()) npc.strategy = override->second.strategy;
-                if (!override->second.peerTrust.empty()) {
-                    for (const auto& [peer, trust] : override->second.peerTrust) {
-                        npc.relationships[peer].trust = trust;
-                    }
-                }
-            }
-        }
-        DriveSystem::initialize(npc, authored.needs, service.state_.now);
-        npc.lastDriveTick = service.state_.now;
-        npc.memories.push_back(Memory{"authored", "Initial content pack memory.", service.state_.now, 1.0});
-        service.state_.npcs.emplace(authored.definition.id, std::move(npc));
-        service.state_.entities[npcEntityId(authored.definition.id)] =
-            WorldEntityState{npcEntityId(authored.definition.id), "npc", EntityLifecycle::Active, Json::object()};
-        service.state_.inventories.try_emplace(npcEntityId(authored.definition.id));
-    }
-    for (const auto& authored : content.socialGroups) {
-        SocialGroupState group;
-        group.definitionId = authored.id;
-        group.metrics = authored.metrics;
-        group.members = authored.initialMembers;
-        group.relationships = authored.initialRelationships;
-        service.state_.socialGroups.emplace(authored.id, std::move(group));
-    }
-    if (instance != nullptr) {
-        for (const auto& [actor, resources] : instance->inventoryInitial) {
-            const auto inventoryId = actor == kPlayerId ? kPlayerId : npcEntityId(actor);
-            auto& inventory = service.state_.inventories[inventoryId];
-            for (const auto& [resource, amount] : resources) inventory[resource] = amount;
-        }
-    }
     service.rebuildEntityRegistry();
     Json ids = Json::array();
     for (const auto& authored : content.npcs) ids.push_back(authored.definition.id);
