@@ -184,6 +184,9 @@ DecisionContext DecisionContextProjector::build(const WorldState& state,
     context.privateCharacter = "hidden goal=" + authoredDefinition.hiddenGoal +
                                "; boundary=" + authoredDefinition.boundary +
                                "; strategy=" + npc.strategy;
+    for (const auto& [trait, value] : authoredDefinition.privateTraits) {
+        context.privateTraits[trait] = value;
+    }
     for (const auto& [needId, need] : npc.needs) {
         context.character += "; need(" + needId + ")=" + std::to_string(need.deficit);
     }
@@ -264,7 +267,8 @@ DecisionContext DecisionContextProjector::build(const WorldState& state,
                                            need->second.expectedRelief});
     }
 
-    const auto ranked = GoalSelector::rank(npc, needs, context.candidates);
+    const auto ranked = GoalSelector::rank(npc, needs, context.candidates, authoredDefinition.privateTraits,
+                                           content.decisionContextPolicy.traitResponseExponent);
     std::vector<ActionCandidate> ordered;
     for (const auto& choice : ranked) {
         const auto candidate = std::find_if(context.candidates.begin(), context.candidates.end(),

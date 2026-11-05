@@ -25,9 +25,8 @@ struct EvolutionProposal {
     // Existing hand-authored proposals default to level2 for compatibility
     // inside the still-unreleased prototype.
     std::string evolutionLevel{"level2"};
-    // Level 1 is an individual strategy/experience lane. The target is
-    // optional for legacy hand-authored proposals and required by the scoped
-    // automatic queue; Level 2 proposals intentionally leave it empty.
+    // Level 1 is an individual strategy/experience lane and must identify its
+    // target NPC; Level 2 proposals intentionally leave it empty.
     std::string targetNpcId;
 };
 

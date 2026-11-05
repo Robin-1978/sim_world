@@ -85,6 +85,9 @@ struct NpcDefinition {
     std::string hiddenGoal;
     std::string boundary;
     std::string voice;
+    // Content-authored private preference dimensions. Values are bounded to
+    // [0, 1] and are projected only to the owning NPC's provider context.
+    std::map<std::string, double> privateTraits;
 };
 
 struct NeedState {

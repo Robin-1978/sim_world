@@ -314,7 +314,8 @@ std::vector<ActionCandidate> parseActions(const Json& beats, const std::string& 
             ActionCandidate candidate{id, recipe->planId, beat.value("id", "content"), recipe->durationMinutes,
                                       recipe->interruptible, recipe->interruptSalienceThreshold,
                                       recipe->reservationMode, recipe->id, {}, recipe->priority,
-                                      recipe->preemptionPolicy};
+                                      recipe->preemptionPolicy, 0.0, Json::object(), Json::object(), 0.0, 0.0, 0.0,
+                                      0.0, 0.0, {}};
             candidate.parameterSchema = recipe->parameterSchema;
             const auto utility = definition.value("utility_profile", Json::object());
             if (!utility.is_object()) throw std::runtime_error("utility_profile must be an object: " + id);
@@ -330,6 +331,15 @@ std::vector<ActionCandidate> parseActions(const Json& beats, const std::string& 
             candidate.relationshipEffect = bounded("relationship_effect", -1.0, 1.0);
             candidate.futureValue = bounded("future_value", -1.0, 1.0);
             candidate.constraintPenalty = bounded("constraint_penalty", 0.0, 1.0);
+            const auto traitEffects = utility.value("trait_effects", Json::object());
+            if (!traitEffects.is_object()) throw std::runtime_error("trait_effects must be an object: " + id);
+            for (auto trait = traitEffects.begin(); trait != traitEffects.end(); ++trait) {
+                if (!trait.value().is_number() || !std::isfinite(trait.value().get<double>()) ||
+                    trait.value().get<double>() < -1.0 || trait.value().get<double>() > 1.0) {
+                    throw std::runtime_error("trait_effects values must be finite numbers in [-1,1]: " + id);
+                }
+                candidate.traitEffects[trait.key()] = trait.value().get<double>();
+            }
             collectBehaviorReservations(recipe->root, pack, candidate.reservations);
             result.push_back(std::move(candidate));
         }
@@ -495,7 +505,17 @@ NpcContent parseNpc(const Json& value, const Json& beats, const WorldContentPack
                                       requiredString(value, "role", path), requiredString(value, "home", path),
                                       requiredString(value, "workplace", path), requiredString(value, "public_goal", path),
                                       requiredString(value, "hidden_goal", path), requiredString(value, "boundary", path),
-                                      value.value("voice", "")};
+                                      value.value("voice", ""), {}};
+    const auto privateTraits = value.value("private_traits", Json::object());
+    if (!privateTraits.is_object()) throw std::runtime_error("private_traits must be an object in " + path);
+    for (auto trait = privateTraits.begin(); trait != privateTraits.end(); ++trait) {
+        if (!trait.value().is_number() || !std::isfinite(trait.value().get<double>()) ||
+            trait.value().get<double>() < 0.0 || trait.value().get<double>() > 1.0) {
+            throw std::runtime_error("private trait must be a finite number in [0,1] in " + path + ": " +
+                                     trait.key());
+        }
+        result.definition.privateTraits[trait.key()] = trait.value().get<double>();
+    }
     const auto initial = value.value("initial", Json::object());
     result.initialLocation = initial.value("location", result.definition.workplace);
     result.initialScheduleLabel = initial.value("schedule_label", result.initialLocation);
@@ -695,6 +715,15 @@ WorldContentPack ContentPackLoader::load(const std::string& rootPath) {
         readContextLimit("max_visible_links", pack.decisionContextPolicy.maxVisibleLinks);
     pack.decisionContextPolicy.maxRelationships =
         readContextLimit("max_relationships", pack.decisionContextPolicy.maxRelationships);
+    if (contextPolicy.contains("trait_response_exponent")) {
+        const auto& exponent = contextPolicy.at("trait_response_exponent");
+        if (!exponent.is_number() || !std::isfinite(exponent.get<double>()) || exponent.get<double>() < 0.5 ||
+            exponent.get<double>() > 3.0) {
+            throw std::runtime_error("decision_context.trait_response_exponent must be between 0.5 and 3 in " +
+                                     worldPath);
+        }
+        pack.decisionContextPolicy.traitResponseExponent = exponent.get<double>();
+    }
     const auto deliberation = world.value("npc_deliberation", Json::object());
     if (!deliberation.is_object()) {
         throw std::runtime_error("npc_deliberation must be an object in " + worldPath);

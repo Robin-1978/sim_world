@@ -115,7 +115,8 @@
         "max_experiences": {"type": "integer", "minimum": 1, "maximum": 1024},
         "max_visible_entities": {"type": "integer", "minimum": 1, "maximum": 1024},
         "max_visible_links": {"type": "integer", "minimum": 1, "maximum": 1024},
-        "max_relationships": {"type": "integer", "minimum": 1, "maximum": 1024}
+        "max_relationships": {"type": "integer", "minimum": 1, "maximum": 1024},
+        "trait_response_exponent": {"type": "number", "minimum": 0.5, "maximum": 3.0}
       },
       "additionalProperties": false
     },

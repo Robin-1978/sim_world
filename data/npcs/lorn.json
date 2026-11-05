@@ -7,6 +7,7 @@
   "public_goal": "Keep the crossing open",
   "hidden_goal": "Repay Mira while hiding a damaged skiff",
   "boundary": "Will not abandon passengers on the water",
+  "private_traits": {"cooperation": 0.55, "secrecy": 0.45, "risk_tolerance": 0.70, "novelty_seeking": 0.25, "duty": 0.85, "assertiveness": 0.65},
   "initial": {"location": "ferry_dock", "strategy": "crossing_revenue", "peer_trust": {"mira": 0.45}},
   "needs": [
     {"id": "crossing_safety", "domain": "psychological", "dimension": "safety", "initial_deficit": 0.30, "decay_per_hour": 0.02, "critical_threshold": 0.65, "weight": 1.10, "priority": 0.10, "satisfiers": {"repair_ferry": {"relief": 0.22, "meta_actions": ["consume_resource", "produce_resource", "relieve_need"]}, "rest": {"relief": 0.03, "meta_actions": ["relieve_need"]}}},

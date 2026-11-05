@@ -73,9 +73,15 @@
       }
     },
     "status": {"type": "string", "enum": ["proposed", "validated", "approved", "rejected"]},
-    "target_npc": {"type": "string", "minLength": 1}
-    ,"evolution_level": {"type": "string", "enum": ["level1", "level2"]}
+    "target_npc": {"type": "string", "minLength": 1},
+    "evolution_level": {"type": "string", "enum": ["level1", "level2"]}
   },
+  "allOf": [
+    {"if": {"required": ["evolution_level"], "properties": {"evolution_level": {"const": "level1"}}},
+     "then": {"required": ["target_npc"]}},
+    {"if": {"required": ["evolution_level"], "properties": {"evolution_level": {"const": "level2"}}},
+     "then": {"not": {"required": ["target_npc"]}}}
+  ],
   "additionalProperties": false,
   "$defs": {
     "behavior_node": {

@@ -33,6 +33,9 @@ struct ActionCandidate {
     double relationshipEffect{0.0};
     double futureValue{0.0};
     double constraintPenalty{0.0};
+    // Content-authored coefficients for private trait preferences. Runtime
+    // multiplies each coefficient by a bounded nonlinear centered response.
+    std::map<std::string, double> traitEffects;
 };
 
 struct StructuralConstraintView {
@@ -88,6 +91,7 @@ struct DecisionContext {
     // part of the public character description. Providers must not copy them
     // into dialogue unless an authored disclosure rule permits it.
     std::string privateCharacter;
+    Json privateTraits = Json::object();
     std::string internalDrives;
     std::string externalStimuli;
     std::string structuralConstraints;

@@ -26,7 +26,8 @@
     "max_experiences": 12,
     "max_visible_entities": 16,
     "max_visible_links": 16,
-    "max_relationships": 16
+    "max_relationships": 16,
+    "trait_response_exponent": 1.5
   },
   "npc_deliberation": {
     "enabled": true,

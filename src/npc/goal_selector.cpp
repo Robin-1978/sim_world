@@ -3,6 +3,7 @@
 #include "npc/drive_system.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <map>
 
 namespace tide_marks {
@@ -14,7 +15,9 @@ std::vector<GoalChoice> GoalSelector::rank(const NpcState& npc,
 
 std::vector<GoalChoice> GoalSelector::rank(const NpcState& npc,
                                            const std::vector<NeedContent>& needs,
-                                           const std::vector<ActionCandidate>& actions) {
+                                           const std::vector<ActionCandidate>& actions,
+                                           const std::map<std::string, double>& privateTraits,
+                                           double traitResponseExponent) {
     std::vector<GoalChoice> choices;
     std::map<std::string, GoalChoice> ranked;
     for (const auto& need : needs) {
@@ -50,6 +53,20 @@ std::vector<GoalChoice> GoalSelector::rank(const NpcState& npc,
         for (const auto& [term, value] : choice.utilityTerms) {
             choice.reason += "; " + term + "=" + std::to_string(value);
         }
+        double traitTotal = 0.0;
+        for (const auto& [trait, coefficient] : action->traitEffects) {
+            const auto value = privateTraits.find(trait);
+            if (value == privateTraits.end()) continue;
+            const double centered = 2.0 * value->second - 1.0;
+            const double response = std::copysign(std::pow(std::abs(centered), traitResponseExponent), centered);
+            const double contribution = coefficient * response;
+            choice.utilityTerms["trait." + trait] = contribution;
+            traitTotal += contribution;
+            choice.reason += "; trait." + trait + "=" + std::to_string(contribution);
+        }
+        traitTotal = std::clamp(traitTotal, -1.0, 1.0);
+        choice.utilityTerms["trait_total"] = traitTotal;
+        choice.score += traitTotal;
     }
     for (const auto& [actionId, choice] : ranked) choices.push_back(choice);
     std::sort(choices.begin(), choices.end(), [](const auto& left, const auto& right) {

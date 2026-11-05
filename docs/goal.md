@@ -11,7 +11,7 @@
 ## 必须保持的边界
 
 1. `WorldState` 是事实唯一来源。Runtime/C++ 独占权限、规则、事务、Revision、事件和持久化提交。
-2. LLM 只能读取经过主体可见性和内容预算裁剪的 `DecisionContext`，并返回结构化理解、权衡、意图、参数或演化提案。公开角色信息与 `private_character` 分离；私密目标和边界可用于内部推理，但不能自动泄露给玩家。LLM 不能直接写事实、调用任意代码或修改 Runtime Core。请求中的 `runtime_metadata` 只用于世界/实例/内容/提示版本关联、异步过期校验和审计，不进入 NPC 的语义世界快照，也不能被模型当作资源、地点或动机事实。
+2. LLM 只能读取经过主体可见性和内容预算裁剪的 `DecisionContext`，并返回结构化理解、权衡、意图、参数或演化提案。公开角色信息与 `private_character`、`private_traits` 分离；私密目标、边界和特质可用于内部推理，但不能自动泄露给玩家。确定性 Runtime 把内容声明的 `trait_effects` 与主体特质组合成有界偏好项，LLM 的文字理由不直接改变分数。LLM 不能直接写事实、调用任意代码或修改 Runtime Core。请求中的 `runtime_metadata` 只用于世界/实例/内容/提示版本关联、异步过期校验和审计，不进入 NPC 的语义世界快照，也不能被模型当作资源、地点或动机事实。
 3. `Goal`、`ProcessExecution`、`FSM`、`BT` 是同一 `NpcActivity` 的不同视角；活动槽拥有唯一生命周期，长过程可以被打断、暂停、恢复或失败，但不会把已经提交的世界事实神奇地抹掉。
 4. 元动作和 BT 节点由注册表与内容配置声明。代码实现通用执行器，内容包绑定参数、条件、权限、资源策略和组合关系；不能为 Mira、Lorn、Eve 或某个 trigger 增加 C++ 特例。
 5. Content Pack、Game Instance 和运行存档分开。`data/` 保存静态定义、Schema 和 Intelligence Profile；运行快照、事件和检查点写到显式 run 路径。

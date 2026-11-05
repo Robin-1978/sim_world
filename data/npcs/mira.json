@@ -7,6 +7,7 @@
   "public_goal": "Keep grain rationing fair",
   "hidden_goal": "Protect an undocumented family member",
   "boundary": "Never endanger a child to satisfy an official order",
+  "private_traits": {"cooperation": 0.85, "secrecy": 0.55, "risk_tolerance": 0.25, "novelty_seeking": 0.35, "duty": 0.80, "autonomy": 0.60},
   "initial": {"location": "granary", "strategy": "ration_ledger", "peer_trust": {"lorn": 0.35, "eve": 0.30}},
   "needs": [
     {"id": "food_security", "domain": "physiological", "dimension": "food", "initial_deficit": 0.25, "decay_per_hour": 0.02, "critical_threshold": 0.70, "weight": 1.0, "priority": 0.10, "satisfiers": {"offer_ration": {"relief": 0.20, "meta_actions": ["consume_resource", "relieve_need"]}, "rest": {"relief": 0.03, "meta_actions": ["relieve_need"]}}},

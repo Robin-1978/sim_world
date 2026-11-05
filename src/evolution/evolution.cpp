@@ -477,8 +477,10 @@ EvolutionValidation EvolutionManager::validate(const EvolutionProposal& proposal
     if (proposal.baseWorldRevision != state.revision) {
         return {false, "revision_conflict", "Proposal must reference the current world revision."};
     }
-    if (proposal.evolutionLevel == "level1" && !proposal.targetNpcId.empty() &&
-        !hasNpc(content, proposal.targetNpcId)) {
+    if (proposal.evolutionLevel == "level1" && proposal.targetNpcId.empty()) {
+        return {false, "missing_target_npc", "A Level 1 proposal must identify the NPC whose strategy may evolve."};
+    }
+    if (proposal.evolutionLevel == "level1" && !hasNpc(content, proposal.targetNpcId)) {
         return {false, "unknown_target_npc", "A Level 1 proposal must target an NPC defined by the active content."};
     }
     if (proposal.evolutionLevel == "level2" && !proposal.targetNpcId.empty()) {

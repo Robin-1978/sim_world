@@ -42,6 +42,14 @@
     "voice": {
       "type": "string"
     },
+    "private_traits": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1
+      }
+    },
     "initial": {
       "type": "object",
       "properties": {

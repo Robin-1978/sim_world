@@ -430,6 +430,41 @@ void goal_ranking_aggregates_all_satisfied_needs() {
     }
 }
 
+void private_traits_change_stable_action_order() {
+    NpcState npc;
+    NeedContent need;
+    need.id = "social_need";
+    need.domain = "social";
+    need.satisfiers = {
+        {"cooperate", NeedSatisfier{0.4, {}}},
+        {"explore", NeedSatisfier{0.4, {}}},
+    };
+    ActionCandidate cooperate;
+    cooperate.actionId = "cooperate";
+    cooperate.traitEffects["cooperation"] = 1.0;
+    ActionCandidate explore;
+    explore.actionId = "explore";
+    explore.traitEffects["cooperation"] = -1.0;
+
+    const auto cooperative = GoalSelector::rank(npc, {need}, {cooperate, explore},
+                                                { {"cooperation", 0.9} }, 1.5);
+    const auto independent = GoalSelector::rank(npc, {need}, {cooperate, explore},
+                                                { {"cooperation", 0.1} }, 1.5);
+    expect(!cooperative.empty() && !independent.empty() && cooperative.front().actionId == "cooperate" &&
+               independent.front().actionId == "explore",
+           "the same state and candidates produce stable divergent rankings from private traits");
+    expect(cooperative.front().utilityTerms.contains("trait_total") &&
+               cooperative.front().utilityTerms.at("trait_total") <= 1.0,
+           "nonlinear trait preference is bounded and auditable");
+
+    const auto service = WorldService::load(ContentPackLoader::defaultRoot(), std::make_unique<MockProvider>());
+    const auto mira = service.decisionContext("mira");
+    const auto eve = service.decisionContext("eve");
+    expect(mira.privateTraits.value("cooperation", 0.0) > eve.privateTraits.value("cooperation", 0.0) &&
+               mira.privateTraits.value("secrecy", 0.0) < eve.privateTraits.value("secrecy", 0.0),
+           "content supplies distinct private traits to each NPC context");
+}
+
 void authored_utility_profile_is_bounded_and_auditable() {
     NpcState npc;
     NeedContent need{"food", "physiological", "food", 0.8, 0.0, 0.9, 1.0, 0.0,
@@ -2702,6 +2737,7 @@ void llm_schedule_overlay_is_versioned_and_content_driven() {
                                                   Json{{"start_minute", 1080}, {"end_minute", 0},
                                                        {"location", "lorn_house"}}})}}})};
     proposal.evolutionLevel = "level1";
+    proposal.targetNpcId = "lorn";
     proposal.evidenceEventSequences = {service.state().events.back().sequence};
     expect(EvolutionManager::validate(proposal, service.content(), service.state()).valid,
            "Level 1 schedule evolution validates only authored locations and bounded time slots");
@@ -2822,6 +2858,12 @@ void level_one_evolution_is_scoped_to_target_npc() {
     expect(EvolutionManager::validate(level2Target, service.content(), service.state()).code ==
                "level_target_mismatch",
            "Level 2 validation rejects an individual NPC target");
+
+    auto missingTarget = result.proposal;
+    missingTarget.targetNpcId.clear();
+    expect(EvolutionManager::validate(missingTarget, service.content(), service.state()).code ==
+               "missing_target_npc",
+           "Level 1 validation rejects a proposal without a target NPC");
 }
 
 void automatic_evolution_uses_async_llm_and_audits_sandbox() {
@@ -2899,6 +2941,7 @@ int main() {
     };
     run("village_has_three_independent_npcs", village_has_three_independent_npcs);
     run("goal_ranking_aggregates_all_satisfied_needs", goal_ranking_aggregates_all_satisfied_needs);
+    run("private_traits_change_stable_action_order", private_traits_change_stable_action_order);
     run("authored_utility_profile_is_bounded_and_auditable",
         authored_utility_profile_is_bounded_and_auditable);
     run("offline_progression_changes_village", offline_progression_changes_village);

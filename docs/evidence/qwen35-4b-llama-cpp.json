@@ -429,6 +429,16 @@
       "level1_target_scope": "the proposal carries target_npc=mira and the operation npc_id=mira",
       "level2_target_scope": "the proposal has no target_npc and is validated as world-level content"
     },
+    "private_trait_smoke": {
+      "command": "./build/tide_marks_headless --profile data/intelligence-profile.json --provider profile --days 0",
+      "provider": "llama.cpp",
+      "elapsed_seconds": 26.12,
+      "context_contract": "private_traits are supplied to the model as confidential NPC context; Runtime still ranks authored candidates and validates the returned action",
+      "dialogue": "I’m at the granary, and I’ll tell you what I’m up to right now. I’m not in an active process right now; I am at the granary.",
+      "world_revision_before_after": [1, 2],
+      "world_fact_boundary": "the dialogue response produced no action_id and no non-dialogue world mutation",
+      "result": "passed"
+    },
     "result": "passed"
   }
 }

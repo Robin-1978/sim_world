@@ -7,6 +7,7 @@
   "public_goal": "Preserve the village records",
   "hidden_goal": "Find proof of the hidden family line",
   "boundary": "Will not burn a record to win an argument",
+  "private_traits": {"cooperation": 0.35, "secrecy": 0.90, "risk_tolerance": 0.40, "novelty_seeking": 0.90, "duty": 0.45, "assertiveness": 0.55},
   "initial": {"location": "archive", "strategy": "archive_index", "peer_trust": {"mira": 0.20}},
   "needs": [
     {"id": "cognition", "domain": "cognitive", "dimension": "epistemic_curiosity", "initial_deficit": 0.35, "decay_per_hour": 0.02, "critical_threshold": 0.70, "weight": 1.00, "priority": 0.10, "satisfiers": {"share_record": {"relief": 0.10, "meta_actions": ["relieve_need"]}, "reveal_clue": {"relief": 0.18, "meta_actions": ["relieve_need"]}, "rest": {"relief": 0.03, "meta_actions": ["relieve_need"]}}},

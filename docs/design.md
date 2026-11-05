@@ -165,7 +165,7 @@ utility(a) = Σ(drive_i × expected_relief_i)
              - resource_cost - risk_cost - constraint_penalty
 ```
 
-这里的需求收益由 `GoalSelector` 对同一 `action_id` 满足的所有需求贡献求和，并把 `utility_score` 与每项 `utility_contributions` 放入决策上下文和意图事件。行动可以由内容声明 `utility_profile`，包括 `resource_cost`、`risk`、`relationship_effect`、`future_value` 和 `constraint_penalty`；Runtime 校验范围后按声明组合这些分项，不在 C++ 里按角色或故事写死权重。LLM 可以在复杂社会情境中解释和权衡这些项，但它不能伪造已经不存在的事实。候选计划和参数契约来自内容包，模型只能填写声明的参数，例如一个通用 `goto` 计划的 `destination`。Runtime 校验参数类型、目标实体、权限和当前拓扑后，才把参数绑定到 BT 的元动作；模型不能凭空创建资源、任务、关系变化或事件。C++ 校验结构约束后把意图转成 Command，事务成功后的结果才改变世界，并生成下一轮外驱和内驱输入。
+这里的需求收益由 `GoalSelector` 对同一 `action_id` 满足的所有需求贡献求和，并把 `utility_score` 与每项 `utility_contributions` 放入决策上下文和意图事件。行动可以由内容声明 `utility_profile`，包括 `resource_cost`、`risk`、`relationship_effect`、`future_value`、`constraint_penalty` 和可选的 `trait_effects`；每个 NPC 的 `private_traits` 是内容定义的私有基础偏好，Runtime 用内容配置的非线性响应指数计算中心化特质匹配，并把总特质贡献限制在有界区间。特质只影响可行候选的偏好，不绕过硬约束，也不替代 hidden goal、boundary、strategy、经验或关系；LLM 读取它来解释权衡，Runtime 负责唯一的确定性特质效用计算，避免理由被重复计分。基础特质不会被经验隐式改写，经验先改变记忆、知识、策略和关系，只有未来明确声明特质演化机制时才修改 Trait。Runtime 校验范围后按声明组合这些分项，不在 C++ 里按角色或故事写死权重。LLM 可以在复杂社会情境中解释和权衡这些项，但它不能伪造已经不存在的事实。候选计划和参数契约来自内容包，模型只能填写声明的参数，例如一个通用 `goto` 计划的 `destination`。Runtime 校验参数类型、目标实体、权限和当前拓扑后，才把参数绑定到 BT 的元动作；模型不能凭空创建资源、任务、关系变化或事件。C++ 校验结构约束后把意图转成 Command，事务成功后的结果才改变世界，并生成下一轮外驱和内驱输入。
 
 ### 社会和集体驱力
 

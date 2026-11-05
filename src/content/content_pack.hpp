@@ -67,6 +67,8 @@ struct DecisionContextPolicy {
     std::size_t maxVisibleEntities{16};
     std::size_t maxVisibleLinks{16};
     std::size_t maxRelationships{16};
+    // Exponent for the bounded nonlinear response of centered private traits.
+    double traitResponseExponent{1.5};
 };
 
 struct StimulusRule {
