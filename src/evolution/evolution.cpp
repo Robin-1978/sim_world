@@ -312,31 +312,42 @@ EvolutionProposal EvolutionManager::fromJson(const Json& value) {
     if (proposal.evolutionLevel != "level1" && proposal.evolutionLevel != "level2") {
         throw std::runtime_error("unsupported evolution proposal evolution_level");
     }
+    proposal.targetNpcId = value.value("target_npc", "");
+    if (!proposal.targetNpcId.empty() && proposal.evolutionLevel != "level1") {
+        throw std::runtime_error("target_npc is only valid for level1 evolution proposals");
+    }
     return proposal;
 }
 
 Json EvolutionManager::toJson(const EvolutionProposal& proposal) {
     Json evidence = Json::array();
     for (const auto sequence : proposal.evidenceEventSequences) evidence.push_back(sequence);
-    return Json{{"kind", proposal.kind}, {"schema_version", 1}, {"id", proposal.id}, {"source", proposal.source},
+    Json result{{"kind", proposal.kind}, {"schema_version", 1}, {"id", proposal.id}, {"source", proposal.source},
                 {"base_content_version", proposal.baseContentVersion},
                 {"base_world_revision", proposal.baseWorldRevision},
                 {"evidence_event_sequences", evidence}, {"operations", proposal.operations},
                 {"status", toString(proposal.status)}, {"evolution_level", proposal.evolutionLevel}};
+    if (!proposal.targetNpcId.empty()) result["target_npc"] = proposal.targetNpcId;
+    return result;
 }
 
 EvolutionProposalRequestResult EvolutionManager::propose(const WorldService& world,
                                                           const std::string& evolutionLevel,
-                                                          const std::string& trigger) {
+                                                          const std::string& trigger,
+                                                          const std::string& targetNpcId) {
     EvolutionProposalRequestResult result;
     result.provider = world.providerName();
+    std::string scopedTarget = targetNpcId;
+    if (evolutionLevel == "level1" && scopedTarget.empty() && !world.content().npcs.empty()) {
+        scopedTarget = world.content().npcs.front().definition.id;
+    }
     Json feedback = Json::object();
     // A malformed/unsupported proposal may be repaired twice using the same
     // captured world context. Keeping this bound prevents an LLM validation
     // loop from becoming the simulation scheduler while allowing a generated
     // behavior tree to fix both its root and nested-node errors.
     for (int attempt = 0; attempt < 3; ++attempt) {
-        const auto response = world.requestEvolutionProposal(evolutionLevel, trigger, feedback);
+        const auto response = world.requestEvolutionProposal(evolutionLevel, trigger, feedback, scopedTarget);
         if (!response.ok) {
             result.code = response.error.empty() ? "evolution_provider_unavailable" : response.error;
             result.message = "The configured LLM did not return an evolution proposal.";
@@ -348,8 +359,9 @@ EvolutionProposalRequestResult EvolutionManager::propose(const WorldService& wor
                 result.message = "The provider returned a non-object evolution proposal.";
                 return result;
             }
-            const auto proposal = EvolutionManager::normalizeProviderProposal(
+            auto proposal = EvolutionManager::normalizeProviderProposal(
                 response.evolutionProposal, world, evolutionLevel, result.provider);
+            proposal.targetNpcId = scopedTarget;
             const auto validation = EvolutionManager::validate(proposal, world.content(), world.state());
             if (!validation.valid) {
                 if (attempt == 0) {
@@ -465,6 +477,13 @@ EvolutionValidation EvolutionManager::validate(const EvolutionProposal& proposal
     if (proposal.baseWorldRevision != state.revision) {
         return {false, "revision_conflict", "Proposal must reference the current world revision."};
     }
+    if (proposal.evolutionLevel == "level1" && !proposal.targetNpcId.empty() &&
+        !hasNpc(content, proposal.targetNpcId)) {
+        return {false, "unknown_target_npc", "A Level 1 proposal must target an NPC defined by the active content."};
+    }
+    if (proposal.evolutionLevel == "level2" && !proposal.targetNpcId.empty()) {
+        return {false, "level_target_mismatch", "Level 2 proposals cannot carry an individual NPC target."};
+    }
     if (!proposal.operations.is_array() || proposal.operations.empty()) {
         return {false, "empty_operations", "A proposal must contain at least one operation."};
     }
@@ -538,6 +557,11 @@ EvolutionValidation EvolutionManager::validate(const EvolutionProposal& proposal
                     return {false, "strategy_field_missing", "A strategy overlay needs " + std::string(field) + "."};
                 }
             }
+            if (proposal.evolutionLevel == "level1" && !proposal.targetNpcId.empty() &&
+                operation.at("npc_id").get<std::string>() != proposal.targetNpcId) {
+                return {false, "level_target_mismatch",
+                        "A Level 1 strategy overlay must target the NPC whose context was evaluated."};
+            }
         }
         if (type == "overlay_schedule") {
             if (!operation.contains("npc_id") || !operation.at("npc_id").is_string() ||
@@ -546,6 +570,11 @@ EvolutionValidation EvolutionManager::validate(const EvolutionProposal& proposal
             }
             if (!operation.contains("slots") || !operation.at("slots").is_array() || operation.at("slots").empty()) {
                 return {false, "schedule_slots_missing", "A schedule overlay needs a non-empty slots array."};
+            }
+            if (proposal.evolutionLevel == "level1" && !proposal.targetNpcId.empty() &&
+                operation.at("npc_id").get<std::string>() != proposal.targetNpcId) {
+                return {false, "level_target_mismatch",
+                        "A Level 1 schedule overlay must target the NPC whose context was evaluated."};
             }
         }
         if (type == "register_behavior_recipe") {
@@ -575,6 +604,11 @@ EvolutionValidation EvolutionManager::validate(const EvolutionProposal& proposal
                         return {false, "duplicate_behavior_recipe_actor",
                                 "An evolved behavior recipe must reference each available_to NPC exactly once."};
                     }
+                }
+                if (proposal.evolutionLevel == "level1" && !proposal.targetNpcId.empty() &&
+                    !actorIds.contains(proposal.targetNpcId)) {
+                    return {false, "level_target_mismatch",
+                            "A Level 1 behavior recipe must be available to the NPC whose context was evaluated."};
                 }
                 recipe.root = behaviorNodeFromJson(operation.at("root"));
                 BehaviorRecipeRuntime::validate(recipe);

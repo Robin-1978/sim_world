@@ -424,7 +424,7 @@ ProviderResponse LlamaCppProvider::proposeEvolution(const Json& context,
         "Never request Runtime Core mutation, arbitrary code, scripts, permissions, transactions, event schemas, "
         "or persistence changes. A proposal is only a suggestion: the Runtime will validate it, run it in an isolated "
         "sandbox, and require independent approval before activation. "
-        "For level1, prefer an NPC strategy or behavior recipe change. For level2, prefer a content/archetype or "
+        "For level1, the context contains target_npc and only that NPC's private cognitive evidence. Every overlay_strategy or overlay_schedule operation MUST use target_npc as npc_id; a register_behavior_recipe operation MUST include target_npc in available_to and must not claim private evidence from another NPC. For level2, prefer a content/archetype or "
         "behavior capability change that can be expressed by the registered declarative operations. "
         "The proposal object uses proposal_kind (content, knowledge, strategy, or declarative_capability); the operation "
         "create_entity_archetype separately uses kind for the entity kind. Every operation MUST use the exact keys operation and id. "

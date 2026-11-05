@@ -285,17 +285,20 @@
     "provider": "llama.cpp",
     "model": "Huihui-Qwen3.5-4B-abliterated.Q4_K_M",
     "level1": {
-      "elapsed_seconds": 26.175,
+      "elapsed_seconds": 8.55,
       "proposal_kind": "strategy",
       "operation": "overlay_strategy",
+      "target_npc": "mira",
+      "proposal_id": "mira_routine_update",
       "status": "proposed",
       "source_world_revision": 1,
       "runtime_result": "accepted as a validated proposal; no overlay activation and no source-world mutation"
     },
     "level2": {
-      "elapsed_seconds": 21.08,
+      "elapsed_seconds": 8.09,
       "proposal_kind": "content",
       "operation": "create_entity_archetype",
+      "proposal_id": "new_granary_facility",
       "status": "proposed",
       "source_world_revision": 1,
       "runtime_result": "accepted as a validated proposal; no overlay activation and no source-world mutation"
@@ -323,18 +326,21 @@
     "level1": {
       "command": "./build/tide_marks_headless --profile data/intelligence-profile.json --provider profile --days 0 --evolve level1",
       "provider": "llama.cpp",
-      "elapsed_seconds": 26.175,
+      "elapsed_seconds": 8.55,
       "proposal_kind": "strategy",
       "operation": "overlay_strategy",
+      "target_npc": "mira",
+      "proposal_id": "mira_routine_update",
       "status": "proposed",
       "runtime_result": "accepted as a validated proposal; no overlay activation and no source-world mutation"
     },
     "level2": {
       "command": "./build/tide_marks_headless --profile data/intelligence-profile.json --provider profile --days 0 --evolve level2",
       "provider": "llama.cpp",
-      "elapsed_seconds": 21.08,
+      "elapsed_seconds": 8.09,
       "proposal_kind": "content",
       "operation": "create_entity_archetype",
+      "proposal_id": "new_granary_facility",
       "status": "proposed",
       "runtime_result": "accepted as a validated proposal; no overlay activation and no source-world mutation"
     },
@@ -408,14 +414,20 @@
       "dialogue": "I’m not in an active process right now; I’m at the granary.",
       "dialogue_world_revision": 2,
       "level1_operation": "overlay_strategy",
+      "level1_target_npc": "mira",
+      "level1_proposal_id": "mira_routine_update",
       "level1_status": "proposed",
       "level1_source_world_revision": 1,
       "level1_source_world_mutated": false,
       "level2_operation": "create_entity_archetype",
-      "level2_proposal_id": "ferry",
+      "level2_proposal_id": "new_granary_facility",
       "level2_status": "proposed",
       "level2_source_world_revision": 1,
-      "level2_source_world_mutated": false
+      "level2_source_world_mutated": false,
+      "level1_elapsed_seconds": 8.55,
+      "level2_elapsed_seconds": 8.09,
+      "level1_target_scope": "the proposal carries target_npc=mira and the operation npc_id=mira",
+      "level2_target_scope": "the proposal has no target_npc and is validated as world-level content"
     },
     "result": "passed"
   }

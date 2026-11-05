@@ -72,7 +72,8 @@
         ]
       }
     },
-    "status": {"type": "string", "enum": ["proposed", "validated", "approved", "rejected"]}
+    "status": {"type": "string", "enum": ["proposed", "validated", "approved", "rejected"]},
+    "target_npc": {"type": "string", "minLength": 1}
     ,"evolution_level": {"type": "string", "enum": ["level1", "level2"]}
   },
   "additionalProperties": false,

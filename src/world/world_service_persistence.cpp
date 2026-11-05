@@ -188,7 +188,7 @@ WorldService WorldService::fromContentSnapshot(const WorldContentPack& content, 
         for (const auto& overlay : service.state_.activeOverlays) {
             EvolutionProposal replay{overlay.proposalId, "declarative_capability", "snapshot",
                                      overlay.baseContentVersion, 0, overlay.operations,
-                                     EvolutionProposalStatus::Approved, {}};
+                                     EvolutionProposalStatus::Approved, {}, "level2", {}};
             const auto applied = EvolutionManager::applyOverlay(rebuilt, replay);
             if (!applied.valid) {
                 throw std::runtime_error("cannot restore overlay " + overlay.proposalId + ": " + applied.message);

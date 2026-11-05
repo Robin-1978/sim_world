@@ -122,7 +122,8 @@ public:
     // configured provider for a structured proposal; no world fact changes.
     [[nodiscard]] ProviderResponse requestEvolutionProposal(const std::string& evolutionLevel,
                                                              const std::string& trigger,
-                                                             const Json& validationFeedback = Json::object()) const;
+                                                             const Json& validationFeedback = Json::object(),
+                                                             const std::string& targetNpcId = {}) const;
     // Main-thread boundary for decisions produced by the worker. Returns the
     // number of results consumed; no Provider call is performed here.
     std::size_t pumpAsyncTurns();

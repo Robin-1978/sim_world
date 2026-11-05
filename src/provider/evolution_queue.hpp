@@ -19,6 +19,7 @@ struct EvolutionRequest {
     std::string requestId;
     std::string key;
     std::string evolutionLevel;
+    std::string targetNpcId;
     std::string trigger;
     std::string baseContentVersion;
     std::uint64_t baseWorldRevision{0};

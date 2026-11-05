@@ -22,11 +22,13 @@ public:
     [[nodiscard]] static ProviderResponse requestProposal(const WorldService& world,
                                                            const std::string& evolutionLevel,
                                                            const std::string& trigger,
-                                                           const Json& validationFeedback);
+                                                           const Json& validationFeedback,
+                                                           const std::string& targetNpcId = {});
     [[nodiscard]] static Json proposalContext(const WorldService& world,
                                               const std::string& evolutionLevel,
                                               const std::string& trigger,
-                                              const Json& validationFeedback);
+                                              const Json& validationFeedback,
+                                              const std::string& targetNpcId = {});
     std::size_t pumpAsyncProposals();
     void scheduleAutomatic();
     CommandResult activateOverlay(const EvolutionProposal& proposal,

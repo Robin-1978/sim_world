@@ -330,10 +330,12 @@ public:
         observedLevel = level;
         observedContext = context;
         const auto evidence = context.at("evidence_events").at(0).at("sequence");
+        const auto targetNpc = context.value("target_npc", "mira");
         Json proposal;
         if (level == "level1") {
             Json operation{{"operation", "overlay_strategy"}, {"id", "llm.strategy.rule"},
-                           {"npc_id", "mira"}, {"peer_id", "lorn"}, {"min_peer_trust", 0.0},
+                           {"npc_id", targetNpc}, {"peer_id", targetNpc == "mira" ? "lorn" : "mira"},
+                           {"min_peer_trust", 0.0},
                            {"strategy", "cooperate"}, {"goal_stage", 1},
                            {"memory", "The model proposed a cooperative strategy."}};
             proposal = Json::object();
@@ -2780,6 +2782,36 @@ void llm_proposes_level_one_and_level_two_evolution() {
            "an LLM proposal still requires isolated sandbox execution before activation");
 }
 
+void level_one_evolution_is_scoped_to_target_npc() {
+    auto provider = std::make_unique<EvolutionProposalProvider>();
+    auto* providerRaw = provider.get();
+    auto service = WorldService::load(ContentPackLoader::defaultRoot(), std::move(provider));
+    const auto result = EvolutionManager::propose(service, "level1", "targeted_reflection", "lorn");
+    expect(result.accepted && result.proposal.targetNpcId == "lorn",
+           "Level 1 proposals retain the NPC target used to build their context");
+    expect(providerRaw->observedContext.value("target_npc", "") == "lorn" &&
+               providerRaw->observedContext.at("npcs").at("lorn").contains("knowledge") &&
+               !providerRaw->observedContext.at("npcs").at("mira").contains("knowledge") &&
+               !providerRaw->observedContext.at("npcs").at("mira").contains("experiences"),
+           "Level 1 exposes private cognitive evidence only for the target NPC");
+
+    const auto roundTrip = EvolutionManager::fromJson(EvolutionManager::toJson(result.proposal));
+    expect(roundTrip.targetNpcId == "lorn" && roundTrip.evolutionLevel == "level1",
+           "Level 1 target scope survives proposal JSON persistence");
+
+    auto mismatched = result.proposal;
+    mismatched.operations.at(0)["npc_id"] = "mira";
+    expect(EvolutionManager::validate(mismatched, service.content(), service.state()).code ==
+               "level_target_mismatch",
+           "Level 1 validation rejects an operation aimed at a different NPC");
+
+    auto level2Target = result.proposal;
+    level2Target.evolutionLevel = "level2";
+    expect(EvolutionManager::validate(level2Target, service.content(), service.state()).code ==
+               "level_target_mismatch",
+           "Level 2 validation rejects an individual NPC target");
+}
+
 void automatic_evolution_uses_async_llm_and_audits_sandbox() {
     auto provider = std::make_unique<EvolutionProposalProvider>();
     auto* providerRaw = provider.get();
@@ -2944,6 +2976,8 @@ int main() {
     run("overlay_stack_restores_and_rolls_back_in_order", overlay_stack_restores_and_rolls_back_in_order);
     run("llm_proposes_level_one_and_level_two_evolution",
         llm_proposes_level_one_and_level_two_evolution);
+    run("level_one_evolution_is_scoped_to_target_npc",
+        level_one_evolution_is_scoped_to_target_npc);
     run("automatic_evolution_uses_async_llm_and_audits_sandbox",
         automatic_evolution_uses_async_llm_and_audits_sandbox);
     run("intelligence_profile_configures_decision_budgets", intelligence_profile_configures_decision_budgets);

@@ -25,6 +25,10 @@ struct EvolutionProposal {
     // Existing hand-authored proposals default to level2 for compatibility
     // inside the still-unreleased prototype.
     std::string evolutionLevel{"level2"};
+    // Level 1 is an individual strategy/experience lane. The target is
+    // optional for legacy hand-authored proposals and required by the scoped
+    // automatic queue; Level 2 proposals intentionally leave it empty.
+    std::string targetNpcId;
 };
 
 struct EvolutionProposalRequestResult {
@@ -81,7 +85,8 @@ public:
     // Proposed and must pass validate -> sandbox -> independent approval.
     [[nodiscard]] static EvolutionProposalRequestResult propose(const WorldService& world,
                                                                  const std::string& evolutionLevel,
-                                                                 const std::string& trigger);
+                                                                 const std::string& trigger,
+                                                                 const std::string& targetNpcId = {});
     [[nodiscard]] static EvolutionValidation applyOverlay(WorldContentPack& content,
                                                             const EvolutionProposal& proposal);
     [[nodiscard]] static EvolutionSandboxResult sandbox(const EvolutionProposal& proposal,

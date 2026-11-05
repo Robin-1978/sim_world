@@ -90,7 +90,8 @@ Json stimulusEvidence(const NpcState& npc) {
 Json WorldEvolutionSystem::proposalContext(const WorldService& world,
                                                 const std::string& evolutionLevel,
                                                 const std::string& trigger,
-                                                const Json& validationFeedback) {
+                                                const Json& validationFeedback,
+                                                const std::string& targetNpcId) {
     const auto& state = world.state_;
     const auto& content = world.content_;
     if (evolutionLevel != "level1" && evolutionLevel != "level2") return Json::object();
@@ -106,8 +107,19 @@ Json WorldEvolutionSystem::proposalContext(const WorldService& world,
     for (const auto& [id, resource] : state.resources) {
         resources[id] = Json{{"amount", resource.amount}, {"reserved", resource.reserved}};
     }
+    std::string scopedTarget = targetNpcId;
+    if (evolutionLevel == "level1" && scopedTarget.empty() && !content.npcs.empty()) {
+        scopedTarget = content.npcs.front().definition.id;
+    }
     Json npcs = Json::object();
     for (const auto& [id, npc] : state.npcs) {
+        // Level 1 is an individual reflection lane.  Peers remain visible as
+        // coarse public context, but their memories, knowledge, experiences,
+        // stimuli and relationship graph never cross the target's projection.
+        if (evolutionLevel == "level1" && id != scopedTarget) {
+            npcs[id] = Json{{"location", npc.location}, {"mode", npc.mode}};
+            continue;
+        }
         Json needs = Json::object();
         for (const auto& [needId, need] : npc.needs) {
             needs[needId] = Json{{"deficit", need.deficit}, {"sensitivity", need.sensitivity},
@@ -154,6 +166,7 @@ Json WorldEvolutionSystem::proposalContext(const WorldService& world,
         contentSummary["registered_conditions"].push_back(id);
     }
     return Json{{"trigger", trigger}, {"evolution_level", evolutionLevel},
+                {"target_npc", scopedTarget},
                 {"base_content_version", content.contentVersion},
                 {"base_world_revision", state.revision},
                 {"world_time", state.now.minute}, {"resources", resources},
@@ -165,11 +178,12 @@ Json WorldEvolutionSystem::proposalContext(const WorldService& world,
 ProviderResponse WorldEvolutionSystem::requestProposal(const WorldService& world,
                                                        const std::string& evolutionLevel,
                                                        const std::string& trigger,
-                                                       const Json& validationFeedback) {
+                                                       const Json& validationFeedback,
+                                                       const std::string& targetNpcId) {
     if (evolutionLevel != "level1" && evolutionLevel != "level2") {
         return ProviderResponse{false, {}, {}, "invalid_evolution_level", Json::object()};
     }
-    const auto context = proposalContext(world, evolutionLevel, trigger, validationFeedback);
+    const auto context = proposalContext(world, evolutionLevel, trigger, validationFeedback, targetNpcId);
     return world.provider_->proposeEvolution(context, evolutionLevel, validationFeedback);
 }
 
@@ -183,18 +197,20 @@ void WorldEvolutionSystem::scheduleAutomatic() {
         return;
     }
     const int day = world_.state_.now.day();
-    const auto schedule = [this, day](const std::string& level, int intervalDays) {
+    const auto schedule = [this, day](const std::string& level, int intervalDays,
+                                      const std::string& targetNpcId) {
         if (intervalDays <= 0 || day % intervalDays != 0) return;
-        const std::string key = "day:" + std::to_string(day) + ":" + level;
+        const std::string key = "day:" + std::to_string(day) + ":" + level + ":" + targetNpcId;
         if (world_.content_.evolutionPolicy.coalescePending && world_.pendingEvolutionKeys_.contains(key)) return;
         const std::string trigger = "day_boundary:" + std::to_string(day);
-        const auto context = proposalContext(world_, level, trigger, Json::object());
+        const auto context = proposalContext(world_, level, trigger, Json::object(), targetNpcId);
         if (context.empty()) return;
         EvolutionRequest request;
         request.requestId = "evolution:auto:" + level + ":" + std::to_string(day) + ":" +
-                            std::to_string(world_.state_.revision) + ":attempt:0";
+                            std::to_string(world_.state_.revision) + ":" + targetNpcId + ":attempt:0";
         request.key = key;
         request.evolutionLevel = level;
+        request.targetNpcId = targetNpcId;
         request.trigger = trigger;
         request.baseContentVersion = world_.content_.contentVersion;
         request.baseWorldRevision = world_.state_.revision;
@@ -205,8 +221,16 @@ void WorldEvolutionSystem::scheduleAutomatic() {
         if (!world_.evolution_->submit(std::move(request)).accepted) return;
         world_.pendingEvolutionKeys_.insert(key);
     };
-    schedule("level1", world_.content_.evolutionPolicy.level1IntervalDays);
-    schedule("level2", world_.content_.evolutionPolicy.level2IntervalDays);
+    if (world_.content_.evolutionPolicy.level1IntervalDays > 0 &&
+        day % world_.content_.evolutionPolicy.level1IntervalDays == 0) {
+        for (const auto& [npcId, npc] : world_.state_.npcs) {
+            (void)npc;
+            if (world_.hasNpc(npcId)) {
+                schedule("level1", world_.content_.evolutionPolicy.level1IntervalDays, npcId);
+            }
+        }
+    }
+    schedule("level2", world_.content_.evolutionPolicy.level2IntervalDays, {});
 }
 
 std::size_t WorldEvolutionSystem::pumpAsyncProposals() {
@@ -223,6 +247,7 @@ std::size_t WorldEvolutionSystem::pumpAsyncProposals() {
             WorldService::TransactionScope transaction(world_);
             data["request_id"] = queued.request.requestId;
             data["evolution_level"] = queued.request.evolutionLevel;
+            data["target_npc"] = queued.request.targetNpcId;
             data["trigger"] = queued.request.trigger;
             data["base_content_version"] = queued.request.baseContentVersion;
             data["base_world_revision"] = queued.request.baseWorldRevision;
@@ -252,8 +277,9 @@ std::size_t WorldEvolutionSystem::pumpAsyncProposals() {
             continue;
         }
         try {
-            const auto proposal = EvolutionManager::normalizeProviderProposal(
+            auto proposal = EvolutionManager::normalizeProviderProposal(
                 queued.response.evolutionProposal, world_, queued.request.evolutionLevel, queued.provider);
+            proposal.targetNpcId = queued.request.targetNpcId;
             const auto validation = EvolutionManager::validate(proposal, world_.content_, world_.state_);
             if (!validation.valid) {
                 if (queued.request.attempt < 2 && queued.provider == "llama.cpp") {
@@ -361,7 +387,7 @@ CommandResult WorldEvolutionSystem::rollbackOverlay(const std::string& proposalI
     for (auto record = world_.state_.activeOverlays.begin(); record != active; ++record) {
         EvolutionProposal replay{record->proposalId, "declarative_capability", "snapshot",
                                  record->baseContentVersion, 0, record->operations,
-                                 EvolutionProposalStatus::Approved, {}};
+                                 EvolutionProposalStatus::Approved, {}, "level2", {}};
         const auto applied = EvolutionManager::applyOverlay(world_.content_, replay);
         if (!applied.valid) return world_.reject(applied.code, applied.message);
         if (world_.content_.contentVersion != record->overlayVersion) {
