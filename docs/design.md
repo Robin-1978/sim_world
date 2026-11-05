@@ -295,6 +295,20 @@ Level 1 是主体行为演化：LLM 在现有 Runtime 能力内泛化一个主�
 
 演化不是每个 Tick 的后台调用。Content Pack 的 `evolution_policy` 只声明是否启用自动提案、两个等级的最小日间隔、是否合并同等级挂起请求和提案上下文的最大年龄；它不能授予自动批准或激活权限。到达配置边界时，Runtime 在已提交时间事务之后捕获只读上下文，把 Level 1/2 请求放入独立的串行 Evolution Queue；Provider 工作线程只读取捕获的 JSON，不持有 WorldState，不阻塞下一次 Tick。结果回到主线程后重新检查内容版本、当前事实中的证据和治理 Schema；无关事实可以在模型思考期间提交，提案会以当前 Revision 重新校验和 Sandbox，最多给真实 Provider 两次结构化修正；有效结果自动运行无 LLM 的 Sandbox 并记录 `evolution.proposal_ready` 审计事件，仍需独立审批才能生成 Overlay。失败、过期或模型不可用只记录审计事件，不用规则或 Mock 冒充演化。普通计划由玩家输入、刺激、需求压力和过程边界触发；Level 1 在有界的个人经验窗口、显著预测误差、连续失败或日边界触发并受冷却/预算限制，自动日边界按 NPC 分别排队；Level 2 只在跨主体异常、资源/关系指标持续偏离或世界周期边界触发。Runtime 先确定性聚合证据，LLM 在一次结构化提案中完成总结、反思和最小创新，之后仍必须经过治理链。Level 1 上下文带有 `target_npc`，只提供该主体的记忆、知识、经验、刺激和关系私域，其他主体最多以地点和运行模式摘要出现；最近事件证据中的 `memory.*`、`knowledge.*`、`experience.*` 和 `drive.adapted` 认知事件也按主体过滤，公共资源、关系和结构事实仍可作为证据。提案的策略/日程操作必须命中该目标，行为配方也必须把目标列入 `available_to`。Level 2 才接收受权限裁剪的跨主体摘要。窗口上限是内容无关的上下文安全上限，排序、可见性和传播范围由 Runtime 的事实权限和配置决定。NPC 的 DecisionContext 使用按主体可见性、地点、关系、承诺和当前候选计划裁剪的 `worldSnapshot`，并分别提供 `selfState`、`planCatalog`、记忆、知识、经验、刺激和约束；不把全量 WorldState 或内部版本号当作模型语义材料。
 
+### 每日反思与创新时间尺度
+
+创新不属于普通 Tick，也不应变成每个行动都触发的“再问一次模型”。Runtime 把每日边界的 Level 1 请求解释为 `daily_reflection`，并使用独立的 `ReflectionResult` schema：主体回顾 `ReflectionCursor` 之后的新事件、持久化的 `unresolved_issues` 和当前状态，可选地产生四类结果——Belief/Knowledge 更新、Experience/Memory 总结、策略或 Goal 调整、Innovation Hypothesis。ReflectionResult 不是事实，也不是 EvolutionProposal：Cognition 更新必须经 `CognitionSystem` 做来源、权限和置信度校验；Goal 调整只能通过现有 `NpcActivity` 生命周期入口；Strategy 调整写入主体策略事实；只有 `innovation_hypotheses` 进入 `EvolutionManager` 的 Level 1 私有提案链。没有足够证据时，反思只更新认知或策略，不得为了满足调用次数而生成创新。
+
+每日反思是幂等的日边界事务。`ReflectionCursor.last_event_sequence` 只在结果和审计事件提交后前移，输入窗口按游标增量聚合，并始终附带未解决问题；同一 NPC 同一天重复调度返回 `reflection_already_processed`。Runtime 先校验全部结构化结果，再以同一事务提交认知事件、Goal/Strategy 投影、创新假设事件和新的游标，因此模型重试或进程恢复不会重复消费证据。创新假设、Overlay 激活和 NPC Adoption 仍分别保留自己的生命周期。
+
+创新假设在 NPC 私域中以版本化 JSON 记录保存，后续反思可以通过 `innovation_actions` 继续 `refining/evaluated`，也可以显式 `rejected/abandoned`；游标前移不会删除未解决问题或未完成假设。Overlay 激活后仍不等于采用：`InnovationAdoptionStatus` 单独记录 `pending → resource_blocked → executing → completed/failed/abandoned`。只有假设已 `accepted` 且对应 Overlay 已独立批准并激活，Runtime 才允许 `startInnovationAdoption`；资源不足可保持 `resource_blocked`，成功或失败都通过事件和快照留下历史。这样可以回放 knowing-doing gap，而不会把 Sandbox 通过误写成 NPC 已经使用。
+
+Innovation Hypothesis 有独立的持久化生命周期：`hypothesized -> refining -> evaluated -> accepted/rejected`，在进入终态前可以明确转为 `abandoned`。这条状态只管理想法本身；Overlay 仍有自己的 `proposed -> approved -> active -> rolled_back/retired` 生命周期，NPC 采用/实施则另有 `pending -> resource_blocked -> executing -> completed/failed/abandoned` 状态。批准 Hypothesis、激活 Overlay 和实际完成采用不能互相冒充，激活后的撤销只能记录 `rolled_back`，不能把历史改写为 `abandoned`。提案 JSON 的 `innovation` 信封保存假设、`novelty_basis`、关联 operations、预期收益、风险和有界 `test_plan`；Proposal Store、EventLog 和 Snapshot 的 Overlay 记录共同保存这个审计链。下一次每日反思可以引用上一份提案事件继续完善，或明确放弃，而不是重新生成同一创新。
+
+创新的等级按影响范围划分，而不是按“是否有创意”划分。Level 1 可以提出只对目标 NPC 可用的行为配方假设，`available_to` 必须精确等于该 NPC，不能创建共享实体原型；它仍须验证和沙箱，但不会直接改变公共世界。Level 2 才能把已有假设提升为共享配方或实体原型，要求公共事件证据、跨主体可见性和独立批准。Level 1 到 Level 2 的提升通过新的 Level 2 提案引用前一阶段的已提交事件完成，私有记忆不会被广播。
+
+这组机制吸收了 *Maslow Machines* 预印本提出的三个可检验启发：较低层需求满足后仍保留有限的高阶动机压力（避免 contentment trap）、把驱力呈现为描述性的 felt-state 而不是命令、以及把“提出想法”和“有资源实现”分开测量。项目不把 Maslow 五层当作固定闸门，也不把模型的拟人化自述当作意识证据；需求域、阈值、满足配方和创新指标仍由 Content Pack、Runtime 事实与回放校准决定。参考：Mark E. Mala, *Maslow Machines: Emergent Civilisation from Intrinsic Drive Hierarchies in LLM Agent Populations*, Zenodo, 2026, DOI `10.5281/zenodo.19479937`（v1.1 记录 DOI `10.5281/zenodo.19479938`）。
+
 同一机制可以承载场景实验：例如“在周边小区开一个小店”“提高利率”“发布一个政策”。LLM 把自然语言转成 `ScenarioProposal`，Validator 检查实体、参数和已注册机制，Sandbox 从同一快照克隆并运行 baseline/scenario，Runtime 输出资源、库存、组织指标、需求、位置、关系、承诺、异常和两侧事件序列；LLM 只把这些已计算结果整理为假设、因果链、敏感参数和不确定性说明。缺少经济或社会机制时必须报告“无法评估”，不能用语言补造数值。当前已实现资源、组织指标和 NPC 需求三类有界 intervention，以及面向不必填用的 CLI；小店、利率和政策只有在对应事实模型落地后才能增加专用 intervention。
 
 `DecisionContext` 的窗口由内容包的 `decision_context` 配置约束：刺激按显著性保留前 N 条，记忆/知识/经验按时间保留最近 N 条，同地点实体和相邻连接按稳定顺序截断，关系按主体可见范围截断。截断只影响模型观察窗口，不删除事实、事件或 NPC 的长期认知；上下文预算应随 Intelligence Profile 校准，而不能通过扩大快照把所有世界状态塞给模型。
@@ -514,6 +528,8 @@ Behavior DSL 只组合注册节点、条件和元动作，例如：
  当前实现不把这套 DSL 误称为通用编程语言，但它已经支持由 JSON 构造一棵受约束的行为树。内容包声明 `meta_actions`（故事动作 ID 到 Runtime 通用 operator 的绑定）、`conditions`（条件 ID 到只读谓词的绑定）和 `recipes`；加载器校验引用，`BehaviorRecipeRuntime` 在运行时编译 `Sequence`、`Selector`、`Interruptible`、`Timeout`、`Condition` 和 `Action` 节点。游戏代码不会为 Mira、Lorn、Eve 或某个故事动作创建专用 BT。`GoalSelector`/LLM 只选择候选 `recipe_id`，接受后由 Runtime 创建 `ProcessExecution` 并记录该 recipe；长过程等待由 ProcessExecution 管理，过程完成时才在事务中运行已编译配方的原子效果。Recipe 可以声明参数 JSON Schema，节点通过 `{"bind":"parameter_name"}` 引用运行时输入；因此 `goto`、交易对象、协作对象和调查目标都是能力参数，而不是写死在 operator 中的故事 ID。普通决策只能选择已批准计划并填写参数；LLM 要创建全新的 BT，必须通过 Level 1/2 的 `register_behavior_recipe` 提案，经过引用验证、沙箱和独立批准后才会进入候选目录。新增行为只需新增 JSON 配方、参数契约和已登记的通用 operator；只有新增底层事实变换原语才需要扩展 Runtime。
 
 演化操作是类型化的，例如 `create_entity_archetype`、`overlay_strategy`、`overlay_schedule`、`register_behavior_recipe`、`add_relationship` 和 `schedule_event`；不是任意 JSON Patch。新增 C++ Component、System、权限、调度、事件格式、存档迁移或可执行代码必须由开发者发布。
+
+创新提案在同一 `EvolutionProposal` 外壳中增加 `kind=innovation` 和 `innovation` 信封，但不增加事实写入捷径。信封至少包含 `hypothesis`、`novelty_basis`、关联 `operation_ids`、`expected_benefits`、`risks` 和 `test_plan`；Level 1 的 operation 只能是 `available_to=[target_npc]` 的私有 `register_behavior_recipe`，Level 2 才能涉及共享 recipe 或 entity archetype。`test_plan` 明确声明 `baseline`、`scenario`、`expected_metrics`、不可恶化的 `constraints`、`resource_budget`、`success_criteria` 和 `failure_criteria`，以及 Runtime 能计算的有限指标（例如事件数、资源总量、知识/经验计数）；指标由 Runtime 计算，LLM 只能解释结果，不能自评“创新成功”。假设的接受、Overlay 的批准/激活和 NPC 的采用分别记录，失败实施不会回滚或篡改已批准内容。
 
 内容定义必须描述对象的语义属性，而不只是给动作起名字。资源定义与运行时持有量分开；生产过程定义与一次执行分开。资源定义至少声明单位、是否可分割、质量轴、替代组、容量和衰减规则；持有量至少记录所有者、位置、数量、已预留量、可用量、来源和到期时间。
 

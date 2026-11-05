@@ -14,8 +14,8 @@ using Json = nlohmann::json;
 inline constexpr std::int64_t kMinutesPerHour = 60;
 inline constexpr std::int64_t kMinutesPerDay = 1440;
 inline constexpr int kWorldEventSchemaVersion = 4;
-inline constexpr int kSnapshotSchemaVersion = 18;
-inline constexpr char kSimulationVersion[] = "adaptive-runtime-1.20";
+inline constexpr int kSnapshotSchemaVersion = 19;
+inline constexpr char kSimulationVersion[] = "adaptive-runtime-1.21";
 
 struct GameTime {
     std::int64_t minute{0};
@@ -193,6 +193,16 @@ struct NpcActivity {
     std::optional<ProcessExecution> process;
 };
 
+// Daily reflection is incremental. The cursor identifies the committed event
+// boundary already reviewed by this NPC; unresolved goals and long-lived
+// problems remain separate inputs and are never discarded when the cursor
+// advances.
+struct ReflectionCursor {
+    std::uint64_t lastEventSequence{0};
+    std::int64_t lastReflectionDay{-1};
+    std::uint64_t reflectionRevision{0};
+};
+
 // Returns a stable diagnostic for a lifecycle aggregate that cannot exist.
 // Snapshot loading rejects these errors instead of rewriting the projection.
 [[nodiscard]] std::optional<std::string> npcActivityInvariantError(const NpcActivity& activity);
@@ -200,6 +210,19 @@ struct NpcActivity {
 // The only operation that changes the lifecycle phase. It keeps Goal and
 // ProcessExecution status fields as projections of the same activity phase.
 void setActivityStatus(NpcActivity& activity, ActivityStatus status);
+
+enum class InnovationAdoptionStatus { Pending, ResourceBlocked, Executing, Completed, Failed, Abandoned };
+std::string toString(InnovationAdoptionStatus status);
+InnovationAdoptionStatus innovationAdoptionStatusFromString(const std::string& value);
+
+struct InnovationAdoptionState {
+    std::string proposalId;
+    std::string recipeId;
+    InnovationAdoptionStatus status{InnovationAdoptionStatus::Pending};
+    GameTime startedAt{-1};
+    GameTime updatedAt{-1};
+    std::string reason;
+};
 
 struct NpcState {
     // Only the content-pack reference lives in runtime state. Static authored
@@ -213,6 +236,15 @@ struct NpcState {
     std::vector<Memory> memories;
     std::vector<KnowledgeFact> knowledge;
     std::vector<Experience> experiences;
+    // Durable problems carried across daily reflections. A reflection may
+    // resolve an item explicitly, but advancing the evidence cursor alone
+    // can never discard an unresolved issue.
+    std::vector<std::string> unresolvedIssues;
+    // Serialized, still-private innovation hypotheses owned by this NPC.
+    // They remain available to the next reflection without becoming shared
+    // content or an implicit Overlay.
+    std::vector<Json> innovationHypotheses;
+    std::vector<InnovationAdoptionState> innovationAdoptions;
     std::vector<std::string> openPromises;
     std::uint64_t stateVersion{0};
     std::string mode{"working"};
@@ -232,6 +264,7 @@ struct NpcState {
     // process. Keeping it separate prevents a minute-level process tick from
     // discarding the last hourly drive anchor.
     GameTime lastDriveTick{-1};
+    ReflectionCursor reflectionCursor;
     NpcActivity activity;
 };
 

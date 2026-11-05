@@ -170,6 +170,193 @@ EvolutionValidation validateParameterSchema(const Json& schema) {
     return validateNode(validateNode, schema, true, "parameters");
 }
 
+EvolutionValidation validateInnovationSpec(const EvolutionProposal& proposal) {
+    const bool supplied = proposal.innovation.is_object() && !proposal.innovation.empty();
+    if (proposal.kind != "innovation") {
+        if (supplied) {
+            return {false, "innovation_kind_mismatch",
+                    "An innovation envelope is only valid for a proposal with kind=innovation."};
+        }
+        return {true, "ok", "No innovation envelope is attached to this proposal."};
+    }
+    if (proposal.evolutionLevel != "level1" && proposal.evolutionLevel != "level2") {
+        return {false, "innovation_level_mismatch", "Innovation proposals must use a governed evolution level."};
+    }
+    if (!supplied) {
+        return {false, "innovation_spec_missing",
+                "An innovation proposal must include a bounded hypothesis and evaluation plan."};
+    }
+    static const std::set<std::string> fields{
+        "hypothesis", "novelty_basis", "operation_ids", "expected_benefits", "risks", "test_plan"};
+    for (auto item = proposal.innovation.begin(); item != proposal.innovation.end(); ++item) {
+        if (!fields.contains(item.key())) {
+            return {false, "innovation_field_unknown",
+                    "Innovation metadata contains an unsupported field: " + item.key()};
+        }
+    }
+    const auto requiredText = [&proposal](const char* key, std::size_t maxLength) -> EvolutionValidation {
+        if (!proposal.innovation.contains(key) || !proposal.innovation.at(key).is_string() ||
+            proposal.innovation.at(key).get<std::string>().empty() ||
+            proposal.innovation.at(key).get<std::string>().size() > maxLength) {
+            return {false, "innovation_field_invalid",
+                    std::string("Innovation ") + key + " must be a bounded non-empty string."};
+        }
+        return {true, "ok", "Innovation text is bounded."};
+    };
+    for (const auto* key : {"hypothesis", "novelty_basis"}) {
+        const auto result = requiredText(key, std::string(key) == "hypothesis" ? 1024 : 64);
+        if (!result.valid) return result;
+    }
+    static const std::set<std::string> noveltyBases{
+        "new_combination", "new_capability", "new_archetype"};
+    if (!noveltyBases.contains(proposal.innovation.at("novelty_basis").get<std::string>())) {
+        return {false, "innovation_novelty_basis_invalid",
+                "Innovation novelty_basis must describe a bounded declarative novelty claim."};
+    }
+    if (proposal.evolutionLevel == "level1" &&
+        proposal.innovation.at("novelty_basis").get<std::string>() == "new_archetype") {
+        return {false, "innovation_level_mismatch",
+                "A Level 1 reflection cannot create a shared world archetype."};
+    }
+    const auto boundedStringArray = [&proposal](const char* key, std::size_t maxItems,
+                                                 std::size_t maxLength) -> EvolutionValidation {
+        if (!proposal.innovation.contains(key) || !proposal.innovation.at(key).is_array() ||
+            proposal.innovation.at(key).empty() || proposal.innovation.at(key).size() > maxItems) {
+            return {false, "innovation_field_invalid",
+                    std::string("Innovation ") + key + " must contain a bounded non-empty list."};
+        }
+        for (const auto& item : proposal.innovation.at(key)) {
+            if (!item.is_string() || item.get<std::string>().empty() || item.get<std::string>().size() > maxLength) {
+                return {false, "innovation_field_invalid",
+                        std::string("Innovation ") + key + " entries must be bounded strings."};
+            }
+        }
+        return {true, "ok", "Innovation list is bounded."};
+    };
+    for (const auto* key : {"expected_benefits", "risks"}) {
+        const auto result = boundedStringArray(key, 4, 512);
+        if (!result.valid) return result;
+    }
+    if (!proposal.innovation.contains("operation_ids") ||
+        !proposal.innovation.at("operation_ids").is_array() ||
+        proposal.innovation.at("operation_ids").empty() ||
+        proposal.innovation.at("operation_ids").size() > proposal.operations.size()) {
+        return {false, "innovation_operation_scope_invalid",
+                "Innovation operation_ids must identify one or more proposed operations."};
+    }
+    std::set<std::string> operationIds;
+    for (const auto& item : proposal.innovation.at("operation_ids")) {
+        if (!item.is_string() || item.get<std::string>().empty() ||
+            !operationIds.insert(item.get<std::string>()).second) {
+            return {false, "innovation_operation_scope_invalid",
+                    "Innovation operation_ids must contain unique non-empty operation ids."};
+        }
+    }
+    for (const auto& operation : proposal.operations) {
+        if (!operation.is_object() || !operation.contains("id") ||
+            !operationIds.contains(operation.at("id").get<std::string>())) {
+            return {false, "innovation_operation_scope_invalid",
+                    "Innovation operation_ids must cover every operation in the proposal."};
+        }
+    }
+    if (operationIds.size() != proposal.operations.size()) {
+        return {false, "innovation_operation_scope_invalid",
+                "Innovation operation_ids cannot reference operations outside the proposal."};
+    }
+    if (proposal.evolutionLevel == "level1") {
+        if (proposal.targetNpcId.empty()) {
+            return {false, "innovation_target_missing",
+                    "A Level 1 innovation hypothesis must identify its reflecting NPC."};
+        }
+        for (const auto& operation : proposal.operations) {
+            if (operation.value("operation", "") != "register_behavior_recipe") {
+                return {false, "innovation_level_mismatch",
+                        "A Level 1 innovation hypothesis may only prepare a private behavior recipe."};
+            }
+            const auto actors = operation.value("available_to", Json::array());
+            if (!actors.is_array() || actors.size() != 1 || !actors.at(0).is_string() ||
+                actors.at(0).get<std::string>() != proposal.targetNpcId) {
+                return {false, "innovation_target_mismatch",
+                        "A Level 1 innovation recipe must remain private to its target NPC."};
+            }
+        }
+    }
+    if (!proposal.innovation.contains("test_plan") || !proposal.innovation.at("test_plan").is_object()) {
+        return {false, "innovation_test_plan_missing", "An innovation must declare a bounded test_plan."};
+    }
+    const auto& testPlan = proposal.innovation.at("test_plan");
+    static const std::set<std::string> testFields{"horizon_minutes", "metrics", "baseline", "scenario",
+                                                   "expected_metrics", "constraints", "resource_budget",
+                                                   "success_criteria", "failure_criteria"};
+    for (auto item = testPlan.begin(); item != testPlan.end(); ++item) {
+        if (!testFields.contains(item.key())) {
+            return {false, "innovation_test_plan_invalid",
+                    "Innovation test_plan contains an unsupported field: " + item.key()};
+        }
+    }
+    if (!testPlan.contains("horizon_minutes") || !testPlan.at("horizon_minutes").is_number_integer() ||
+        testPlan.at("horizon_minutes").get<int>() <= 0 || testPlan.at("horizon_minutes").get<int>() > 10080) {
+        return {false, "innovation_test_plan_invalid",
+                "Innovation test_plan.horizon_minutes must be between 1 and 10080."};
+    }
+    static const std::set<std::string> metricIds{
+        "events_added", "final_revision", "npc_count", "knowledge_count", "experience_count",
+        "advance_minutes", "resource_total"};
+    if (!testPlan.contains("metrics") || !testPlan.at("metrics").is_array() ||
+        testPlan.at("metrics").empty() || testPlan.at("metrics").size() > 6) {
+        return {false, "innovation_test_plan_invalid",
+                "Innovation test_plan.metrics must contain one to six registered metrics."};
+    }
+    std::set<std::string> metrics;
+    for (const auto& metric : testPlan.at("metrics")) {
+        if (!metric.is_string() || !metricIds.contains(metric.get<std::string>()) ||
+            !metrics.insert(metric.get<std::string>()).second) {
+            return {false, "innovation_test_plan_invalid",
+                    "Innovation test_plan.metrics must use unique registered metric ids."};
+        }
+    }
+    const auto requiredPlanText = [&testPlan](const char* key) -> EvolutionValidation {
+        if (!testPlan.contains(key) || !testPlan.at(key).is_string() ||
+            testPlan.at(key).get<std::string>().empty() || testPlan.at(key).get<std::string>().size() > 512) {
+            return {false, "innovation_test_plan_invalid",
+                    std::string("Innovation test_plan.") + key + " must be a bounded non-empty string."};
+        }
+        return {true, "ok", "Innovation test criterion is bounded."};
+    };
+    for (const auto* key : {"baseline", "scenario", "success_criteria", "failure_criteria"}) {
+        const auto result = requiredPlanText(key);
+        if (!result.valid) return result;
+    }
+    if (!testPlan.contains("expected_metrics") || !testPlan.at("expected_metrics").is_object() ||
+        testPlan.at("expected_metrics").empty() || testPlan.at("expected_metrics").size() > 6) {
+        return {false, "innovation_test_plan_invalid", "Innovation test_plan.expected_metrics must map registered metrics to numeric targets."};
+    }
+    for (auto item = testPlan.at("expected_metrics").begin(); item != testPlan.at("expected_metrics").end(); ++item) {
+        if (!metrics.contains(item.key()) || !item.value().is_number()) {
+            return {false, "innovation_test_plan_invalid", "Innovation expected_metrics must use selected registered metric ids and numeric targets."};
+        }
+    }
+    const auto constraints = testPlan.value("constraints", Json::array());
+    if (!constraints.is_array() || constraints.empty() || constraints.size() > 6) {
+        return {false, "innovation_test_plan_invalid", "Innovation test_plan.constraints must be a bounded non-empty list."};
+    }
+    for (const auto& item : constraints) {
+        if (!item.is_string() || item.get<std::string>().empty() || item.get<std::string>().size() > 512) {
+            return {false, "innovation_test_plan_invalid", "Innovation test constraints must be bounded strings."};
+        }
+    }
+    if (!testPlan.contains("resource_budget") || !testPlan.at("resource_budget").is_object() ||
+        testPlan.at("resource_budget").empty() || testPlan.at("resource_budget").size() > 8) {
+        return {false, "innovation_test_plan_invalid", "Innovation test_plan.resource_budget must be a bounded resource map."};
+    }
+    for (auto item = testPlan.at("resource_budget").begin(); item != testPlan.at("resource_budget").end(); ++item) {
+        if (!item.value().is_number() || item.value().get<double>() < 0.0 || item.value().get<double>() > 1000000.0) {
+            return {false, "innovation_test_plan_invalid", "Innovation resource budgets must be bounded non-negative numbers."};
+        }
+    }
+    return {true, "ok", "Innovation hypothesis and evaluation plan are bounded."};
+}
+
 EvolutionValidation applyOperations(WorldContentPack& content, const EvolutionProposal& proposal) {
     for (const auto& operation : proposal.operations) {
         const auto type = operation.at("operation").get<std::string>();
@@ -275,11 +462,42 @@ std::string toString(EvolutionProposalStatus status) {
     return "rejected";
 }
 
+std::string toString(InnovationLifecycle status) {
+    switch (status) {
+    case InnovationLifecycle::Hypothesized: return "hypothesized";
+    case InnovationLifecycle::Refining: return "refining";
+    case InnovationLifecycle::Evaluated: return "evaluated";
+    case InnovationLifecycle::Accepted: return "accepted";
+    case InnovationLifecycle::Rejected: return "rejected";
+    case InnovationLifecycle::Abandoned: return "abandoned";
+    }
+    return "hypothesized";
+}
+
+InnovationLifecycle innovationLifecycleFromString(const std::string& value) {
+    if (value == "refining") return InnovationLifecycle::Refining;
+    if (value == "evaluated") return InnovationLifecycle::Evaluated;
+    if (value == "accepted") return InnovationLifecycle::Accepted;
+    if (value == "rejected") return InnovationLifecycle::Rejected;
+    if (value == "abandoned") return InnovationLifecycle::Abandoned;
+    return InnovationLifecycle::Hypothesized;
+}
+
 EvolutionProposalStatus evolutionProposalStatusFromString(const std::string& value) {
     if (value == "validated") return EvolutionProposalStatus::Validated;
     if (value == "approved") return EvolutionProposalStatus::Approved;
     if (value == "rejected") return EvolutionProposalStatus::Rejected;
     return EvolutionProposalStatus::Proposed;
+}
+
+std::set<std::string> EvolutionManager::allowedOperationIds(const std::string& evolutionLevel) {
+    if (evolutionLevel == "level1") {
+        return {"overlay_strategy", "overlay_schedule", "register_behavior_recipe"};
+    }
+    if (evolutionLevel == "level2") {
+        return {"create_entity_archetype", "register_behavior_recipe"};
+    }
+    return {};
 }
 
 EvolutionProposal EvolutionManager::fromJson(const Json& value) {
@@ -316,6 +534,19 @@ EvolutionProposal EvolutionManager::fromJson(const Json& value) {
     if (!proposal.targetNpcId.empty() && proposal.evolutionLevel != "level1") {
         throw std::runtime_error("target_npc is only valid for level1 evolution proposals");
     }
+    proposal.innovation = value.value("innovation", Json::object());
+    if (!proposal.innovation.is_object()) {
+        throw std::runtime_error("innovation metadata must be an object");
+    }
+    proposal.innovationStatus = value.value("innovation_status", "hypothesized");
+    static const std::set<std::string> innovationStatuses{
+        "hypothesized", "refining", "evaluated", "accepted", "rejected", "abandoned"};
+    if (!innovationStatuses.contains(proposal.innovationStatus)) {
+        throw std::runtime_error("unsupported innovation lifecycle status");
+    }
+    if (proposal.kind != "innovation" && proposal.innovationStatus != "hypothesized") {
+        throw std::runtime_error("innovation lifecycle status is only valid for innovation proposals");
+    }
     return proposal;
 }
 
@@ -328,6 +559,10 @@ Json EvolutionManager::toJson(const EvolutionProposal& proposal) {
                 {"evidence_event_sequences", evidence}, {"operations", proposal.operations},
                 {"status", toString(proposal.status)}, {"evolution_level", proposal.evolutionLevel}};
     if (!proposal.targetNpcId.empty()) result["target_npc"] = proposal.targetNpcId;
+    if (!proposal.innovation.empty()) {
+        result["innovation"] = proposal.innovation;
+        result["innovation_status"] = proposal.innovationStatus;
+    }
     return result;
 }
 
@@ -404,7 +639,7 @@ EvolutionProposal EvolutionManager::normalizeProviderProposal(const Json& value,
     Json normalized = value;
     normalized["schema_version"] = 1;
     static const std::set<std::string> proposalKinds{
-        "content", "knowledge", "strategy", "declarative_capability"};
+        "content", "knowledge", "strategy", "declarative_capability", "innovation"};
     const auto operationKind = [&normalized]() {
         if (!normalized.contains("operations") || !normalized.at("operations").is_array() ||
             normalized.at("operations").empty() || !normalized.at("operations").at(0).is_object()) {
@@ -452,7 +687,7 @@ EvolutionValidation EvolutionManager::validate(const EvolutionProposal& proposal
         return {false, "invalid_identity", "Proposal id and source are required."};
     }
     static const std::set<std::string> kinds{
-        "content", "knowledge", "strategy", "declarative_capability"};
+        "content", "knowledge", "strategy", "declarative_capability", "innovation"};
     if (!kinds.contains(proposal.kind)) {
         return {false, "invalid_proposal_kind", "Proposal kind is outside the governed evolution registry."};
     }
@@ -489,8 +724,10 @@ EvolutionValidation EvolutionManager::validate(const EvolutionProposal& proposal
     if (!proposal.operations.is_array() || proposal.operations.empty()) {
         return {false, "empty_operations", "A proposal must contain at least one operation."};
     }
-    static const std::set<std::string> allowed{
-        "create_entity_archetype", "register_behavior_recipe", "overlay_strategy", "overlay_schedule"};
+    const auto allowed = allowedOperationIds(proposal.evolutionLevel);
+    if (allowed.empty()) {
+        return {false, "invalid_evolution_level", "Proposal evolution level is outside the governed lanes."};
+    }
     static const std::set<std::string> forbidden{
         "runtime_core_mutation", "load_script", "inject_code", "json_patch",
         "change_event_schema", "change_transaction_rules"};
@@ -621,6 +858,8 @@ EvolutionValidation EvolutionManager::validate(const EvolutionProposal& proposal
             }
         }
     }
+    const auto innovationValidation = validateInnovationSpec(proposal);
+    if (!innovationValidation.valid) return innovationValidation;
     return {true, "ok", "Proposal is structurally valid and ready for sandbox approval."};
 }
 
@@ -638,8 +877,36 @@ EvolutionValidation EvolutionManager::approve(EvolutionProposal& proposal,
         proposal.status = EvolutionProposalStatus::Rejected;
         return {false, "sandbox_failed", "A proposal cannot activate without a passing sandbox result."};
     }
+    if (proposal.kind == "innovation" && proposal.innovationStatus != "accepted") {
+        return {false, "innovation_acceptance_required",
+                "An innovation hypothesis must be explicitly accepted before its overlay can be approved."};
+    }
     proposal.status = EvolutionProposalStatus::Approved;
     return {true, "approved", "Proposal is approved for versioned overlay activation."};
+}
+
+EvolutionValidation EvolutionManager::transitionInnovation(EvolutionProposal& proposal,
+                                                             const std::string& nextStatus) {
+    if (proposal.kind != "innovation" || proposal.innovation.empty()) {
+        return {false, "innovation_required", "Only an innovation proposal has an innovation lifecycle."};
+    }
+    static const std::set<std::string> statuses{
+        "hypothesized", "refining", "evaluated", "accepted", "rejected", "abandoned"};
+    if (!statuses.contains(nextStatus)) {
+        return {false, "innovation_status_invalid", "Innovation lifecycle status is not registered."};
+    }
+    const auto current = proposal.innovationStatus;
+    const bool allowed =
+        (current == "hypothesized" && (nextStatus == "refining" || nextStatus == "evaluated" || nextStatus == "abandoned")) ||
+        (current == "refining" && (nextStatus == "refining" || nextStatus == "evaluated" || nextStatus == "abandoned")) ||
+        (current == "evaluated" && (nextStatus == "accepted" || nextStatus == "rejected" || nextStatus == "abandoned")) ||
+        (current == "accepted" && nextStatus == "abandoned");
+    if (!allowed) {
+        return {false, "innovation_status_transition_invalid",
+                "Innovation lifecycle cannot move from " + current + " to " + nextStatus + "."};
+    }
+    proposal.innovationStatus = nextStatus;
+    return {true, "ok", "Innovation lifecycle transitioned to " + nextStatus + "."};
 }
 
 EvolutionValidation EvolutionManager::applyOverlay(WorldContentPack& content,
@@ -649,6 +916,10 @@ EvolutionValidation EvolutionManager::applyOverlay(WorldContentPack& content,
     }
     if (proposal.baseContentVersion != content.contentVersion) {
         return {false, "content_version_conflict", "Overlay base content does not match the active content."};
+    }
+    if (proposal.kind == "innovation" && proposal.innovationStatus != "accepted") {
+        return {false, "innovation_acceptance_required",
+                "An innovation hypothesis must be accepted before its overlay can activate."};
     }
     auto candidate = content;
     EvolutionValidation applied;
@@ -710,7 +981,11 @@ EvolutionSandboxResult EvolutionManager::sandbox(const EvolutionProposal& propos
             result.eventDiff.push_back(worldEventToJson(sandboxWorld.state().events[index]));
         }
         Json resources = Json::object();
-        for (const auto& [id, resource] : sandboxWorld.state().resources) resources[id] = resource.amount;
+        int resourceTotal = 0;
+        for (const auto& [id, resource] : sandboxWorld.state().resources) {
+            resources[id] = resource.amount;
+            resourceTotal += resource.amount;
+        }
         std::size_t knowledge = 0;
         std::size_t experiences = 0;
         for (const auto& [id, npc] : sandboxWorld.state().npcs) {
@@ -720,7 +995,7 @@ EvolutionSandboxResult EvolutionManager::sandbox(const EvolutionProposal& propos
         result.metrics = Json{{"events_added", result.eventDiff.size()}, {"final_revision", result.finalRevision},
                               {"resources", resources}, {"npc_count", sandboxWorld.state().npcs.size()},
                               {"knowledge_count", knowledge}, {"experience_count", experiences},
-                              {"advance_minutes", advanceMinutes}};
+                              {"advance_minutes", advanceMinutes}, {"resource_total", resourceTotal}};
         result.passed = true;
         result.code = "ok";
         result.message = "Sandbox completed without mutating the source world.";

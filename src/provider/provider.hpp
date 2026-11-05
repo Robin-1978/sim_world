@@ -143,6 +143,10 @@ struct ProviderResponse {
     // intent. The Runtime parses and governs this JSON; the provider never
     // mutates WorldState or approves its own proposal.
     Json evolutionProposal = Json::object();
+    // Daily reflection is a separate structured cognition result. Runtime
+    // routes ordinary updates locally and only forwards embedded innovation
+    // hypotheses to the governed evolution lane.
+    Json reflectionResult = Json::object();
 };
 
 // A decision policy is content/runtime configuration, not a model name
@@ -187,6 +191,17 @@ public:
         (void)validationFeedback;
         return proposeEvolution(context, evolutionLevel);
     }
+    virtual ProviderResponse proposeReflection(const Json& context,
+                                               const std::string& targetNpcId) {
+        (void)context;
+        (void)targetNpcId;
+        return ProviderResponse{false, {}, {}, "reflection_provider_unavailable", Json::object(), Json::object()};
+    }
+    // Returns non-secret execution identity for audit envelopes.  It never
+    // includes API key values or environment variable contents.
+    [[nodiscard]] virtual Json runtimeMetadata(const std::string& purpose) const {
+        return Json{{"provider_id", name()}, {"provider_type", name()}, {"purpose", purpose}};
+    }
     [[nodiscard]] virtual std::string name() const = 0;
 };
 
@@ -224,6 +239,7 @@ struct PurposeProvider {
 };
 
 struct LlamaCppConfig {
+    std::string profileId;
     std::string baseUrl{"http://127.0.0.1:8192/v1"};
     std::string model{"local"};
     std::string apiKeyEnv;
@@ -249,6 +265,9 @@ public:
     ProviderResponse proposeEvolution(const Json& context,
                                       const std::string& evolutionLevel,
                                       const Json& validationFeedback) override;
+    ProviderResponse proposeReflection(const Json& context,
+                                       const std::string& targetNpcId) override;
+    [[nodiscard]] Json runtimeMetadata(const std::string& purpose) const override;
     [[nodiscard]] std::string name() const override { return "llama.cpp"; }
 
 private:

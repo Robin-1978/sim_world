@@ -41,6 +41,14 @@
         "max_tokens": 1024
       }
     },
+    "reflection": {
+      "provider": "local_qwen",
+      "policy": {
+        "thinking": true,
+        "reasoning_budget_tokens": 256,
+        "max_tokens": 1536
+      }
+    },
     "world_evolution": {
       "provider": "local_qwen",
       "policy": {

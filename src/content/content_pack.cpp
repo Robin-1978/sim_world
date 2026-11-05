@@ -693,6 +693,7 @@ WorldContentPack loadInternal(const std::string& rootPath, const Documents* docu
         throw std::runtime_error("evolution_prompts must be an object in " + worldPath);
     }
     pack.npcEvolutionPrompt = boundedText(evolutionPrompts, "npc_strategy", worldPath, 4096);
+    pack.npcReflectionPrompt = boundedText(evolutionPrompts, "npc_reflection", worldPath, 4096);
     pack.worldEvolutionPrompt = boundedText(evolutionPrompts, "world_substrate", worldPath, 4096);
     pack.sceneAsset = world.value("scene_asset", "");
     pack.cameraMode = world.value("camera", "slanted_top_down");

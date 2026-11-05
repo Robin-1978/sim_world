@@ -128,14 +128,16 @@ To exercise governed Level 1 and Level 2 evolution with the real model, run:
 
 These commands print the LLM proposal only. Runtime validation, sandbox execution, independent approval, and versioned overlay activation are separate steps; requesting a proposal never mutates the source world. For deterministic schema and governance tests, use the repository's CTest suite, which injects `MockProvider` explicitly.
 
-The village content pack also enables automatic, asynchronous evolution proposals at configured day boundaries. This path does not block a world tick and does not self-approve an overlay. To observe a bounded Level 1 proposal while advancing an interactive-style day, use `--wait-llm-ms` (the local model may still take several seconds per queued request):
+The village content pack also enables automatic, asynchronous Level 1 daily reflections and Level 2 world proposals at configured day boundaries. A reflection returns a separate `ReflectionResult`; Runtime routes sourced cognition, strategy, goal and unresolved-issue updates, while only an optional innovation hypothesis enters evolution governance. This path does not block a world tick and does not self-approve an overlay. To observe the bounded reflection/world queue while advancing an interactive-style day, use `--wait-llm-ms` (the local model may still take several seconds per queued request):
 
 ```bash
 ./build/tide_marks_headless --profile data/intelligence-profile.json \
   --provider profile --days 1 --wait-llm-ms 30000 --dump-events
 ```
 
-The resulting `evolution.proposal_ready` event contains the validated proposal and deterministic sandbox result. A developer or world designer must approve and activate it through the normal overlay governance path.
+The resulting `reflection.committed` and `evolution.proposal_ready` events contain the validated outputs and deterministic sandbox result. A developer or world designer must approve and activate an evolution overlay through the normal governance path.
+
+Innovation is a daily-reflection outcome, not a per-tick action. A Level 1 reflection may keep a private behavior hypothesis for its target NPC; a Level 2 proposal may promote an evidenced hypothesis into shared declarative content. The `innovation` envelope records the hypothesis, novelty basis, linked operations, benefits, risks, and a bounded test plan with baseline/scenario, expected metrics, constraints, resource budget, and explicit success/failure criteria. Hypothesis acceptance, Overlay approval/activation, and NPC adoption remain separate lifecycle steps, so a sandbox passing does not claim that an NPC has implemented the idea. After an accepted hypothesis is activated as an Overlay, `InnovationAdoptionStatus` records whether the NPC is resource-blocked, executing, completed, failed, or abandoned. The runtime persists each NPC's incremental `reflection_cursor`, private hypotheses, and adoption records in the Snapshot to avoid reprocessing the same event boundary.
 
 An instance can be created and resumed as one SQLite file. Creation imports the complete JSON content bundle once; the second command restores from SQLite without the source content directory:
 

@@ -214,5 +214,26 @@ void setActivityStatus(NpcActivity& activity, ActivityStatus status) {
     }
 }
 
+std::string toString(InnovationAdoptionStatus status) {
+    switch (status) {
+    case InnovationAdoptionStatus::Pending: return "pending";
+    case InnovationAdoptionStatus::ResourceBlocked: return "resource_blocked";
+    case InnovationAdoptionStatus::Executing: return "executing";
+    case InnovationAdoptionStatus::Completed: return "completed";
+    case InnovationAdoptionStatus::Failed: return "failed";
+    case InnovationAdoptionStatus::Abandoned: return "abandoned";
+    }
+    return "pending";
+}
+
+InnovationAdoptionStatus innovationAdoptionStatusFromString(const std::string& value) {
+    if (value == "resource_blocked") return InnovationAdoptionStatus::ResourceBlocked;
+    if (value == "executing") return InnovationAdoptionStatus::Executing;
+    if (value == "completed") return InnovationAdoptionStatus::Completed;
+    if (value == "failed") return InnovationAdoptionStatus::Failed;
+    if (value == "abandoned") return InnovationAdoptionStatus::Abandoned;
+    return InnovationAdoptionStatus::Pending;
+}
+
 
 }  // namespace tide_marks

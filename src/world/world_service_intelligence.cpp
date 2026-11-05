@@ -2,6 +2,7 @@
 
 #include "world/world_evolution_system.hpp"
 #include "world/world_intelligence_system.hpp"
+#include "provider/evolution_queue.hpp"
 
 #include <chrono>
 #include <thread>
@@ -23,6 +24,24 @@ ProviderResponse WorldService::requestEvolutionProposal(const std::string& evolu
                                                          const Json& validationFeedback,
                                                          const std::string& targetNpcId) const {
     return WorldEvolutionSystem::requestProposal(*this, evolutionLevel, trigger, validationFeedback, targetNpcId);
+}
+
+ProviderResponse WorldService::requestDailyReflection(const std::string& targetNpcId) const {
+    return WorldEvolutionSystem::requestReflection(*this, targetNpcId);
+}
+
+CommandResult WorldService::commitDailyReflection(const std::string& targetNpcId,
+                                                  const ProviderResponse& response) {
+    EvolutionRequest request;
+    request.requestKind = "reflection";
+    request.evolutionLevel = "level1";
+    request.targetNpcId = targetNpcId;
+    request.trigger = "daily_reflection";
+    request.baseContentVersion = content_.contentVersion;
+    request.baseWorldRevision = state_.revision;
+    request.createdAt = state_.now;
+    request.context = WorldEvolutionSystem::reflectionContext(*this, targetNpcId);
+    return WorldEvolutionSystem(*this).commitReflection(request, response, provider_->name());
 }
 
 TurnRequest WorldService::makeTurnRequest(const std::string& npcId, const std::string& input,

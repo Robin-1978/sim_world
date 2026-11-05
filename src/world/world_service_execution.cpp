@@ -22,6 +22,17 @@ CommandResult WorldService::rollbackOverlay(const std::string& proposalId) {
     return WorldEvolutionSystem(*this).rollbackOverlay(proposalId);
 }
 
+CommandResult WorldService::startInnovationAdoption(const std::string& npcId, const std::string& proposalId) {
+    return WorldEvolutionSystem(*this).startAdoption(npcId, proposalId);
+}
+
+CommandResult WorldService::transitionInnovationAdoption(const std::string& npcId,
+                                                         const std::string& proposalId,
+                                                         InnovationAdoptionStatus status,
+                                                         const std::string& reason) {
+    return WorldEvolutionSystem(*this).transitionAdoption(npcId, proposalId, status, reason);
+}
+
 CommandResult WorldService::assertKnownFact(const std::string& npcId, const std::string& subject,
                                             const std::string& predicate, const std::string& value,
                                             std::uint64_t sourceSequence, const std::string& scope,

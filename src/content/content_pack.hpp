@@ -292,6 +292,7 @@ struct WorldContentPack {
     // each SQLite instance. They describe scope only; Runtime still owns the
     // schema, operation registry, validation, sandbox and approval boundary.
     std::string npcEvolutionPrompt;
+    std::string npcReflectionPrompt;
     std::string worldEvolutionPrompt;
     DriveAdaptationPolicy driveAdaptation;
     StimulusPolicy stimulusPolicy;

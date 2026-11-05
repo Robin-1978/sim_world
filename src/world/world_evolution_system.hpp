@@ -11,6 +11,7 @@ class WorldService;
 struct CommandResult;
 struct EvolutionProposal;
 struct EvolutionSandboxResult;
+struct EvolutionRequest;
 
 // Coordinates world-facing Level 1/Level 2 evolution. Provider requests and
 // overlay lifecycle are kept outside WorldService, while all fact changes
@@ -29,11 +30,21 @@ public:
                                               const std::string& trigger,
                                               const Json& validationFeedback,
                                               const std::string& targetNpcId = {});
+    [[nodiscard]] static Json reflectionContext(const WorldService& world,
+                                                 const std::string& targetNpcId);
+    [[nodiscard]] static ProviderResponse requestReflection(const WorldService& world,
+                                                             const std::string& targetNpcId);
     std::size_t pumpAsyncProposals();
     void scheduleAutomatic();
     CommandResult activateOverlay(const EvolutionProposal& proposal,
                                   const EvolutionSandboxResult& sandbox);
     CommandResult rollbackOverlay(const std::string& proposalId);
+    CommandResult commitReflection(const EvolutionRequest& request,
+                                   const ProviderResponse& response,
+                                   const std::string& provider);
+    CommandResult startAdoption(const std::string& npcId, const std::string& proposalId);
+    CommandResult transitionAdoption(const std::string& npcId, const std::string& proposalId,
+                                      InnovationAdoptionStatus status, const std::string& reason);
 
 private:
     WorldService& world_;

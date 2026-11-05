@@ -65,6 +65,22 @@ Experience experienceFromJson(const Json& json) {
     return experience;
 }
 
+Json innovationAdoptionJson(const InnovationAdoptionState& adoption) {
+    return Json{{"proposal_id", adoption.proposalId}, {"recipe_id", adoption.recipeId},
+                {"status", toString(adoption.status)}, {"started_at", adoption.startedAt.minute},
+                {"updated_at", adoption.updatedAt.minute}, {"reason", adoption.reason}};
+}
+
+InnovationAdoptionState innovationAdoptionFromJson(const Json& json) {
+    return InnovationAdoptionState{
+        jsonValue<std::string>(json, "proposal_id", ""),
+        jsonValue<std::string>(json, "recipe_id", ""),
+        innovationAdoptionStatusFromString(jsonValue<std::string>(json, "status", "pending")),
+        GameTime{jsonValue<std::int64_t>(json, "started_at", -1)},
+        GameTime{jsonValue<std::int64_t>(json, "updated_at", -1)},
+        jsonValue<std::string>(json, "reason", "")};
+}
+
 Json stimulusJson(const ExternalStimulus& stimulus) {
     return Json{{"id", stimulus.id}, {"source_event", stimulus.sourceEvent},
                 {"source_sequence", stimulus.sourceSequence}, {"category", stimulus.category},
@@ -263,12 +279,18 @@ Json worldStateToJson(const WorldState& state) {
                         {"needs", needs},
                         {"relationships", relationships},
                         {"memories", memories}, {"knowledge", knowledge}, {"experiences", experiences},
+                        {"unresolved_issues", npc.unresolvedIssues},
+                        {"innovation_hypotheses", npc.innovationHypotheses},
+                        {"innovation_adoptions", [&npc] { Json value = Json::array(); for (const auto& adoption : npc.innovationAdoptions) value.push_back(innovationAdoptionJson(adoption)); return value; }()},
                         {"open_promises", npc.openPromises},
                         {"state_version", npc.stateVersion}, {"mode", npc.mode}, {"strategy", npc.strategy},
                         {"stimulus_sensitivity", stimulusSensitivity},
                         {"stimuli", stimuli}, {"last_autonomous_turn", npc.lastAutonomousTurn.minute},
                         {"last_simulation_tick", npc.lastSimulationTick.minute},
                         {"last_drive_tick", npc.lastDriveTick.minute},
+                        {"reflection_cursor", Json{{"last_event_sequence", npc.reflectionCursor.lastEventSequence},
+                                                     {"last_reflection_day", npc.reflectionCursor.lastReflectionDay},
+                                                     {"reflection_revision", npc.reflectionCursor.reflectionRevision}}},
                         {"activity", activity}};
     }
     Json promises = Json::object();
@@ -422,6 +444,22 @@ WorldState deserializeWorldState(const Json& json) {
         for (const auto& experience : value.value("experiences", Json::array())) {
             npc.experiences.push_back(experienceFromJson(experience));
         }
+        npc.unresolvedIssues = value.value("unresolved_issues", std::vector<std::string>{});
+        npc.innovationHypotheses = value.value("innovation_hypotheses", std::vector<Json>{});
+        if (npc.innovationHypotheses.size() > 8) {
+            throw std::runtime_error("snapshot NPC innovation hypotheses exceed the bounded limit");
+        }
+        for (const auto& hypothesis : npc.innovationHypotheses) {
+            if (!hypothesis.is_object()) throw std::runtime_error("snapshot NPC innovation hypothesis must be an object");
+        }
+        const auto adoptions = value.value("innovation_adoptions", Json::array());
+        if (!adoptions.is_array() || adoptions.size() > 8) {
+            throw std::runtime_error("snapshot NPC innovation adoptions exceed the bounded limit");
+        }
+        for (const auto& adoption : adoptions) {
+            if (!adoption.is_object()) throw std::runtime_error("snapshot NPC innovation adoption must be an object");
+            npc.innovationAdoptions.push_back(innovationAdoptionFromJson(adoption));
+        }
         npc.openPromises = value.value("open_promises", std::vector<std::string>{});
         npc.stateVersion = jsonValue<std::uint64_t>(value, "state_version", 0);
         npc.mode = jsonValue<std::string>(value, "mode", "working");
@@ -437,6 +475,14 @@ WorldState deserializeWorldState(const Json& json) {
         npc.lastSimulationTick = GameTime{jsonValue<std::int64_t>(value, "last_simulation_tick", -1)};
         npc.lastDriveTick = GameTime{jsonValue<std::int64_t>(value, "last_drive_tick",
                                                             value.value("last_simulation_tick", -1))};
+        const auto reflection = value.value("reflection_cursor", Json::object());
+        if (!reflection.is_object()) throw std::runtime_error("snapshot reflection_cursor must be an object");
+        npc.reflectionCursor.lastEventSequence =
+            jsonValue<std::uint64_t>(reflection, "last_event_sequence", 0);
+        npc.reflectionCursor.lastReflectionDay =
+            jsonValue<std::int64_t>(reflection, "last_reflection_day", -1);
+        npc.reflectionCursor.reflectionRevision =
+            jsonValue<std::uint64_t>(reflection, "reflection_revision", 0);
         const auto activity = value.value("activity", Json::object());
         if (activity.is_object() && activity.contains("goal") && activity.at("goal").is_object()) {
             const auto& goal = activity.at("goal");
@@ -524,6 +570,14 @@ WorldState deserializeWorldState(const Json& json) {
         state.exchangeContracts[it.key()] = std::move(contract);
     }
     for (const auto& event : json.value("events", Json::array())) state.events.push_back(worldEventFromJson(event));
+    for (const auto& [id, npc] : state.npcs) {
+        if (npc.reflectionCursor.lastEventSequence > state.events.size()) {
+            throw std::runtime_error("snapshot NPC " + id + " reflection cursor is beyond the event history");
+        }
+        if (npc.reflectionCursor.lastReflectionDay > state.now.day()) {
+            throw std::runtime_error("snapshot NPC " + id + " reflection cursor is from the future");
+        }
+    }
     for (const auto& turn : json.value("processed_turn_ids", std::vector<std::string>{})) {
         state.processedTurnIds.insert(turn);
     }

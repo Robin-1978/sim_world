@@ -3,6 +3,7 @@
 #include "world/meta_actions.hpp"
 #include "evolution/evolution.hpp"
 #include "provider/turn_queue.hpp"
+#include "world/world_evolution_system.hpp"
 
 #if defined(TIDE_MARKS_HAS_BULLET)
 #include "physics/bullet_physics.hpp"
@@ -358,10 +359,61 @@ public:
         return ProviderResponse{true, {}, proposal.at("rationale").get<std::string>(), {}, proposal};
     }
 
+    ProviderResponse proposeReflection(const Json& context, const std::string& targetNpcId) override {
+        observedReflectionTargets.push_back(targetNpcId);
+        Json result{{"schema_version", 1}, {"npc_id", targetNpcId},
+                    {"evidence_event_sequences", Json::array()},
+                    {"cognition_updates", Json{{"belief_updates", Json::array()},
+                                                   {"experience_updates", Json::array()},
+                                                   {"memory_updates", Json::array()}}},
+                    {"strategy_adjustment", Json::object()}, {"goal_adjustment", Json::object()},
+                    {"unresolved_issues", context.value("unresolved_issues", Json::array())},
+                    {"resolved_issues", Json::array()}, {"innovation_hypotheses", Json::array()},
+                    {"innovation_actions", Json::array()},
+                    {"rationale", "No durable update was justified by this reflection window."}};
+        ProviderResponse response;
+        response.ok = true;
+        response.reflectionResult = std::move(result);
+        return response;
+    }
+
     [[nodiscard]] std::string name() const override { return "evolution-test-llm"; }
     std::string observedLevel;
     Json observedContext = Json::object();
     std::vector<std::string> observedTargets;
+    std::vector<std::string> observedReflectionTargets;
+};
+
+class ReflectionProvider final : public IProvider {
+public:
+    ProviderResponse decide(const DecisionContext& context, const std::string& input) override {
+        return MockProvider{}.decide(context, input);
+    }
+
+    ProviderResponse proposeReflection(const Json& context, const std::string& targetNpcId) override {
+        reflectionContexts.push_back(context);
+        const auto evidence = context.value("new_evidence", Json::array());
+        const auto source = evidence.empty() ? 0ULL : evidence.at(0).at("sequence").get<std::uint64_t>();
+        Json result{{"schema_version", 1}, {"npc_id", targetNpcId},
+                    {"evidence_event_sequences", source == 0 ? Json::array() : Json::array({source})},
+                    {"cognition_updates", Json{{"belief_updates", source == 0 ? Json::array() : Json::array({Json{
+                         {"subject", "harbor"}, {"predicate", "safe"}, {"value", "known"},
+                         {"source_sequence", source}, {"scope", "witness"}, {"confidence", 0.8}}})},
+                                                   {"experience_updates", Json::array()}, {"memory_updates", Json::array()}}},
+                    {"strategy_adjustment", Json{{"strategy", "reflective"}}},
+                    {"goal_adjustment", Json::object()},
+                    {"unresolved_issues", Json::array({"verify the harbor signal"})},
+                    {"resolved_issues", Json::array()}, {"innovation_hypotheses", Json::array()},
+                    {"innovation_actions", Json::array()},
+                    {"rationale", "The evidence supports a bounded belief update."}};
+        ProviderResponse response;
+        response.ok = true;
+        response.reflectionResult = std::move(result);
+        return response;
+    }
+
+    [[nodiscard]] std::string name() const override { return "reflection-test-llm"; }
+    std::vector<Json> reflectionContexts;
 };
 
 void village_has_three_independent_npcs() {
@@ -1438,7 +1490,7 @@ void snapshot_and_replay_are_deterministic() {
                !replayLines.at(1).at("events").empty(),
            "replay writes one baseline and one aggregate commit frame instead of one record per tick");
     const auto snapshot = service.snapshotJson();
-    expect(snapshot.at("save_schema_version").get<int>() == 18 &&
+    expect(snapshot.at("save_schema_version").get<int>() == 19 &&
                snapshot.at("world_revision").is_number_unsigned(),
            "snapshot declares its schema and explicit world revision");
     expect(snapshot.at("instance_id") == "tide_marks.village.instance",
@@ -1448,6 +1500,35 @@ void snapshot_and_replay_are_deterministic() {
     const auto& savedNpc = snapshot.at("npcs").at("mira");
     expect(savedNpc.contains("definition_id") && !savedNpc.contains("definition"),
            "snapshot stores a content reference instead of a definition copy");
+    auto cursorSnapshot = service.snapshotJson();
+    cursorSnapshot["npcs"]["mira"]["reflection_cursor"] =
+        Json{{"last_event_sequence", service.state().events.size()},
+             {"last_reflection_day", service.state().now.day()},
+             {"reflection_revision", service.state().revision}};
+    cursorSnapshot["npcs"]["mira"]["innovation_adoptions"] = Json::array({
+        Json{{"proposal_id", "innovation.test"}, {"recipe_id", "private_recipe"},
+             {"status", "resource_blocked"}, {"started_at", service.state().now.minute},
+             {"updated_at", service.state().now.minute}, {"reason", "waiting for timber"}}});
+    auto restoredCursor = WorldService::fromSnapshot(cursorSnapshot);
+    expect(restoredCursor.state().npcs.at("mira").reflectionCursor.lastEventSequence ==
+                   service.state().events.size() &&
+               restoredCursor.state().npcs.at("mira").reflectionCursor.lastReflectionDay ==
+                   service.state().now.day() &&
+               restoredCursor.state().npcs.at("mira").innovationAdoptions.size() == 1 &&
+               restoredCursor.state().npcs.at("mira").innovationAdoptions.front().status ==
+                   InnovationAdoptionStatus::ResourceBlocked,
+           "daily reflection cursors and adoption state survive snapshot restore at an explicit event boundary");
+    expect(restoredCursor.transitionInnovationAdoption("mira", "innovation.test",
+                                                       InnovationAdoptionStatus::Executing,
+                                                       "timber arrived").accepted &&
+               restoredCursor.transitionInnovationAdoption("mira", "innovation.test",
+                                                           InnovationAdoptionStatus::Completed,
+                                                           "recipe finished").accepted,
+           "resource-blocked innovation adoption can resume and complete through governed transitions");
+    expect(!restoredCursor.transitionInnovationAdoption("mira", "innovation.test",
+                                                        InnovationAdoptionStatus::Executing,
+                                                        "retry").accepted,
+           "completed innovation adoption cannot be silently reopened");
     auto brokenSnapshot = service.snapshotJson();
     brokenSnapshot["npcs"]["mira"]["definition_id"] = "missing_definition";
     bool rejected = false;
@@ -1583,7 +1664,7 @@ void sqlite_persistence_roundtrips_versioned_artifacts() {
     const auto path = (std::filesystem::temp_directory_path() / "tide_marks-persistence-test.sqlite").string();
     std::filesystem::remove(path);
     SqlitePersistence persistence(path);
-    const Json snapshot{{"save_schema_version", 18}, {"world_revision", 4}, {"content_version", "test-v1"}};
+    const Json snapshot{{"save_schema_version", 19}, {"world_revision", 4}, {"content_version", "test-v1"}};
     const std::vector<Json> firstReplay{
         Json{{"kind", "replay_header"}, {"schema_version", 2}},
         Json{{"kind", "transaction"}, {"world_revision", 4}}};
@@ -2733,6 +2814,78 @@ void evolution_sandbox_isolated_and_versioned() {
     std::filesystem::remove(path);
 }
 
+void innovation_reflection_lifecycle_is_governed() {
+    const auto service = WorldService::load(ContentPackLoader::defaultRoot(), std::make_unique<MockProvider>());
+    const auto evidence = service.state().events.back().sequence;
+    const Json innovationSpec{
+        {"hypothesis", "A private repair rehearsal can reduce repeated ferry failures."},
+        {"novelty_basis", "new_combination"},
+        {"operation_ids", Json::array({"private_repair_rehearsal"})},
+        {"expected_benefits", Json::array({"lower repeated failure cost"})},
+        {"risks", Json::array({"consumes time without changing shared infrastructure"})},
+        {"test_plan", Json{{"horizon_minutes", 120}, {"metrics", Json::array({"events_added", "resource_total"})},
+                             {"baseline", "Mira uses the existing ferry repair routine."},
+                             {"scenario", "Mira rehearses a private repair behavior."},
+                             {"expected_metrics", Json{{"events_added", 2.0}, {"resource_total", 100.0}}},
+                             {"constraints", Json::array({"do not reduce record integrity"})},
+                             {"resource_budget", Json{{"resource_total", 5.0}}},
+                             {"success_criteria", "The rehearsal completes within the horizon."},
+                             {"failure_criteria", "The rehearsal exceeds its resource budget."}}}};
+    EvolutionProposal level1{
+        "innovation.reflection.private", "innovation", "llm", service.content().contentVersion,
+        service.state().revision,
+        Json::array({Json{{"operation", "register_behavior_recipe"}, {"id", "private_repair_rehearsal"},
+                         {"available_to", Json::array({"mira"})},
+                         {"root", Json{{"type", "meta_action"}, {"id", "root"},
+                                       {"name", "relieve_need"}}}}})};
+    level1.evidenceEventSequences = {evidence};
+    level1.evolutionLevel = "level1";
+    level1.targetNpcId = "mira";
+    level1.innovation = innovationSpec;
+    expect(EvolutionManager::validate(level1, service.content(), service.state()).valid,
+           "daily reflection can produce a private Level 1 innovation hypothesis");
+    auto sharedPrivate = level1;
+    sharedPrivate.id = "innovation.reflection.leak";
+    sharedPrivate.operations.at(0)["available_to"] = Json::array({"mira", "lorn"});
+    expect(EvolutionManager::validate(sharedPrivate, service.content(), service.state()).code ==
+               "innovation_target_mismatch",
+           "Level 1 innovation cannot silently propagate a private recipe to peers");
+
+    EvolutionProposal level2{
+        "innovation.world.shared", "innovation", "llm", service.content().contentVersion,
+        service.state().revision,
+        Json::array({Json{{"operation", "create_entity_archetype"}, {"id", "innovation_workshop"},
+                         {"kind", "facility"}, {"default_metadata", Json{{"purpose", "experimentation"}}}}})};
+    level2.evidenceEventSequences = {evidence};
+    level2.innovation = Json{
+        {"hypothesis", "A shared workshop can make successful behavior experiments reusable."},
+        {"novelty_basis", "new_archetype"},
+        {"operation_ids", Json::array({"innovation_workshop"})},
+        {"expected_benefits", Json::array({"increase reusable experiments"})},
+        {"risks", Json::array({"uses scarce construction capacity"})},
+        {"test_plan", Json{{"horizon_minutes", 240}, {"metrics", Json::array({"npc_count", "events_added"})},
+                             {"baseline", "NPCs use separate authored routines."},
+                             {"scenario", "NPCs use a shared workshop recipe."},
+                             {"expected_metrics", Json{{"npc_count", 3.0}, {"events_added", 4.0}}},
+                             {"constraints", Json::array({"do not reduce information reliability"})},
+                             {"resource_budget", Json{{"resource_total", 12.0}}},
+                             {"success_criteria", "Shared work increases measured coordination."},
+                             {"failure_criteria", "Coordination falls below the baseline."}}}};
+    expect(EvolutionManager::validate(level2, service.content(), service.state()).valid,
+           "Level 2 can promote a bounded innovation hypothesis into shared declarative content");
+    const auto roundTrip = EvolutionManager::fromJson(EvolutionManager::toJson(level2));
+    expect(roundTrip.kind == "innovation" && roundTrip.innovation == level2.innovation &&
+               roundTrip.innovationStatus == "hypothesized",
+           "innovation metadata and lifecycle persist through proposal storage JSON");
+    auto lifecycle = level2;
+    expect(EvolutionManager::transitionInnovation(lifecycle, "refining").valid &&
+               EvolutionManager::transitionInnovation(lifecycle, "evaluated").valid &&
+               EvolutionManager::transitionInnovation(lifecycle, "accepted").valid,
+           "innovation hypotheses follow the explicit reflection-to-acceptance lifecycle");
+    expect(!EvolutionManager::transitionInnovation(lifecycle, "refining").valid,
+           "accepted hypotheses cannot be silently reopened by a later reflection");
+}
+
 void evolved_behavior_recipe_is_bound_to_declared_npcs() {
     auto service = WorldService::load(ContentPackLoader::defaultRoot(), std::make_unique<MockProvider>());
     EvolutionProposal proposal{
@@ -2924,13 +3077,13 @@ void automatic_evolution_uses_async_llm_and_audits_sandbox() {
     const auto toBoundary = kMinutesPerDay - (service.state().now.minute % kMinutesPerDay);
     service.advanceMinutes(toBoundary);
     service.waitForAsyncTurns(1000);
-    expect(providerRaw->observedLevel == "level1" && providerRaw->observedTargets.size() == 3 &&
-               std::set<std::string>(providerRaw->observedTargets.begin(), providerRaw->observedTargets.end()) ==
+    expect(providerRaw->observedReflectionTargets.size() == 3 &&
+               std::set<std::string>(providerRaw->observedReflectionTargets.begin(), providerRaw->observedReflectionTargets.end()) ==
                    std::set<std::string>{"eve", "lorn", "mira"},
-           "a configured day boundary enqueues one scoped Level 1 request for every active NPC");
+           "a configured day boundary enqueues one independent daily reflection for every active NPC");
     expect(std::any_of(service.state().events.begin(), service.state().events.end(),
-                       [](const auto& event) { return event.type == "evolution.proposal_ready"; }),
-           "an asynchronous LLM evolution proposal is validated, sandboxed, and audited");
+                       [](const auto& event) { return event.type == "reflection.committed"; }),
+           "an asynchronous LLM ReflectionResult is validated, committed, and audited");
     expect(std::none_of(service.state().events.begin(), service.state().events.end(),
                         [](const auto& event) { return event.type == "evolution.overlay_activated"; }),
            "automatic evolution never self-approves or activates an overlay");
@@ -2947,6 +3100,50 @@ void automatic_evolution_uses_async_llm_and_audits_sandbox() {
                            [](const auto& event) { return event.type == "evolution.proposal_ready" &&
                                                           event.target == "level2"; }),
            "the same configured queue also drives Level 2 world-foundation proposals through the LLM");
+}
+
+void daily_reflection_routes_updates_and_keeps_incremental_cursor() {
+    auto provider = std::make_unique<ReflectionProvider>();
+    auto* providerRaw = provider.get();
+    auto content = ContentPackLoader::load(ContentPackLoader::defaultRoot());
+    content.evolutionPolicy.enabled = true;
+    content.evolutionPolicy.level1IntervalDays = 1;
+    content.evolutionPolicy.level2IntervalDays = 0;
+    content.evolutionPolicy.maxProposalAgeMinutes = 180;
+    content.npcDeliberation.enabled = false;
+    auto service = WorldService::fromContent(content, std::move(provider));
+    service.advanceMinutes(kMinutesPerDay - (service.state().now.minute % kMinutesPerDay));
+    service.waitForAsyncTurns(1000);
+    const auto& mira = service.state().npcs.at("mira");
+    expect(mira.reflectionCursor.lastReflectionDay == 2 && mira.reflectionCursor.lastEventSequence > 0,
+           "daily reflection commits an NPC cursor at the completed event boundary");
+    expect(!mira.knowledge.empty() && mira.strategy == "reflective" &&
+               std::find(mira.unresolvedIssues.begin(), mira.unresolvedIssues.end(), "verify the harbor signal") !=
+                   mira.unresolvedIssues.end(),
+           "reflection routes sourced belief and strategy updates while retaining unresolved issues");
+    expect(service.commitDailyReflection("mira", ProviderResponse{}).code == "reflection_already_processed",
+           "replaying a same-day reflection is idempotently rejected before provider data can mutate facts");
+    const auto firstContextCount = providerRaw->reflectionContexts.size();
+    expect(firstContextCount == 3, "one reflection result is requested for each NPC");
+
+    service.advanceMinutes(kMinutesPerDay);
+    service.waitForAsyncTurns(1000);
+    expect(providerRaw->reflectionContexts.size() == 6,
+           "each NPC receives one new reflection on the next day");
+    const auto& secondContext = providerRaw->reflectionContexts.at(3);
+    expect(secondContext.at("reflection_cursor").at("last_event_sequence").get<std::uint64_t>() > 0 &&
+               !secondContext.at("unresolved_issues").empty(),
+           "the next reflection receives the persisted cursor and unresolved issue set");
+    expect(std::count_if(service.state().events.begin(), service.state().events.end(),
+                         [](const auto& event) { return event.type == "reflection.committed"; }) >= 6,
+           "reflection commits remain auditable across day boundaries");
+    const auto worldContext = WorldEvolutionSystem::proposalContext(service, "level2", "world_reflection", Json::object());
+    expect(std::all_of(worldContext.at("evidence_events").begin(), worldContext.at("evidence_events").end(),
+                       [](const auto& event) {
+                           return event.value("type", "") != "innovation.hypothesis_created" ||
+                                  !event.at("data").contains("proposal");
+                       }),
+           "Level 2 receives committed hypothesis evidence without a private Level 1 proposal payload");
 }
 
 void intelligence_profile_configures_decision_budgets() {
@@ -2981,7 +3178,11 @@ void intelligence_profile_configures_decision_budgets() {
                profile.purposes.at("decision").providerId == profile.purposes.at("world_evolution").providerId &&
                profile.purposes.at("npc_evolution").policies.at("proposal").reasoningBudgetTokens == 256 &&
                profile.purposes.at("world_evolution").policies.at("proposal").reasoningBudgetTokens == 512,
-           "provider credentials are stored on the reusable provider and are not coupled to a purpose");
+           "provider credentials are stored on the reusable provider and evolution has bounded purpose policies");
+    if (profile.purposes.contains("reflection")) {
+        expect(profile.purposes.at("reflection").policies.at("proposal").reasoningBudgetTokens == 256,
+               "the current profile gives daily reflection its own bounded reasoning policy");
+    }
     const auto provider = makeProviderFromProfile(profile, "mock");
     expect(provider->name() == "mock", "the profile provider can be overridden for offline tests");
 }
@@ -3177,6 +3378,8 @@ int main() {
         level_one_evolution_is_scoped_to_target_npc);
     run("automatic_evolution_uses_async_llm_and_audits_sandbox",
         automatic_evolution_uses_async_llm_and_audits_sandbox);
+    run("daily_reflection_routes_updates_and_keeps_incremental_cursor",
+        daily_reflection_routes_updates_and_keeps_incremental_cursor);
     run("intelligence_profile_configures_decision_budgets", intelligence_profile_configures_decision_budgets);
     run("intelligence_profile_decouples_models_from_api_keys",
         intelligence_profile_decouples_models_from_api_keys);

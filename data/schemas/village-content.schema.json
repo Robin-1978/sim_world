@@ -40,6 +40,7 @@
       "type": "object",
       "description": "World-authored role prompts imported into each instance; Runtime still enforces the operation contract.",
       "properties": {
+        "npc_reflection": {"type": "string", "minLength": 1, "maxLength": 4096},
         "npc_strategy": {"type": "string", "minLength": 1, "maxLength": 4096},
         "world_substrate": {"type": "string", "minLength": 1, "maxLength": 4096}
       },

@@ -67,8 +67,12 @@ void EvolutionQueue::run() {
 
         ProviderResponse response;
         try {
-            response = provider_.proposeEvolution(request.context, request.evolutionLevel,
-                                                  request.validationFeedback);
+            if (request.requestKind == "reflection") {
+                response = provider_.proposeReflection(request.context, request.targetNpcId);
+            } else {
+                response = provider_.proposeEvolution(request.context, request.evolutionLevel,
+                                                      request.validationFeedback);
+            }
         } catch (const std::exception& error) {
             response = ProviderResponse{false, {}, {}, std::string("provider_exception:") + error.what(), Json::object()};
         } catch (...) {

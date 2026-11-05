@@ -132,6 +132,11 @@ public:
                                                              const std::string& trigger,
                                                              const Json& validationFeedback = Json::object(),
                                                              const std::string& targetNpcId = {}) const;
+    // Explicit daily reflection entry point. It returns a structured
+    // cognition result; callers must commit it through the Runtime boundary.
+    [[nodiscard]] ProviderResponse requestDailyReflection(const std::string& targetNpcId) const;
+    CommandResult commitDailyReflection(const std::string& targetNpcId,
+                                        const ProviderResponse& response);
     // Main-thread boundary for decisions produced by the worker. Returns the
     // number of results consumed; no Provider call is performed here.
     std::size_t pumpAsyncTurns();
@@ -187,6 +192,10 @@ public:
                           const std::string& turnId = {});
     CommandResult activateOverlay(const EvolutionProposal& proposal, const EvolutionSandboxResult& sandbox);
     CommandResult rollbackOverlay(const std::string& proposalId);
+    CommandResult startInnovationAdoption(const std::string& npcId, const std::string& proposalId);
+    CommandResult transitionInnovationAdoption(const std::string& npcId, const std::string& proposalId,
+                                               InnovationAdoptionStatus status,
+                                               const std::string& reason = {});
     CommandResult assertKnownFact(const std::string& npcId, const std::string& subject,
                                   const std::string& predicate, const std::string& value,
                                   std::uint64_t sourceSequence, const std::string& scope,

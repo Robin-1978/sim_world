@@ -6,7 +6,7 @@
   "properties": {
     "schema_version": {"const": 1},
     "id": {"type": "string", "minLength": 1},
-    "kind": {"type": "string", "enum": ["content", "knowledge", "strategy", "declarative_capability"]},
+    "kind": {"type": "string", "enum": ["content", "knowledge", "strategy", "declarative_capability", "innovation"]},
     "source": {"type": "string", "minLength": 1},
     "base_content_version": {"type": "string", "minLength": 1},
     "base_world_revision": {"type": "integer", "minimum": 0},
@@ -74,13 +74,47 @@
     },
     "status": {"type": "string", "enum": ["proposed", "validated", "approved", "rejected"]},
     "target_npc": {"type": "string", "minLength": 1},
-    "evolution_level": {"type": "string", "enum": ["level1", "level2"]}
+    "evolution_level": {"type": "string", "enum": ["level1", "level2"]},
+    "innovation_status": {"enum": ["hypothesized", "refining", "evaluated", "accepted", "rejected", "abandoned"]},
+    "innovation": {
+      "type": "object",
+      "required": ["hypothesis", "novelty_basis", "operation_ids", "expected_benefits", "risks", "test_plan"],
+      "properties": {
+        "hypothesis": {"type": "string", "minLength": 1, "maxLength": 1024},
+        "novelty_basis": {"enum": ["new_combination", "new_capability", "new_archetype"]},
+        "operation_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+        "expected_benefits": {"type": "array", "minItems": 1, "maxItems": 4, "items": {"type": "string", "minLength": 1, "maxLength": 512}},
+        "risks": {"type": "array", "minItems": 1, "maxItems": 4, "items": {"type": "string", "minLength": 1, "maxLength": 512}},
+        "test_plan": {
+          "type": "object",
+          "required": ["horizon_minutes", "metrics", "baseline", "scenario", "expected_metrics", "constraints", "resource_budget", "success_criteria", "failure_criteria"],
+          "properties": {
+            "horizon_minutes": {"type": "integer", "minimum": 1, "maximum": 10080},
+            "metrics": {"type": "array", "minItems": 1, "maxItems": 6, "uniqueItems": true,
+              "items": {"enum": ["events_added", "final_revision", "npc_count", "knowledge_count", "experience_count", "advance_minutes", "resource_total"]}},
+            "baseline": {"type": "string", "minLength": 1, "maxLength": 512},
+            "scenario": {"type": "string", "minLength": 1, "maxLength": 512},
+            "expected_metrics": {"type": "object", "minProperties": 1, "maxProperties": 6, "additionalProperties": {"type": "number"}},
+            "constraints": {"type": "array", "minItems": 1, "maxItems": 6, "items": {"type": "string", "minLength": 1, "maxLength": 512}},
+            "resource_budget": {"type": "object", "minProperties": 1, "maxProperties": 8, "additionalProperties": {"type": "number", "minimum": 0, "maximum": 1000000}},
+            "success_criteria": {"type": "string", "minLength": 1, "maxLength": 512},
+            "failure_criteria": {"type": "string", "minLength": 1, "maxLength": 512}
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
   },
   "allOf": [
     {"if": {"required": ["evolution_level"], "properties": {"evolution_level": {"const": "level1"}}},
      "then": {"required": ["target_npc"]}},
     {"if": {"required": ["evolution_level"], "properties": {"evolution_level": {"const": "level2"}}},
-     "then": {"not": {"required": ["target_npc"]}}}
+     "then": {"not": {"required": ["target_npc"]}}},
+    {"if": {"properties": {"kind": {"const": "innovation"}}},
+     "then": {"required": ["innovation"], "properties": {"innovation_status": {"enum": ["hypothesized", "refining", "evaluated", "accepted", "rejected", "abandoned"]}}}},
+    {"if": {"properties": {"kind": {"const": "innovation"}, "evolution_level": {"const": "level1"}}},
+     "then": {"properties": {"innovation": {"properties": {"novelty_basis": {"enum": ["new_combination", "new_capability"]}}}}}}
   ],
   "additionalProperties": false,
   "$defs": {

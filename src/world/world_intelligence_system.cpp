@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <sstream>
 #include <thread>
 
 namespace tide_marks {
@@ -14,6 +15,19 @@ namespace tide_marks {
 namespace {
 void applyNpcSignal(NpcState& npc, NpcSignal signal) {
     npc.mode = toString(transition(npcModeFromString(npc.mode), signal));
+}
+
+std::string stablePromptHash(const std::string& value) {
+    // FNV-1a is sufficient here: this is an audit fingerprint, not a
+    // security boundary.  Keeping it local avoids exposing prompt text.
+    std::uint64_t hash = 1469598103934665603ULL;
+    for (const unsigned char byte : value) {
+        hash ^= byte;
+        hash *= 1099511628211ULL;
+    }
+    std::ostringstream output;
+    output << std::hex << hash;
+    return output.str();
 }
 }  // namespace
 
@@ -52,6 +66,11 @@ TurnRequest WorldIntelligenceSystem::makeTurnRequest(const std::string& npcId, c
     request.context.runtimeMetadata["channel_id"] = channelId;
     request.context.runtimeMetadata["trigger"] = trigger;
     request.context.runtimeMetadata["prompt_version"] = request.context.promptVersion;
+    const auto providerMetadata = world_.provider_->runtimeMetadata("decision:" + channel->second.providerPolicy);
+    if (providerMetadata.is_object()) {
+        for (const auto& [key, value] : providerMetadata.items()) request.context.runtimeMetadata[key] = value;
+    }
+    request.context.runtimeMetadata["prompt_hash"] = stablePromptHash(request.context.promptVersion);
     request.promptVersion = request.context.promptVersion;
     request.coalescePending = !channel->second.conversation &&
                               world_.content_.npcDeliberation.coalescePending;

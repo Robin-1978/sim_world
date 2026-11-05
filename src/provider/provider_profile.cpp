@@ -223,7 +223,8 @@ IntelligenceProfile loadIntelligenceProfile(const std::string& path) {
         throw std::runtime_error("intelligence profile requires non-empty purposes: " + path);
     }
     for (const auto& [purpose, value] : root.at("purposes").items()) {
-        if (purpose != "decision" && purpose != "npc_evolution" && purpose != "world_evolution") {
+        if (purpose != "decision" && purpose != "npc_evolution" && purpose != "reflection" &&
+            purpose != "world_evolution") {
             throw std::runtime_error("unsupported purpose '" + purpose + "': " + path);
         }
         auto binding = readPurposeProvider(value, purpose, path);
@@ -261,6 +262,7 @@ std::unique_ptr<IProvider> makeProviderFromProfile(const IntelligenceProfile& pr
             throw std::runtime_error("llama provider requires model and base_url in the intelligence profile");
         }
         LlamaCppConfig config;
+        config.profileId = profile.id;
         config.baseUrl = decisionProvider->second.baseUrl;
         config.model = decisionProvider->second.model;
         config.apiKeyEnv = decisionProvider->second.apiKeyEnv;
@@ -271,6 +273,11 @@ std::unique_ptr<IProvider> makeProviderFromProfile(const IntelligenceProfile& pr
         config.decisionPolicies = decisionPurpose->second.policies;
         config.purposePolicies.emplace("npc_evolution",
                                       profile.purposes.at("npc_evolution").policies.at("proposal"));
+        const auto reflectionPurpose = profile.purposes.find("reflection");
+        const auto& reflectionPolicy = reflectionPurpose == profile.purposes.end()
+                                           ? config.fallbackPolicy
+                                           : reflectionPurpose->second.policies.at("proposal");
+        config.purposePolicies.emplace("reflection", reflectionPolicy);
         config.purposePolicies.emplace("world_evolution",
                                       profile.purposes.at("world_evolution").policies.at("proposal"));
         config.fallbackPolicy = config.decisionPolicies.begin()->second;

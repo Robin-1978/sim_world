@@ -20,6 +20,10 @@ struct EvolutionRequest {
     std::string key;
     std::string evolutionLevel;
     std::string targetNpcId;
+    // `evolution` asks for an EvolutionProposal; `reflection` asks for the
+    // independent DailyReflection result. Both share one serial provider
+    // lane so local llama.cpp is never called concurrently.
+    std::string requestKind{"evolution"};
     std::string trigger;
     std::string baseContentVersion;
     std::uint64_t baseWorldRevision{0};

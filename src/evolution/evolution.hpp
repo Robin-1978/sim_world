@@ -4,6 +4,7 @@
 #include "core/types.hpp"
 
 #include <string>
+#include <set>
 #include <vector>
 
 namespace tide_marks {
@@ -11,6 +12,11 @@ namespace tide_marks {
 class WorldService;
 
 enum class EvolutionProposalStatus { Proposed, Validated, Approved, Rejected };
+
+// Innovation has a longer-lived lifecycle than a one-shot evolution request:
+// a daily reflection may refine or abandon a hypothesis before it reaches the
+// normal validate -> sandbox -> approve -> overlay path.
+enum class InnovationLifecycle { Hypothesized, Refining, Evaluated, Accepted, Rejected, Abandoned };
 
 struct EvolutionProposal {
     std::string id;
@@ -28,6 +34,15 @@ struct EvolutionProposal {
     // Level 1 is an individual strategy/experience lane and must identify its
     // target NPC; Level 2 proposals intentionally leave it empty.
     std::string targetNpcId;
+    // An innovation is still a governed evolution proposal.  This envelope
+    // records the hypothesis and its bounded evaluation plan; the actual
+    // world change remains one of the registered declarative operations.
+    // Keeping it as JSON lets the content schema evolve without creating a
+    // second mutation path in Runtime Core.
+    Json innovation = Json::object();
+    // This status belongs only to the hypothesis. Overlay approval/activation
+    // and NPC adoption are separate lifecycles recorded by their own facts.
+    std::string innovationStatus{"hypothesized"};
 };
 
 struct EvolutionProposalRequestResult {
@@ -66,12 +81,18 @@ public:
 
 class EvolutionManager {
 public:
+    // The operation registry is the single source for lane membership. The
+    // provider schema and validator may add field-level rules, but neither may
+    // invent a new operation name independently.
+    [[nodiscard]] static std::set<std::string> allowedOperationIds(const std::string& evolutionLevel);
     [[nodiscard]] static EvolutionValidation validate(const EvolutionProposal& proposal,
                                                        const WorldContentPack& content,
                                                        const WorldState& state);
     [[nodiscard]] static EvolutionValidation approve(EvolutionProposal& proposal,
                                                        const std::string& approver,
                                                        bool sandboxPassed);
+    [[nodiscard]] static EvolutionValidation transitionInnovation(EvolutionProposal& proposal,
+                                                                    const std::string& nextStatus);
     [[nodiscard]] static EvolutionProposal fromJson(const Json& value);
     [[nodiscard]] static Json toJson(const EvolutionProposal& proposal);
     // Converts one provider payload into the governed proposal envelope. It
@@ -95,5 +116,7 @@ public:
 
 std::string toString(EvolutionProposalStatus status);
 EvolutionProposalStatus evolutionProposalStatusFromString(const std::string& value);
+std::string toString(InnovationLifecycle status);
+InnovationLifecycle innovationLifecycleFromString(const std::string& value);
 
 }  // namespace tide_marks

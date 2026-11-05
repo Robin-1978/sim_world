@@ -1,6 +1,7 @@
 #include "world/world_evolution_system.hpp"
 
 #include "evolution/evolution.hpp"
+#include "world/cognition_system.hpp"
 #include "world/world_service.hpp"
 
 #include <algorithm>
@@ -86,6 +87,25 @@ Json stimulusEvidence(const NpcState& npc) {
     return result;
 }
 
+bool isPrivateCognitiveEvent(const std::string& type);
+
+Json reflectionEvidence(const WorldState& state, const NpcState& npc) {
+    Json events = Json::array();
+    for (const auto& event : state.events) {
+        if (event.sequence <= npc.reflectionCursor.lastEventSequence) continue;
+        // The cursor is a committed boundary. The same visibility rule as
+        // Level 1 proposals applies to the incremental reflection window.
+        if (isPrivateCognitiveEvent(event.type) &&
+            event.actor != npc.definitionId && event.target != npc.definitionId &&
+            event.target != npcEntityId(npc.definitionId)) continue;
+        events.push_back(Json{{"sequence", event.sequence}, {"at", event.at.minute},
+                              {"type", event.type}, {"actor", event.actor}, {"target", event.target},
+                              {"detail", event.detail}, {"data", event.data}});
+        if (events.size() >= kMaxEvolutionEvidenceEntries * 4) break;
+    }
+    return events;
+}
+
 bool isPrivateCognitiveEvent(const std::string& type) {
     // These event families are projections of one NPC's cognition.  Other
     // world facts remain public evolution evidence, while private cognitive
@@ -122,9 +142,17 @@ Json WorldEvolutionSystem::proposalContext(const WorldService& world,
     for (std::size_t index = first; index < state.events.size(); ++index) {
         const auto& event = state.events[index];
         if (!visibleInEvolutionContext(event, evolutionLevel, scopedTarget)) continue;
+        Json eventData = event.data;
+        // A Level 1 hypothesis is durable evidence for its owner. Level 2 may
+        // use the existence and source events of that hypothesis, but does not
+        // receive the owner's private proposal payload as a free broadcast.
+        if (evolutionLevel == "level2" && event.type == "innovation.hypothesis_created" &&
+            eventData.is_object()) {
+            eventData.erase("proposal");
+        }
         events.push_back(Json{{"sequence", event.sequence}, {"at", event.at.minute},
                               {"type", event.type}, {"actor", event.actor}, {"target", event.target},
-                              {"detail", event.detail}, {"data", event.data}});
+                              {"detail", event.detail}, {"data", eventData}});
     }
     Json resources = Json::object();
     for (const auto& [id, resource] : state.resources) {
@@ -159,13 +187,17 @@ Json WorldEvolutionSystem::proposalContext(const WorldService& world,
                                         {"progress", npc.activity.process->progress},
                                         {"completes_at", npc.activity.process->completesAt.minute}};
         }
+        Json reflectionCursor{{"last_event_sequence", npc.reflectionCursor.lastEventSequence},
+                              {"last_reflection_day", npc.reflectionCursor.lastReflectionDay},
+                              {"reflection_revision", npc.reflectionCursor.reflectionRevision}};
         npcs[id] = Json{{"location", npc.location}, {"mode", npc.mode}, {"strategy", npc.strategy},
                         {"goal_stage", npc.goalStage}, {"activity", activity},
                         {"needs", needs}, {"active_process", npc.activity.process.has_value()},
                         {"memory_count", npc.memories.size()}, {"knowledge_count", npc.knowledge.size()},
                         {"experience_count", npc.experiences.size()}, {"knowledge", knowledgeEvidence(npc)},
                         {"experiences", experienceEvidence(npc)}, {"memories", memoryEvidence(npc)},
-                        {"relationships", relationshipEvidence(npc)}, {"stimuli", stimulusEvidence(npc)}};
+                        {"relationships", relationshipEvidence(npc)}, {"stimuli", stimulusEvidence(npc)},
+                        {"reflection_cursor", reflectionCursor}, {"unresolved_issues", npc.unresolvedIssues}};
         if (evolutionLevel == "level1" && id == scopedTarget) {
             const auto* authored = world.authoredNpc(id);
             if (authored != nullptr) {
@@ -175,15 +207,19 @@ Json WorldEvolutionSystem::proposalContext(const WorldService& world,
             }
         }
     }
-    Json allowedOperations = evolutionLevel == "level1"
-                                 ? Json::array({"overlay_strategy", "overlay_schedule", "register_behavior_recipe"})
-                                 : Json::array({"create_entity_archetype", "register_behavior_recipe"});
+    Json allowedOperations = Json::array();
+    for (const auto& operation : EvolutionManager::allowedOperationIds(evolutionLevel)) {
+        allowedOperations.push_back(operation);
+    }
     Json contentSummary{
         {"content_id", content.id}, {"content_version", content.contentVersion},
         {"entity_archetypes", content.entityArchetypes.size()},
         {"behavior_recipes", content.behaviorRecipes.size()},
         {"strategy_rules", content.strategyRules.size()},
+        {"entity_archetype_ids", Json::array()}, {"behavior_recipe_ids", Json::array()},
         {"registered_meta_actions", Json::array()}, {"registered_conditions", Json::array()}};
+    for (const auto& archetype : content.entityArchetypes) contentSummary["entity_archetype_ids"].push_back(archetype.id);
+    for (const auto& recipe : content.behaviorRecipes) contentSummary["behavior_recipe_ids"].push_back(recipe.id);
     for (const auto& [id, definition] : content.metaActions) {
         (void)definition;
         contentSummary["registered_meta_actions"].push_back(id);
@@ -194,6 +230,9 @@ Json WorldEvolutionSystem::proposalContext(const WorldService& world,
     }
     return Json{{"trigger", trigger}, {"evolution_level", evolutionLevel},
                 {"target_npc", scopedTarget},
+                {"reflection", Json{{"cadence", "daily_boundary"},
+                                     {"innovation_optional", true},
+                                     {"purpose", evolutionLevel == "level1" ? "daily_reflection" : "world_reflection"}}},
                 {"base_content_version", content.contentVersion},
                 {"evolution_system_prompt", evolutionLevel == "level1"
                                                 ? content.npcEvolutionPrompt
@@ -201,10 +240,88 @@ Json WorldEvolutionSystem::proposalContext(const WorldService& world,
                 {"evolution_prompt_version", content.contentVersion + ":" +
                                                   (evolutionLevel == "level1" ? "npc_strategy" : "world_substrate")},
                 {"base_world_revision", state.revision},
+                {"runtime_metadata", world.provider_->runtimeMetadata(
+                    evolutionLevel == "level1" ? "npc_evolution:proposal" : "world_evolution:proposal")},
                 {"world_time", state.now.minute}, {"resources", resources},
                 {"npcs", npcs}, {"content", contentSummary},
                 {"allowed_operations", allowedOperations}, {"evidence_events", events},
                 {"validation_feedback", validationFeedback}};
+}
+
+Json WorldEvolutionSystem::reflectionContext(const WorldService& world,
+                                             const std::string& targetNpcId) {
+    const auto found = world.state_.npcs.find(targetNpcId);
+    if (found == world.state_.npcs.end()) return Json::object();
+    const auto& npc = found->second;
+    Json currentNeeds = Json::object();
+    for (const auto& [id, need] : npc.needs) {
+        currentNeeds[id] = Json{{"deficit", need.deficit}, {"sensitivity", need.sensitivity},
+                                {"confidence", need.evidenceConfidence}};
+    }
+    Json activity = Json{{"status", toString(npc.activity.status)}};
+    if (npc.activity.goal) {
+        activity["goal"] = Json{{"id", npc.activity.goal->id}, {"intent", npc.activity.goal->intent},
+                                 {"target", npc.activity.goal->target},
+                                 {"priority", npc.activity.goal->priority},
+                                 {"status", toString(npc.activity.goal->status)},
+                                 {"deadline", npc.activity.goal->deadline.minute}};
+    }
+    if (npc.activity.process) {
+        activity["process"] = Json{{"id", npc.activity.process->id},
+                                    {"action", npc.activity.process->actionId},
+                                    {"status", toString(npc.activity.process->status)},
+                                    {"progress", npc.activity.process->progress}};
+    }
+    Json contentSummary{{"content_version", world.content_.contentVersion},
+                         {"behavior_recipe_ids", Json::array()},
+                         {"entity_archetype_ids", Json::array()},
+                         {"registered_meta_actions", Json::array()},
+                         {"registered_conditions", Json::array()}};
+    for (const auto& recipe : world.content_.behaviorRecipes) {
+        contentSummary["behavior_recipe_ids"].push_back(recipe.id);
+    }
+    for (const auto& archetype : world.content_.entityArchetypes) {
+        contentSummary["entity_archetype_ids"].push_back(archetype.id);
+    }
+    for (const auto& [id, definition] : world.content_.metaActions) {
+        (void)definition;
+        contentSummary["registered_meta_actions"].push_back(id);
+    }
+    for (const auto& [id, definition] : world.content_.conditions) {
+        (void)definition;
+        contentSummary["registered_conditions"].push_back(id);
+    }
+    return Json{{"schema_version", 1}, {"trigger", "daily_reflection"},
+                {"target_npc", targetNpcId}, {"base_world_revision", world.state_.revision},
+                {"world_time", world.state_.now.minute},
+                {"runtime_metadata", world.provider_->runtimeMetadata("reflection:proposal")},
+                {"reflection_prompt", world.content_.npcReflectionPrompt.empty()
+                                           ? world.content_.npcEvolutionPrompt
+                                           : world.content_.npcReflectionPrompt},
+                {"current_state", Json{{"location", npc.location}, {"mode", npc.mode},
+                                        {"strategy", npc.strategy}, {"goal_stage", npc.goalStage},
+                                        {"needs", currentNeeds}, {"activity", activity},
+                                        {"memory_count", npc.memories.size()},
+                                        {"knowledge", knowledgeEvidence(npc)},
+                                        {"experiences", experienceEvidence(npc)},
+                                        {"memories", memoryEvidence(npc)},
+                                        {"relationships", relationshipEvidence(npc)},
+                                        {"stimuli", stimulusEvidence(npc)},
+                                        {"pending_innovation_hypotheses", npc.innovationHypotheses},
+                                        {"innovation_adoptions", [&npc] { Json value = Json::array(); for (const auto& adoption : npc.innovationAdoptions) value.push_back(Json{{"proposal_id", adoption.proposalId}, {"recipe_id", adoption.recipeId}, {"status", toString(adoption.status)}, {"reason", adoption.reason}}); return value; }()}}},
+                {"reflection_cursor", Json{{"last_event_sequence", npc.reflectionCursor.lastEventSequence},
+                                             {"last_reflection_day", npc.reflectionCursor.lastReflectionDay},
+                                             {"reflection_revision", npc.reflectionCursor.reflectionRevision}}},
+                {"new_evidence", reflectionEvidence(world.state_, npc)},
+                {"unresolved_issues", npc.unresolvedIssues},
+                {"pending_innovation_hypotheses", npc.innovationHypotheses}, {"content", contentSummary}};
+}
+
+ProviderResponse WorldEvolutionSystem::requestReflection(const WorldService& world,
+                                                         const std::string& targetNpcId) {
+    const auto context = reflectionContext(world, targetNpcId);
+    if (context.empty()) return ProviderResponse{false, {}, {}, "unknown_npc", Json::object(), Json::object()};
+    return world.provider_->proposeReflection(context, targetNpcId);
 }
 
 ProviderResponse WorldEvolutionSystem::requestProposal(const WorldService& world,
@@ -234,8 +351,12 @@ void WorldEvolutionSystem::scheduleAutomatic() {
         if (intervalDays <= 0 || day % intervalDays != 0) return;
         const std::string key = "day:" + std::to_string(day) + ":" + level + ":" + targetNpcId;
         if (world_.content_.evolutionPolicy.coalescePending && world_.pendingEvolutionKeys_.contains(key)) return;
-        const std::string trigger = "day_boundary:" + std::to_string(day);
-        const auto context = proposalContext(world_, level, trigger, Json::object(), targetNpcId);
+        const std::string trigger = (level == "level1" ? "daily_reflection:" : "world_reflection:") +
+                                    std::to_string(day);
+        const bool reflection = level == "level1";
+        const auto context = reflection
+                                 ? reflectionContext(world_, targetNpcId)
+                                 : proposalContext(world_, level, trigger, Json::object(), targetNpcId);
         if (context.empty()) return;
         EvolutionRequest request;
         request.requestId = "evolution:auto:" + level + ":" + std::to_string(day) + ":" +
@@ -243,6 +364,7 @@ void WorldEvolutionSystem::scheduleAutomatic() {
         request.key = key;
         request.evolutionLevel = level;
         request.targetNpcId = targetNpcId;
+        request.requestKind = reflection ? "reflection" : "evolution";
         request.trigger = trigger;
         request.baseContentVersion = world_.content_.contentVersion;
         request.baseWorldRevision = world_.state_.revision;
@@ -284,9 +406,27 @@ std::size_t WorldEvolutionSystem::pumpAsyncProposals() {
             data["base_content_version"] = queued.request.baseContentVersion;
             data["base_world_revision"] = queued.request.baseWorldRevision;
             data["attempt"] = queued.request.attempt;
+            data["request_kind"] = queued.request.requestKind;
             data["provider"] = queued.provider;
             world_.addEvent(type, kWorldActor, queued.request.evolutionLevel, detail, std::move(data));
         };
+        if (queued.request.requestKind == "reflection") {
+            if (queued.request.targetNpcId.empty() || !world_.hasNpc(queued.request.targetNpcId)) {
+                audit("reflection.rejected", "The Runtime rejected a reflection for an unknown NPC",
+                      Json{{"code", "unknown_npc"}});
+            } else if (!queued.response.ok) {
+                audit("reflection.failed", "The configured LLM did not return a daily reflection",
+                      Json{{"error", queued.response.error.empty() ? "provider_unavailable" : queued.response.error}});
+            } else {
+                const auto result = commitReflection(queued.request, queued.response, queued.provider);
+                if (!result.accepted) {
+                    audit("reflection.rejected", "The Runtime rejected a structured daily reflection",
+                          Json{{"code", result.code}, {"message", result.message}});
+                }
+            }
+            finish();
+            continue;
+        }
         // Evolution is a proposal, not an intent that immediately starts an
         // activity. Unrelated committed facts may arrive while the model is
         // thinking; the proposal is rebased through current validation and
@@ -362,6 +502,356 @@ std::size_t WorldEvolutionSystem::pumpAsyncProposals() {
         }
     }
     return consumed;
+}
+
+CommandResult WorldEvolutionSystem::commitReflection(const EvolutionRequest& request,
+                                                     const ProviderResponse& response,
+                                                     const std::string& provider) {
+    WorldService::TransactionScope transaction(world_);
+    const auto npcFound = world_.state_.npcs.find(request.targetNpcId);
+    if (npcFound == world_.state_.npcs.end()) return world_.reject("unknown_npc", "Reflection target does not exist.");
+    auto& npc = npcFound->second;
+    if (npc.reflectionCursor.lastReflectionDay >= world_.state_.now.day()) {
+        return world_.reject("reflection_already_processed", "This NPC already has a committed reflection for the current day.");
+    }
+    if (world_.content_.contentVersion != request.baseContentVersion) {
+        return world_.reject("reflection_stale", "Reflection context no longer matches the current content version.");
+    }
+    if (!response.reflectionResult.is_object()) {
+        return world_.reject("invalid_reflection", "The provider returned no structured reflection result.");
+    }
+    const auto& result = response.reflectionResult;
+    if (result.value("schema_version", 1) != 1 || result.value("npc_id", request.targetNpcId) != request.targetNpcId) {
+        return world_.reject("invalid_reflection_identity", "Reflection identity or schema version is invalid.");
+    }
+    const std::uint64_t boundarySequence = world_.state_.events.empty() ? 0 : world_.state_.events.back().sequence;
+    std::set<std::uint64_t> evidence;
+    const auto evidenceJson = result.value("evidence_event_sequences", Json::array());
+    if (!evidenceJson.is_array() || evidenceJson.size() > 32) {
+        return world_.reject("invalid_reflection_evidence", "Reflection evidence must be a bounded array.");
+    }
+    for (const auto& item : evidenceJson) {
+        if (!item.is_number_unsigned()) return world_.reject("invalid_reflection_evidence", "Reflection evidence must use event sequences.");
+        const auto sequence = item.get<std::uint64_t>();
+        if (sequence <= npc.reflectionCursor.lastEventSequence || sequence > boundarySequence ||
+            !evidence.insert(sequence).second) {
+            return world_.reject("invalid_reflection_evidence", "Reflection evidence must be new, committed and unique.");
+        }
+        const auto event = std::find_if(world_.state_.events.begin(), world_.state_.events.end(),
+                                       [sequence](const auto& candidate) { return candidate.sequence == sequence; });
+        const bool privateEvent = event != world_.state_.events.end() &&
+                                  (event->type.rfind("memory.", 0) == 0 ||
+                                   event->type.rfind("knowledge.", 0) == 0 ||
+                                   event->type.rfind("experience.", 0) == 0 ||
+                                   event->type == "drive.adapted");
+        if (event == world_.state_.events.end() ||
+            (privateEvent && event->actor != request.targetNpcId && event->target != request.targetNpcId &&
+             event->target != npcEntityId(request.targetNpcId))) {
+            return world_.reject("reflection_private_evidence", "A reflection cannot cite another NPC's private cognition.");
+        }
+    }
+    const auto hasSource = [&evidence, boundarySequence, &npc](std::uint64_t sequence) {
+        return sequence > npc.reflectionCursor.lastEventSequence && sequence <= boundarySequence && evidence.contains(sequence);
+    };
+    const auto boundedText = [](const Json& value, const char* key, std::size_t max) {
+        return value.is_object() && value.contains(key) && value.at(key).is_string() &&
+               !value.at(key).get<std::string>().empty() && value.at(key).get<std::string>().size() <= max;
+    };
+    const auto cognition = result.value("cognition_updates", Json::object());
+    if (!cognition.is_object()) return world_.reject("invalid_reflection_cognition", "cognition_updates must be an object.");
+    const auto beliefs = cognition.value("belief_updates", Json::array());
+    const auto experiences = cognition.value("experience_updates", Json::array());
+    const auto memories = cognition.value("memory_updates", Json::array());
+    if (!beliefs.is_array() || !experiences.is_array() || !memories.is_array() ||
+        beliefs.size() > 8 || experiences.size() > 8 || memories.size() > 8) {
+        return world_.reject("invalid_reflection_cognition", "Reflection cognition updates exceed bounded limits.");
+    }
+    for (const auto& item : beliefs) {
+        if (!boundedText(item, "subject", 128) || !boundedText(item, "predicate", 128) ||
+            !boundedText(item, "value", 512) || !item.contains("source_sequence") ||
+            !item.at("source_sequence").is_number_unsigned() || !item.contains("confidence") ||
+            !item.at("confidence").is_number() || item.at("confidence").get<double>() < 0.0 ||
+            item.at("confidence").get<double>() > 1.0 ||
+            !hasSource(item.at("source_sequence").get<std::uint64_t>())) {
+            return world_.reject("invalid_reflection_cognition", "Belief updates require bounded sourced fields.");
+        }
+    }
+    for (const auto& item : experiences) {
+        if (!boundedText(item, "domain", 128) || !boundedText(item, "trigger", 256) ||
+            !boundedText(item, "action", 128) || !boundedText(item, "outcome", 512) ||
+            !item.contains("source_sequence") || !item.at("source_sequence").is_number_unsigned() ||
+            !item.contains("confidence") || !item.at("confidence").is_number() ||
+            item.at("confidence").get<double>() < 0.0 || item.at("confidence").get<double>() > 1.0 ||
+            !hasSource(item.at("source_sequence").get<std::uint64_t>())) {
+            return world_.reject("invalid_reflection_cognition", "Experience updates require bounded sourced fields.");
+        }
+    }
+    for (const auto& item : memories) {
+        if (!boundedText(item, "text", 512) || !item.contains("source_sequence") ||
+            !item.at("source_sequence").is_number_unsigned() ||
+            (item.contains("confidence") && (!item.at("confidence").is_number() ||
+                                              item.at("confidence").get<double>() < 0.0 ||
+                                              item.at("confidence").get<double>() > 1.0)) ||
+            !hasSource(item.at("source_sequence").get<std::uint64_t>())) {
+            return world_.reject("invalid_reflection_cognition", "Memory updates require a committed source event.");
+        }
+    }
+    const auto strategy = result.value("strategy_adjustment", Json::object());
+    if (!strategy.is_object() || (strategy.contains("strategy") &&
+        (!strategy.at("strategy").is_string() || strategy.at("strategy").get<std::string>().empty() ||
+         strategy.at("strategy").get<std::string>().size() > 128))) {
+        return world_.reject("invalid_reflection_strategy", "Strategy adjustment must be a bounded string.");
+    }
+    const auto goal = result.value("goal_adjustment", Json::object());
+    if (!goal.is_object()) return world_.reject("invalid_reflection_goal", "Goal adjustment must be an object.");
+    if (goal.contains("priority_delta") && (!goal.at("priority_delta").is_number() ||
+        goal.at("priority_delta").get<double>() < -1.0 || goal.at("priority_delta").get<double>() > 1.0)) {
+        return world_.reject("invalid_reflection_goal", "Goal priority_delta must be bounded.");
+    }
+    if (goal.contains("status") && (!goal.at("status").is_string() || goal.at("status") != "cancelled")) {
+        return world_.reject("invalid_reflection_goal", "Only a governed cancellation may be requested by reflection.");
+    }
+    const auto openIssues = result.value("unresolved_issues", Json::array());
+    const auto resolvedIssues = result.value("resolved_issues", Json::array());
+    if (!openIssues.is_array() || !resolvedIssues.is_array() || openIssues.size() > 16 || resolvedIssues.size() > 16) {
+        return world_.reject("invalid_reflection_issues", "Reflection issue lists are bounded arrays.");
+    }
+    std::set<std::string> issueSet(npc.unresolvedIssues.begin(), npc.unresolvedIssues.end());
+    for (const auto& item : openIssues) {
+        if (!item.is_string() || item.get<std::string>().empty() || item.get<std::string>().size() > 256) {
+            return world_.reject("invalid_reflection_issues", "Unresolved issue text must be bounded.");
+        }
+        issueSet.insert(item.get<std::string>());
+    }
+    for (const auto& item : resolvedIssues) {
+        if (!item.is_string() || !issueSet.contains(item.get<std::string>())) {
+            return world_.reject("invalid_reflection_issues", "A reflection may resolve only a persisted issue.");
+        }
+        issueSet.erase(item.get<std::string>());
+    }
+    const auto hypotheses = result.value("innovation_hypotheses", Json::array());
+    if (!hypotheses.is_array() || hypotheses.size() > 2) {
+        return world_.reject("invalid_reflection_innovation", "Innovation hypotheses are optional and bounded.");
+    }
+    std::vector<EvolutionProposal> normalizedHypotheses;
+    for (const auto& hypothesis : hypotheses) {
+        try {
+            auto proposal = EvolutionManager::normalizeProviderProposal(hypothesis, world_, "level1", provider);
+            proposal.targetNpcId = request.targetNpcId;
+            proposal.kind = "innovation";
+            proposal.innovationStatus = "hypothesized";
+            const auto validation = EvolutionManager::validate(proposal, world_.content_, world_.state_);
+            if (!validation.valid) return world_.reject(validation.code, validation.message);
+            normalizedHypotheses.push_back(std::move(proposal));
+        } catch (const std::exception& error) {
+            return world_.reject("invalid_reflection_innovation", error.what());
+        }
+    }
+    const auto innovationActions = result.value("innovation_actions", Json::array());
+    if (!innovationActions.is_array() || innovationActions.size() > 8) {
+        return world_.reject("invalid_reflection_innovation", "Innovation lifecycle actions are bounded.");
+    }
+    struct InnovationTransition { std::size_t index; std::string next; };
+    std::vector<InnovationTransition> transitions;
+    for (const auto& action : innovationActions) {
+        if (!action.is_object() || !boundedText(action, "proposal_id", 128) ||
+            !boundedText(action, "status", 32)) {
+            return world_.reject("invalid_reflection_innovation", "Innovation lifecycle actions require bounded ids and statuses.");
+        }
+        const auto found = std::find_if(npc.innovationHypotheses.begin(), npc.innovationHypotheses.end(),
+                                        [&action](const Json& item) {
+                                            return item.value("id", "") == action.at("proposal_id").get<std::string>();
+                                        });
+        if (found == npc.innovationHypotheses.end()) {
+            return world_.reject("unknown_innovation_hypothesis", "A reflection may transition only its persisted hypotheses.");
+        }
+        const auto next = action.at("status").get<std::string>();
+        if (next != "refining" && next != "evaluated" && next != "accepted" &&
+            next != "rejected" && next != "abandoned") {
+            return world_.reject("invalid_reflection_innovation", "Innovation lifecycle status is not registered.");
+        }
+        const auto index = static_cast<std::size_t>(std::distance(npc.innovationHypotheses.begin(), found));
+        auto proposal = EvolutionManager::fromJson(*found);
+        const auto validation = EvolutionManager::transitionInnovation(proposal, next);
+        if (!validation.valid) return world_.reject(validation.code, validation.message);
+        transitions.push_back(InnovationTransition{index, next});
+    }
+    for (std::size_t index = 0; index < beliefs.size(); ++index) {
+        const auto& item = beliefs.at(index);
+        const auto applied = CognitionSystem(world_).assertKnownFact(
+            request.targetNpcId, item.at("subject"), item.at("predicate"), item.at("value"),
+            item.at("source_sequence"), item.value("scope", "inference"), item.at("confidence"),
+            request.targetNpcId, "reflection:" + request.targetNpcId + ":" + std::to_string(world_.state_.now.day()) + ":belief:" + std::to_string(index));
+        if (!applied.accepted) { transaction.rollback(); return applied; }
+    }
+    for (std::size_t index = 0; index < experiences.size(); ++index) {
+        const auto& item = experiences.at(index);
+        const auto applied = CognitionSystem(world_).recordExperience(
+            request.targetNpcId, item.at("domain"), item.at("trigger"), item.at("action"), item.at("outcome"),
+            item.at("source_sequence"), item.at("confidence"), item.value("personal", true),
+            request.targetNpcId, "reflection:" + request.targetNpcId + ":" + std::to_string(world_.state_.now.day()) + ":experience:" + std::to_string(index));
+        if (!applied.accepted) { transaction.rollback(); return applied; }
+    }
+    for (std::size_t index = 0; index < memories.size(); ++index) {
+        const auto& item = memories.at(index);
+        npc.memories.push_back(Memory{item.value("kind", "reflection"), item.at("text"), world_.state_.now,
+                                      item.value("confidence", 1.0)});
+        world_.addEvent("memory.reflected", request.targetNpcId, request.targetNpcId,
+                        "Daily reflection consolidated a sourced memory",
+                        Json{{"source_sequence", item.at("source_sequence")}, {"text", item.at("text")},
+                             {"provider", provider}});
+    }
+    for (const auto& transition : transitions) {
+        auto proposal = EvolutionManager::fromJson(npc.innovationHypotheses.at(transition.index));
+        const auto changed = EvolutionManager::transitionInnovation(proposal, transition.next);
+        if (!changed.valid) { transaction.rollback(); return world_.reject(changed.code, changed.message); }
+        npc.innovationHypotheses.at(transition.index) = EvolutionManager::toJson(proposal);
+        world_.addEvent("innovation.hypothesis_transitioned", request.targetNpcId, request.targetNpcId,
+                        "Daily reflection advanced a private innovation hypothesis",
+                        Json{{"proposal_id", proposal.id}, {"status", proposal.innovationStatus}});
+    }
+    if (strategy.contains("strategy")) {
+        npc.strategy = strategy.at("strategy");
+        ++npc.stateVersion;
+        world_.addEvent("strategy.reflected", request.targetNpcId, request.targetNpcId,
+                        "Daily reflection adjusted the NPC strategy", Json{{"strategy", npc.strategy}});
+    }
+    if (goal.contains("priority_delta") && npc.activity.goal) {
+        npc.activity.goal->priority = std::clamp(npc.activity.goal->priority + goal.at("priority_delta").get<double>(), 0.0, 1.0);
+        ++npc.stateVersion;
+        world_.addEvent("goal.reflected", request.targetNpcId, request.targetNpcId,
+                        "Daily reflection adjusted the active goal priority",
+                        Json{{"priority", npc.activity.goal->priority}});
+    }
+    if (goal.value("status", "") == "cancelled" && npc.activity.goal) {
+        setActivityStatus(npc.activity, ActivityStatus::Cancelled);
+        ++npc.stateVersion;
+        world_.addEvent("goal.cancelled", request.targetNpcId, request.targetNpcId,
+                        "Daily reflection cancelled the active goal", Json::object());
+    }
+    npc.unresolvedIssues.assign(issueSet.begin(), issueSet.end());
+    for (const auto& hypothesis : normalizedHypotheses) {
+        const auto serialized = EvolutionManager::toJson(hypothesis);
+        const auto existing = std::find_if(npc.innovationHypotheses.begin(), npc.innovationHypotheses.end(),
+                                           [&hypothesis](const Json& item) {
+                                               return item.value("id", "") == hypothesis.id;
+                                           });
+        if (existing == npc.innovationHypotheses.end()) {
+            if (npc.innovationHypotheses.size() >= 8) {
+                transaction.rollback();
+                return world_.reject("innovation_hypothesis_limit", "An NPC cannot retain more than eight pending hypotheses.");
+            }
+            npc.innovationHypotheses.push_back(serialized);
+        } else {
+            *existing = serialized;
+        }
+        world_.addEvent("innovation.hypothesis_created", request.targetNpcId, request.targetNpcId,
+                        "Daily reflection produced a governed private innovation hypothesis",
+                        Json{{"proposal_id", hypothesis.id}, {"evolution_level", "level1"},
+                             {"target_npc", request.targetNpcId},
+                             {"evidence_event_sequences", hypothesis.evidenceEventSequences},
+                             {"innovation_status", hypothesis.innovationStatus},
+                             {"proposal", serialized}, {"provider", provider}});
+    }
+    npc.reflectionCursor.lastReflectionDay = world_.state_.now.day();
+    const auto reflectionEvent = world_.addEvent(
+        "reflection.committed", request.targetNpcId, request.targetNpcId,
+        "The Runtime committed a structured daily reflection",
+        Json{{"provider", provider}, {"evidence_event_sequences", evidenceJson},
+             {"innovation_count", normalizedHypotheses.size()}, {"unresolved_issue_count", npc.unresolvedIssues.size()}});
+    npc.reflectionCursor.lastEventSequence = reflectionEvent.sequence;
+    npc.reflectionCursor.reflectionRevision = reflectionEvent.worldRevision;
+    ++npc.stateVersion;
+    return CommandResult{true, "ok", "reflection committed", reflectionEvent};
+}
+
+CommandResult WorldEvolutionSystem::startAdoption(const std::string& npcId,
+                                                  const std::string& proposalId) {
+    WorldService::TransactionScope transaction(world_);
+    const auto npcFound = world_.state_.npcs.find(npcId);
+    if (npcFound == world_.state_.npcs.end()) return world_.reject("unknown_npc", "Adoption target does not exist.");
+    const auto hypothesis = std::find_if(npcFound->second.innovationHypotheses.begin(),
+                                         npcFound->second.innovationHypotheses.end(),
+                                         [&proposalId](const Json& item) {
+                                             return item.value("id", "") == proposalId;
+                                         });
+    if (hypothesis == npcFound->second.innovationHypotheses.end()) {
+        return world_.reject("unknown_innovation_hypothesis", "Adoption requires a persisted hypothesis owned by the NPC.");
+    }
+    if (hypothesis->value("innovation_status", "hypothesized") != "accepted") {
+        return world_.reject("innovation_not_accepted", "Only an accepted innovation hypothesis can be adopted.");
+    }
+    const auto active = std::find_if(world_.state_.activeOverlays.begin(), world_.state_.activeOverlays.end(),
+                                     [&proposalId](const auto& overlay) { return overlay.proposalId == proposalId; });
+    if (active == world_.state_.activeOverlays.end()) {
+        return world_.reject("innovation_overlay_inactive", "Adoption requires an independently approved active overlay.");
+    }
+    auto& adoptions = npcFound->second.innovationAdoptions;
+    const auto existing = std::find_if(adoptions.begin(), adoptions.end(),
+                                       [&proposalId](const auto& item) { return item.proposalId == proposalId; });
+    if (existing != adoptions.end()) {
+        if (existing->status == InnovationAdoptionStatus::Executing ||
+            existing->status == InnovationAdoptionStatus::Completed) {
+            return world_.reject("innovation_adoption_exists", "That innovation is already executing or completed for this NPC.");
+        }
+        existing->status = InnovationAdoptionStatus::Executing;
+        existing->updatedAt = world_.state_.now;
+        existing->reason = "resources became available";
+        const auto event = world_.addEvent("innovation.adoption_started", npcId, proposalId,
+                                           "The NPC began adopting an accepted innovation",
+                                           Json{{"proposal_id", proposalId}, {"recipe_id", existing->recipeId}});
+        return CommandResult{true, "ok", "adoption executing", event};
+    }
+    if (adoptions.size() >= 8) return world_.reject("innovation_adoption_limit", "An NPC cannot retain more than eight adoption records.");
+    std::string recipeId;
+    const auto operations = hypothesis->value("operations", Json::array());
+    if (operations.is_array() && !operations.empty() && operations.at(0).is_object()) {
+        recipeId = operations.at(0).value("id", "");
+    }
+    InnovationAdoptionState adoption{proposalId, recipeId, InnovationAdoptionStatus::Executing,
+                                     world_.state_.now, world_.state_.now, "accepted overlay available"};
+    adoptions.push_back(adoption);
+    ++npcFound->second.stateVersion;
+    const auto event = world_.addEvent("innovation.adoption_started", npcId, proposalId,
+                                       "The NPC began adopting an accepted innovation",
+                                       Json{{"proposal_id", proposalId}, {"recipe_id", recipeId},
+                                            {"status", toString(adoption.status)}});
+    return CommandResult{true, "ok", "adoption executing", event};
+}
+
+CommandResult WorldEvolutionSystem::transitionAdoption(const std::string& npcId,
+                                                       const std::string& proposalId,
+                                                       InnovationAdoptionStatus status,
+                                                       const std::string& reason) {
+    WorldService::TransactionScope transaction(world_);
+    const auto npcFound = world_.state_.npcs.find(npcId);
+    if (npcFound == world_.state_.npcs.end()) return world_.reject("unknown_npc", "Adoption target does not exist.");
+    const auto adoption = std::find_if(npcFound->second.innovationAdoptions.begin(),
+                                       npcFound->second.innovationAdoptions.end(),
+                                       [&proposalId](const auto& item) { return item.proposalId == proposalId; });
+    if (adoption == npcFound->second.innovationAdoptions.end()) {
+        return world_.reject("unknown_innovation_adoption", "Adoption state does not exist for this NPC.");
+    }
+    const auto current = adoption->status;
+    const bool allowed =
+        (current == InnovationAdoptionStatus::Pending &&
+         (status == InnovationAdoptionStatus::ResourceBlocked || status == InnovationAdoptionStatus::Executing ||
+          status == InnovationAdoptionStatus::Abandoned)) ||
+        (current == InnovationAdoptionStatus::ResourceBlocked &&
+         (status == InnovationAdoptionStatus::Executing || status == InnovationAdoptionStatus::Abandoned)) ||
+        (current == InnovationAdoptionStatus::Executing &&
+         (status == InnovationAdoptionStatus::Completed || status == InnovationAdoptionStatus::Failed ||
+          status == InnovationAdoptionStatus::Abandoned));
+    if (!allowed) return world_.reject("invalid_innovation_adoption_transition", "Adoption lifecycle transition is not allowed.");
+    adoption->status = status;
+    adoption->updatedAt = world_.state_.now;
+    adoption->reason = reason;
+    ++npcFound->second.stateVersion;
+    const auto event = world_.addEvent("innovation.adoption_transitioned", npcId, proposalId,
+                                       "The NPC adoption lifecycle advanced",
+                                       Json{{"proposal_id", proposalId}, {"from", toString(current)},
+                                            {"to", toString(status)}, {"reason", reason}});
+    return CommandResult{true, "ok", "adoption state updated", event};
 }
 
 CommandResult WorldEvolutionSystem::activateOverlay(const EvolutionProposal& proposal,
