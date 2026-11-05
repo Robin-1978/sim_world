@@ -105,14 +105,17 @@ DialogueTurn WorldIntelligenceSystem::executeTurn(const std::string& npcId, cons
         return code == "missing_action_parameter" || code == "unknown_action_parameter" ||
                code == "invalid_action_parameter_type" || code == "unexpected_action_parameters" ||
                code == "invalid_action_parameters" || code == "invalid_action_parameter_value" ||
-               code == "invalid_expected_relief";
+               code == "invalid_expected_relief" || code == "missing_dialogue";
     };
     if (!turnResult.accepted && response.ok && world_.provider_->name() == "llama.cpp" && retryable(turnResult.error)) {
         const Json feedback{{"attempt", 1},
                             {"code", turnResult.error},
-                            {"message", "Runtime rejected a structured proposal field; repair only the declared plan input or expected relief keys."},
+                            {"message", turnResult.error == "missing_dialogue"
+                                             ? "A conversation response must contain a concise player-facing dialogue sentence."
+                                             : "Runtime rejected a structured proposal field; repair only the declared plan input or expected relief keys."},
                             {"previous_action_id", response.proposal.actionId},
-                            {"previous_parameters", response.proposal.parameters}};
+                            {"previous_parameters", response.proposal.parameters},
+                            {"previous_dialogue", response.dialogue}};
         auto repaired = world_.provider_->decide(request.context, input, feedback);
         if (repaired.ok) turnResult = commitTurn(request, std::move(repaired));
     }
@@ -204,6 +207,17 @@ DialogueTurn WorldIntelligenceSystem::commitTurn(const TurnRequest& request, Pro
             result.error = "invalid_expected_relief";
             return result;
         }
+    }
+    // A conversation turn is not successful merely because its structured
+    // action proposal is valid.  Empty or whitespace-only dialogue would make
+    // the player-facing interaction disappear while still writing a
+    // dialogue.turn event.  Keep this boundary in Runtime so every provider
+    // (including future adapters) follows the same contract; the LLM adapter
+    // receives one bounded repair opportunity in executeTurn().
+    if (channel->second.conversation &&
+        response.dialogue.find_first_not_of(" \t\r\n") == std::string::npos) {
+        result.error = "missing_dialogue";
+        return result;
     }
     if (response.proposal.actionId.empty()) {
         if (worldActionAllowed && response.proposal.worldActionRequested) {

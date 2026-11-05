@@ -351,7 +351,7 @@ ProviderResponse LlamaCppProvider::decide(const DecisionContext& context, const 
                              {"motivation", Json{{"type", "string"}}},
                              {"expected_outcome", Json{{"type", "string"}}},
                              {"confidence", Json{{"type", "number"}, {"minimum", 0.0}, {"maximum", 1.0}}},
-                             {"dialogue", Json{{"type", "string"}}},
+                             {"dialogue", Json{{"type", "string"}, {"minLength", 1}}},
                              {"cited_stimulus_ids", Json{{"type", "array"}, {"items", Json{{"type", "string"}}}}},
                              {"tradeoffs", Json{{"type", "array"}, {"items", Json{{"type", "string"}}}}},
                              {"expected_relief", Json{{"type", "object"},

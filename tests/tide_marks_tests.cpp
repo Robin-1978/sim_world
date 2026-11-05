@@ -155,6 +155,23 @@ private:
     std::string actionId_;
 };
 
+class EmptyDialogueProvider final : public IProvider {
+public:
+    ProviderResponse decide(const DecisionContext& context, const std::string&) override {
+        IntentProposal proposal;
+        proposal.speechAct = "information_request";
+        proposal.intent = "respond";
+        proposal.rationale = "The test provider intentionally omitted the player-facing answer.";
+        proposal.expectedOutcome = "Runtime must reject an empty conversation response.";
+        proposal.confidence = 1.0;
+        proposal.worldRevision = context.worldRevision;
+        proposal.npcStateVersion = context.npcStateVersion;
+        proposal.worldActionRequested = false;
+        return ProviderResponse{true, std::move(proposal), "   \n", {}};
+    }
+    [[nodiscard]] std::string name() const override { return "semantic-test"; }
+};
+
 class FailingProvider final : public IProvider {
 public:
     ProviderResponse decide(const DecisionContext& context, const std::string&) override {
@@ -1012,6 +1029,14 @@ void provider_and_action_validation_are_safe() {
         "mira", "Please offer a ration.", "semantic-overreach");
     expect(!rejectedAction.accepted && rejectedAction.error == "speech_act_disallows_world_action",
            "Runtime rejects a world action when the model-selected speech act does not permit it");
+
+    auto emptyDialogue = WorldService::load(
+        ContentPackLoader::defaultRoot(), std::make_unique<EmptyDialogueProvider>());
+    const auto eventsBeforeEmptyDialogue = emptyDialogue.state().events.size();
+    const auto emptyTurn = emptyDialogue.converse("mira", "What are you doing?", "empty-dialogue");
+    expect(!emptyTurn.accepted && emptyTurn.error == "missing_dialogue" &&
+               emptyDialogue.state().events.size() == eventsBeforeEmptyDialogue,
+           "Runtime rejects an empty player-facing dialogue instead of committing a blank response");
 
     auto failingProvider = std::make_unique<FailingProvider>();
     auto* failingRaw = failingProvider.get();
