@@ -32,7 +32,7 @@
     "correlation_id": {"type": "string", "pattern": "^correlation:[1-9][0-9]*$"},
     "causation_sequence": {"type": "integer", "minimum": 0},
     "content_version": {"type": "string", "minLength": 1},
-    "simulation_version": {"const": "adaptive-runtime-p1.19"}
+    "simulation_version": {"const": "adaptive-runtime-1.20"}
   },
   "additionalProperties": false
 }

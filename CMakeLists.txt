@@ -1,20 +1,8 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(tide_marks LANGUAGES CXX)
+project(tide_marks LANGUAGES C CXX)
 
 find_package(Threads REQUIRED)
-
-option(TIDE_MARKS_ENABLE_SQLITE "Build the optional SQLite persistence adapter when sqlite3 is available" ON)
-option(TIDE_MARKS_REQUIRE_SQLITE "Fail configuration when the SQLite persistence adapter cannot be built" OFF)
-if(TIDE_MARKS_ENABLE_SQLITE)
-    find_path(TIDE_MARKS_SQLITE_INCLUDE_DIR sqlite3.h)
-    find_library(TIDE_MARKS_SQLITE_LIBRARY NAMES sqlite3)
-endif()
-if(TIDE_MARKS_REQUIRE_SQLITE AND (NOT TIDE_MARKS_ENABLE_SQLITE OR
-                                  NOT TIDE_MARKS_SQLITE_INCLUDE_DIR OR
-                                  NOT TIDE_MARKS_SQLITE_LIBRARY))
-    message(FATAL_ERROR "TIDE_MARKS_REQUIRE_SQLITE=ON but sqlite3 headers or library were not found")
-endif()
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -48,6 +36,19 @@ FetchContent_Declare(
     URL https://github.com/nlohmann/json/releases/download/v3.11.3/json.tar.xz
 )
 FetchContent_MakeAvailable(nlohmann_json)
+
+# SQLite is part of the shipped runtime rather than a system-library or
+# compile-time feature fork. Build the pinned amalgamation into a static
+# archive so deployed executables do not need a separately installed sqlite3.
+FetchContent_Declare(
+    sqlite3
+    URL https://www.sqlite.org/2025/sqlite-amalgamation-3500100.zip
+    URL_HASH SHA256=41716b44ac8777188c4c3f1f370f01c9cb9e3b6428eb5c981d086c35de2d9d3f
+)
+FetchContent_MakeAvailable(sqlite3)
+add_library(tide_marks_sqlite STATIC "${sqlite3_SOURCE_DIR}/sqlite3.c")
+target_include_directories(tide_marks_sqlite PUBLIC "${sqlite3_SOURCE_DIR}")
+target_compile_definitions(tide_marks_sqlite PRIVATE SQLITE_THREADSAFE=1 SQLITE_OMIT_LOAD_EXTENSION=1)
 
 if(TIDE_MARKS_FETCH_RAYLIB)
     FetchContent_Declare(
@@ -129,11 +130,7 @@ target_include_directories(tide_marks_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/sr
 target_compile_definitions(tide_marks_core PRIVATE
     TIDE_MARKS_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/data")
 target_link_libraries(tide_marks_core PUBLIC nlohmann_json::nlohmann_json Threads::Threads)
-if(TIDE_MARKS_ENABLE_SQLITE AND TIDE_MARKS_SQLITE_INCLUDE_DIR AND TIDE_MARKS_SQLITE_LIBRARY)
-    target_compile_definitions(tide_marks_core PUBLIC TIDE_MARKS_HAS_SQLITE=1)
-    target_include_directories(tide_marks_core PUBLIC ${TIDE_MARKS_SQLITE_INCLUDE_DIR})
-    target_link_libraries(tide_marks_core PUBLIC ${TIDE_MARKS_SQLITE_LIBRARY})
-endif()
+target_link_libraries(tide_marks_core PUBLIC tide_marks_sqlite)
 if(TIDE_MARKS_WARNINGS)
     if(MSVC)
         target_compile_options(tide_marks_core PRIVATE /W4 /permissive-)

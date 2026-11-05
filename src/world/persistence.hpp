@@ -2,12 +2,9 @@
 
 #include "core/types.hpp"
 
+#include <sqlite3.h>
 #include <string>
 #include <vector>
-
-#ifdef TIDE_MARKS_HAS_SQLITE
-#include <sqlite3.h>
-#endif
 
 namespace tide_marks {
 
@@ -24,8 +21,8 @@ public:
                                    const std::vector<Json>& replayLines) const = 0;
 };
 
-// Prototype file adapter. SQLite implements the same boundary optionally
-// without introducing a second mutable WorldState.
+// Prototype file adapter. SQLite implements the same boundary without
+// introducing a second mutable WorldState.
 class JsonFilePersistence final : public IWorldPersistence {
 public:
     void saveSnapshot(const std::string& path, const Json& snapshot) const override;
@@ -37,8 +34,7 @@ private:
     static void replaceFile(const std::string& path, const std::string& bytes);
 };
 
-#ifdef TIDE_MARKS_HAS_SQLITE
-// Optional single-file adapter. It stores the same serialized artifacts as
+// Single-file adapter. It stores the same serialized artifacts as
 // JsonFilePersistence, but each replacement is committed in one SQLite
 // transaction and can be queried by run path. It is an adapter, not a second
 // mutable WorldState or an alternative rule engine.
@@ -63,6 +59,4 @@ private:
     static void close(sqlite3* database) noexcept;
     static void check(int result, sqlite3* database, const char* operation);
 };
-#endif
-
 }  // namespace tide_marks

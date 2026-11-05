@@ -47,7 +47,7 @@ WorldState facts
 
 已有并获准的需求模型在运行时自动推进，不需要人工逐分钟批准。LLM 在已注册候选中选择交互意图，也不需要人工逐句批准，但必须通过版本、权限和业务规则校验。
 
-LLM 提出新的需求类型、驱动力曲线、集体指标、行为配方、内容实体或规则组合时，才进入演化治理：`Proposal -> Validate -> Sandbox/Replay -> Approval Policy -> Versioned Activate -> Measure -> Rollback/Retain`。P0 使用开发者/世界设计者明确批准；以后可以让低风险声明式提案按策略自动批准，高风险提案仍需人工批准。事务、权限、事件格式、存档、调度、组件存储和其他 Runtime Core 永远不能由 LLM 在线修改，只能由开发者改代码、测试、迁移和发布。
+LLM 提出新的需求类型、驱动力曲线、集体指标、行为配方、内容实体或规则组合时，才进入演化治理：`Proposal -> Validate -> Sandbox/Replay -> Approval Policy -> Versioned Activate -> Measure -> Rollback/Retain`。当前由开发者/世界设计者明确批准；以后可以让低风险声明式提案按策略自动批准，高风险提案仍需人工批准。事务、权限、事件格式、存档、调度、组件存储和其他 Runtime Core 永远不能由 LLM 在线修改，只能由开发者改代码、测试、迁移和发布。
 
 ## 3. 世界实例与内容边界
 
@@ -82,7 +82,7 @@ JSON 是内容和提案的机器边界，C++ 类型是编译期契约，WorldSta
 
 ### 内驱：需求域、驱动状态与自动适应
 
-P0 使用四个可同时激活的需求域。它们用于建模和内容校验，不是严格互斥的心理实体，也不形成一个固定先后顺序：
+当前实现使用四个可同时激活的需求域。它们用于建模和内容校验，不是严格互斥的心理实体，也不形成一个固定先后顺序：
 
 | 需求域 | 典型状态变量 | 村庄中的具体需求示例 | 事实满足路径示例 |
 |---|---|---|---|
@@ -91,7 +91,7 @@ P0 使用四个可同时激活的需求域。它们用于建模和内容校验�
 | 社会 / 关系 | 归属、信任、互惠、承认、公平、地位、共同责任 | 被伙伴接纳、获得协作、兑现承诺、维护声誉 | 交谈、共同工作、交换、承诺、加入组织 |
 | 认知 / 认识 | 确定性、信息充分性、因果一致性、新颖性、掌握 | Eve 对家谱真相的求知、对记录可靠性的怀疑 | 调查、询问、比较证据、实验、学习 |
 
-Maslow 的五层图可以用于角色底稿和玩家可读的叙事提示，但不足以作为第一期 Runtime 的需求模型：其层级证据并不支持固定闸门，不能表示同一主体的并行需求，也不提供外部刺激、满足路径、学习、制度约束和可执行协议。P0 从四个需求域中各定义至少一项具体需求，以验证通用链路；这些是小村庄的内容分类，不是 Runtime 的枚举。需求域是非空的内容标签，其他世界可以增加 `ecological`、`institutional` 或新的域，而无需修改 C++ 驱动力内核；受治理的演化提案仍必须为新域提供满足配方、来源和可验证结果。
+Maslow 的五层图可以用于角色底稿和玩家可读的叙事提示，但不足以作为第一期 Runtime 的需求模型：其层级证据并不支持固定闸门，不能表示同一主体的并行需求，也不提供外部刺激、满足路径、学习、制度约束和可执行协议。当前实现从四个需求域中各定义至少一项具体需求，以验证通用链路；这些是小村庄的内容分类，不是 Runtime 的枚举。需求域是非空的内容标签，其他世界可以增加 `ecological`、`institutional` 或新的域，而无需修改 C++ 驱动力内核；受治理的演化提案仍必须为新域提供满足配方、来源和可验证结果。
 
 一项具体需求由 `NeedDefinition` 定义，运行时实例由 `NeedState` 保存。Definition 声明 `id`、`domain`、可选 `dimension`、初始缺口、基础变化率、临界阈值、基础权重与优先级、一个或多个满足配方以及来源/版本。State 保存当前缺口、最近更新时间、最近满足来源、有限度敏感度、预期满足和适应版本。这里的“五个驱动属性”是同一驱动状态的五个操作维度，不是五个人类需求：
 
@@ -105,8 +105,12 @@ Maslow 的五层图可以用于角色底稿和玩家可读的叙事提示，但�
 
 ```text
 deficit(t + Δt) = clamp(deficit(t) + decay_per_hour × Δt - committed_relief, 0, 1)
-`DriveSystem::evaluate` 将这些维度投影为结构化 `DriveEvaluation`：`urgency` 把缺口和临界区间归一化，`effective_weight = priority + sensitivity × urgency`，`expected_relief` 取个体有来源的经验值（没有时使用内容包初值），`confidence` 取当前证据置信度，单个需求对候选行动的贡献为 `effective_weight × expected_relief × confidence`。`drive` 数值只是同一投影的压力摘要，不再承担第二套排序语义。
-expected_relief(action, need) = learned_expectation × evidence_confidence
+```
+
+`DriveSystem::evaluate` 将这些维度投影为结构化 `DriveEvaluation`：`urgency` 把缺口和临界区间归一化，`effective_weight = priority + sensitivity × urgency`，`expected_relief` 取个体有来源的经验值（没有时使用内容包初值），`confidence` 取当前证据置信度，单个需求对候选行动的贡献为 `effective_weight × expected_relief × confidence`。`expected_relief` 本身不再乘置信度，避免在 GoalSelector 中重复惩罚同一份证据不确定性。`drive` 数值只是同一投影的压力摘要，不再承担第二套排序语义。
+
+```text
+expected_relief(action, need) = learned_expectation
 ```
 
 每个具体需求必须绑定一个或多个 `NeedSatisfier`。满足配方说明在什么条件下、通过哪条已注册行为或过程、消费哪些事实、产生多少有证据的满足，以及失败和替代路径。配方最终编译成一个或多个元动作，例如 `consume_resource + relieve_need`、`reserve_resource + produce_resource + relieve_need`、`communicate + adjust_relationship + relieve_need`。一个配方可以满足多个需求，多个配方也可以满足同一需求；没有可执行满足配方的需求不能进入活动内容。满足只能引用已提交的行为、过程或事件。对白、模型自述、未验证记忆和 LLM 自行填写的数字不能直接降低缺口。
@@ -115,7 +119,7 @@ expected_relief(action, need) = learned_expectation × evidence_confidence
 
 自动适应发生在单个主体的状态上，且必须有界、可审计、可回滚。例如行动前预测会缓解 0.2，实际结算为 0.05，DriveSystem 在内容声明的学习率、单次步长和冷却期内校准该需求的预期满足，并产生 `drive.adapted`；外驱习惯化则在校准该类刺激的敏感度。适应参数属于世界规则；LLM 可以解释误差和提出策略提案，但不能直接写权重、阈值或衰减率。个体适应不等于社会规则或 Runtime Core 演化。
 
-当前 P0 采用确定性驱动力内核，确保世界不调用模型也能运行、测试和回放。内驱是主体内部连续状态，外驱是世界对主体施加的已记录刺激，结构约束是意图能否执行的条件。LLM 不替代内稳态计算，但会实际参与高价值决策：读取授权的需求、事件、关系和后果，解释处境，比较满足路径的代价与社会影响，引用它依赖的 Stimulus，生成 `tradeoffs` 和 `expected_relief`，再提出候选意图。C++ 只接受经过版本、权限、资源、可见性和业务规则校验的行动；模型不能直接写缺口、敏感度、资源、关系或事件。LLM 也可以提出新的需求定义、刺激类型、结构规则、行为配方和策略，但提案未通过沙箱和批准前不改变需求模型。
+当前实现采用确定性驱动力内核，确保世界不调用模型也能运行、测试和回放。内驱是主体内部连续状态，外驱是世界对主体施加的已记录刺激，结构约束是意图能否执行的条件。LLM 不替代内稳态计算，但会实际参与高价值决策：读取授权的需求、事件、关系和后果，解释处境，比较满足路径的代价与社会影响，引用它依赖的 Stimulus，生成 `tradeoffs` 和 `expected_relief`，再提出候选意图。C++ 只接受经过版本、权限、资源、可见性和业务规则校验的行动；模型不能直接写缺口、敏感度、资源、关系或事件。LLM 也可以提出新的需求定义、刺激类型、结构规则、行为配方和策略，但提案未通过沙箱和批准前不改变需求模型。
 
 该模型是用于可信模拟的可解释近似，不声称还原真实人类心理。理论依据用于确定状态语义和边界，具体阈值、曲线与满足强度必须由内容或经批准的演化提案定义并通过回放校准。
 
@@ -132,7 +136,7 @@ effective_salience = salience × adapted_sensitivity(source_type, actor)
 
 外驱的“自动演化”有两层：第一层是在已批准规则内，事件自动生成刺激、到期、聚合、习惯化和重新评价；第二层是新的刺激类型、评价规则或聚合方式，只能通过 `EvolutionProposal` 进入沙箱和版本化激活。后者不能由 LLM 直接登记为活动规则。
 
-安全需求必须有真实的威胁来源。P0 曾只用 `crossing_safety` 验证“安全状态衰减—修复—满足”；P1 现已增加 `conflict.attack`、`conflict.sabotage`、`security.threaten`、`security.defend`、`security.evacuate` 和 `security.repair`。攻击或破坏是对目标的行动尝试，威胁和恐吓可以只改变威胁与暴露而不造成物理损伤，防守、撤离和修复是独立响应。它们先提交可审计事件，再由 `StimulusProjector` 投射为威胁刺激；实际安全缺口由事件、暴露时间、完整性/可用性变化和主体可信感知共同计算，LLM 只能权衡风险和响应，不能直接把安全感改成某个数值。
+安全需求必须有真实的威胁来源。早期验证曾只用 `crossing_safety` 验证“安全状态衰减—修复—满足”；现已增加 `conflict.attack`、`conflict.sabotage`、`security.threaten`、`security.defend`、`security.evacuate` 和 `security.repair`。攻击或破坏是对目标的行动尝试，威胁和恐吓可以只改变威胁与暴露而不造成物理损伤，防守、撤离和修复是独立响应。它们先提交可审计事件，再由 `StimulusProjector` 投射为威胁刺激；实际安全缺口由事件、暴露时间、完整性/可用性变化和主体可信感知共同计算，LLM 只能权衡风险和响应，不能直接把安全感改成某个数值。
 
 ### 结构：可执行约束与受治理演化
 
@@ -151,7 +155,9 @@ StructureObservation
   -> retain / revise / rollback
 ```
 
-批准权属于平台治理策略，而不是提出提案的 LLM。P0 中，新的需求定义、规则、拓扑、能力、行为配方和结构 overlay 由开发者或世界设计者批准；LLM 可以创建提案、补充证据和比较候选，但不得批准自己的提案。低风险且可在沙箱中完整验证的声明式变化以后可以自动批准，核心事务、权限、事件格式、调度、存档和组件存储等 Runtime Core 只能由开发者通过代码、测试、迁移和发布审核演化。任何自动激活都必须记录提案、审批者/策略、内容版本、模拟版本、指标、激活 Revision 和回滚结果。
+批准权属于平台治理策略，而不是提出提案的 LLM。当前，新的需求定义、规则、拓扑、能力、行为配方和结构 overlay 由开发者或世界设计者批准；LLM 可以创建提案、补充证据和比较候选，但不得批准自己的提案。低风险且可在沙箱中完整验证的声明式变化以后可以自动批准，核心事务、权限、事件格式、调度、存档和组件存储等 Runtime Core 只能由开发者通过代码、测试、迁移和发布审核演化。任何自动激活都必须记录提案、审批者/策略、内容版本、模拟版本、指标、激活 Revision 和回滚结果。
+
+治理策略按风险分级而不是对所有提案执行同样重的流程：个体策略调整要求目标范围、Schema 和回放不变量；日程和行为配方要求沙箱与独立批准；实体原型和制度规则要求 baseline/scenario 指标比较、权限审查和人工批准；Runtime Core、任意脚本、权限模型和存档格式只能通过开发者代码发布。所有等级都保留同一 Proposal 契约和审计字段。
 
 ### 意图、目标与行动
 
@@ -160,22 +166,22 @@ StructureObservation
 候选行动的效用可表达为：
 
 ```text
-utility(a) = Σ(drive_i × expected_relief_i)
+utility(a) = Σ(DriveEvaluation.utilityContribution_i)
              + goal_continuity + relationship_effect + future_value
              - resource_cost - risk_cost - constraint_penalty
 ```
 
-这里的需求收益由 `GoalSelector` 对同一 `action_id` 满足的所有需求贡献求和，并把 `utility_score` 与每项 `utility_contributions` 放入决策上下文和意图事件。行动可以由内容声明 `utility_profile`，包括 `resource_cost`、`risk`、`relationship_effect`、`future_value`、`constraint_penalty` 和可选的 `trait_effects`；每个 NPC 的 `private_traits` 是内容定义的私有基础偏好，Runtime 用内容配置的非线性响应指数计算中心化特质匹配，并把总特质贡献限制在有界区间。特质只影响可行候选的偏好，不绕过硬约束，也不替代 hidden goal、boundary、strategy、经验或关系；LLM 读取它来解释权衡，Runtime 负责唯一的确定性特质效用计算，避免理由被重复计分。基础特质不会被经验隐式改写，经验先改变记忆、知识、策略和关系，只有未来明确声明特质演化机制时才修改 Trait。Runtime 校验范围后按声明组合这些分项，不在 C++ 里按角色或故事写死权重。LLM 可以在复杂社会情境中解释和权衡这些项，但它不能伪造已经不存在的事实。候选计划和参数契约来自内容包，模型只能填写声明的参数，例如一个通用 `goto` 计划的 `destination`。Runtime 校验参数类型、目标实体、权限和当前拓扑后，才把参数绑定到 BT 的元动作；模型不能凭空创建资源、任务、关系变化或事件。C++ 校验结构约束后把意图转成 Command，事务成功后的结果才改变世界，并生成下一轮外驱和内驱输入。
+这里 `DriveSystem` 只输出每项需求的标准化 `DriveEvaluation`；`GoalSelector` 是唯一的候选行动总效用聚合者，对同一 `action_id` 求和并加上内容声明的成本/风险/关系/未来价值/特质项，然后把 `utility_score` 与每项 `utility_contributions` 放入决策上下文和意图事件。行动可以由内容声明 `utility_profile`，包括 `resource_cost`、`risk`、`relationship_effect`、`future_value`、`constraint_penalty` 和可选的 `trait_effects`；每个 NPC 的 `private_traits` 是内容定义的私有基础偏好，Runtime 用内容配置的非线性响应指数计算中心化特质匹配，并把总特质贡献限制在有界区间。特质只影响可行候选的偏好，不绕过硬约束，也不替代 hidden goal、boundary、strategy、经验或关系；LLM 读取它来解释权衡，Runtime 负责唯一的确定性特质效用计算，避免理由被重复计分。基础特质不会被经验隐式改写，经验先改变记忆、知识、策略和关系，只有未来明确声明特质演化机制时才修改 Trait。Runtime 校验范围后按声明组合这些分项，不在 C++ 里按角色或故事写死权重。LLM 可以在复杂社会情境中解释和权衡这些项，但它不能伪造已经不存在的事实。候选计划和参数契约来自内容包，模型只能填写声明的参数，例如一个通用 `goto` 计划的 `destination`。Runtime 校验参数类型、目标实体、权限和当前拓扑后，才把参数绑定到 BT 的元动作；模型不能凭空创建资源、任务、关系变化或事件。C++ 校验结构约束后把意图转成 Command，事务成功后的结果才改变世界，并生成下一轮外驱和内驱输入。
 
 ### 社会和集体驱力
 
 个体需求通过共享资源和关系汇聚为社会驱力：粮食安全、运输能力、记录完整性、信任、成员流失、公共设施可用性和组织目标。集体指标必须声明参与实体、资源池、目标值、时间窗口、聚合方式、冲突权重和失败后果，不能简单取 NPC 平均值。
 
-P0 只实现个体需求和公共资源，验证“资源变化—行动—他人受影响”的因果链；P1 已增加可配置的组织成员、集体指标、跨主体关系、原子资源交易、声明式资源预留/抢占、受约束的冲突/安全事实和近远场更新；P2 允许 World Intelligence 提出新的社会指标或策略，并通过历史回放沙箱比较效果。复杂合同仲裁与更大规模协商仍是内容扩展项。自主性、胜任感和关系性作为横向调制因素，不压缩成单一需求层级。
+当前实现只实现个体需求和公共资源，验证“资源变化—行动—他人受影响”的因果链；已增加可配置的组织成员、集体指标、跨主体关系、原子资源交易、声明式资源预留/抢占、受约束的冲突/安全事实和近远场更新；World Intelligence 可以提出新的社会指标或策略，并通过历史回放沙箱比较效果。复杂合同仲裁与更大规模协商仍是内容扩展项。自主性、胜任感和关系性作为横向调制因素，不压缩成单一需求层级。
 
 ### 世界模型的基本对象
 
-在增加任何新行为前，先确认行为操作的对象、状态变量和计量单位已经存在。小村庄 P0 采用 ODD（Overview、Design concepts、Details）式检查；每个对象同时有三种表示：
+在增加任何新行为前，先确认行为操作的对象、状态变量和计量单位已经存在。小村庄采用 ODD（Overview、Design concepts、Details）式检查；每个对象同时有三种表示：
 
 1. **Definition**：内容包中的稳定定义，例如资源单位、过程配方、角色能力和规则版本；只读，运行中不能被状态污染。
 2. **Runtime state**：由 C++ 维护的当前事实，例如持有数量、预留、位置、合同状态和过程进度；所有写入都经过事务。
@@ -230,7 +236,10 @@ Perception / Need / Opportunity
   -> memory, relationship and next drives
 ```
 
-因此，P0 可以先用通用资源池验证村庄因果链，但必须保留单位、所有权、质量、容量、预留和时间窗口这些字段的语义入口；只有数量而没有这些属性时，系统只能称为“资源计数器”，不能称为生产、经济或社会模拟。
+因此，当前实现可以先用通用资源池验证村庄因果链，但必须保留单位、所有权、质量、容量、预留和时间窗口这些字段的语义入口；只有数量而没有这些属性时，系统只能称为“资源计数器”，不能称为生产、经济或社会模拟。
+
+资源与实体属性必须保持不同的事实归属。粮食、木材和燃料是可以由 `ResourceSystem` 持有、预留、转移、生产或消耗的资源；船体完整性、门的耐久度、设施可用性和档案完整性是目标实体的属性，由对应 Domain System/Component 维护；修理过程可以消耗资源并产生属性变化，但不能把属性更新伪装成任意资源写入。当前村庄内容为了验证通用数量账本，把 `boat_integrity` 声明为不可分割的 `kind=condition` 资源标量；这类标量若进入交易，必须由内容明确授权。新的内容应优先使用实体属性或 `SecurityState`，资源 operator 不得对实体属性提供任意 `set` 接口。
+
 
 ## 5. NPC Runtime 与 World Intelligence
 
@@ -249,7 +258,7 @@ NPC 由身份、物理状态、需求、长期目标、关系、感知、记忆�
 
 NPC 不每帧调用 LLM。日常移动、进食、休息、工作、资源结算和远端生活由规则推进；玩家交互、重大冲突、反思、社会策略和演化提案才进入串行 TurnQueue。NPC 具有 active、dormant、destroyed 生命周期；休眠不删除身份和历史。后台自主请求使用内容声明的 `max_decision_age_minutes` 截止点；同一 NPC、同一决策通道的尚未开始请求可由 `coalesce_pending` 合并，过期或被合并的结果只产生审计事件，不能启动旧活动。玩家交互仍按通道单独处理，不被后台请求吞掉。异步 decision channel 还可以声明 `allow_intervening_world_changes`：会话默认关闭；自驱可开启以允许同一调度边界中其他主体的无关提交先发生，但返回时仍必须通过主体版本、时间、权限、参数和当前事实校验。这个声明只放宽全局 Revision 的乐观并发检查，不授予模型绕过 Runtime 的权限。
 
-经验与知识不是同一个对象。EventLog 是事实来源；NPC 的 episodic memory 保留“发生了什么”，KnowledgeFact 表示主体对实体/关系/规则的带来源判断，Experience 表示从一次或多次行动结果中抽象出的可复用倾向或技能。直接感知、亲身行动结果、观察他人事件、可信 testimony 和探索结果都可以产生候选经验；Runtime 只接受带来源、时间、范围和置信度的声明，LLM 可以总结或提出归纳但不能把文本直接变成客观事实。通用经验可被多个 NPC 或策略模板复用，个人经验绑定 NPC、关系和视角。决策上下文同时提供已确认知识与经验，但候选行动仍必须经过当前事实校验。
+经验与知识不是同一个对象。EventLog 是事实来源；NPC 的 episodic memory 保留“发生了什么”，KnowledgeFact 表示主体对实体/关系/规则的带来源判断，Experience 表示从一次或多次行动结果中抽象出的可复用倾向或技能。直接感知、亲身行动结果、观察他人事件、可信 testimony 和探索结果都可以产生候选经验；Runtime 只接受带来源、时间、范围和置信度的声明，LLM 可以总结或提出归纳但不能把文本直接变成客观事实。通用经验可被多个 NPC 或策略模板复用，个人经验绑定 NPC、关系和视角。决策上下文同时提供已确认知识与经验，但候选行动仍必须经过当前事实校验。 认知投影还明确区分 `WorldFact`、`Belief` 和 `Hypothesis`：`KnowledgeFact.confirmed` 表示主体是否把来源交叉验证为自己的确认判断，`confidence` 表示主体对判断的信任，不表示世界事实本身的真值。每条记忆、知识和假设都保存来源事件、观察者、观察时间、事件时间、作用范围和置信度；冲突来源可以并存，新的证据由 `CognitionSystem` 合并或降低置信度。
 
 `WorldService` 是唯一协调入口，但不应成为所有领域规则的实现容器。合同协调由 `ContractSystem` 负责承诺和交换的状态机、参与方权限、截止时间与结算规划；NPC 活动推进由 `NpcSimulationSystem` 负责日程边界、长过程、预留抢占、挂起/恢复和策略日界修订；这两个系统都通过 WorldService 的统一事务和事件回调提交事实，不拥有独立状态副本。资源、社会、元动作、NPC 活动和合同系统都遵守同一条 `validate -> transaction -> WorldState/EventLog` 路径。
 
@@ -283,13 +292,13 @@ Level 1 是主体行为演化：LLM 在现有 Runtime 能力内泛化 NPC 的经
 
 演化不是每个 Tick 的后台调用。Content Pack 的 `evolution_policy` 只声明是否启用自动提案、两个等级的最小日间隔、是否合并同等级挂起请求和提案上下文的最大年龄；它不能授予自动批准或激活权限。到达配置边界时，Runtime 在已提交时间事务之后捕获只读上下文，把 Level 1/2 请求放入独立的串行 Evolution Queue；Provider 工作线程只读取捕获的 JSON，不持有 WorldState，不阻塞下一次 Tick。结果回到主线程后重新检查内容版本、当前事实中的证据和治理 Schema；无关事实可以在模型思考期间提交，提案会以当前 Revision 重新校验和 Sandbox，最多给真实 Provider 两次结构化修正；有效结果自动运行无 LLM 的 Sandbox 并记录 `evolution.proposal_ready` 审计事件，仍需独立审批才能生成 Overlay。失败、过期或模型不可用只记录审计事件，不用规则或 Mock 冒充演化。普通计划由玩家输入、刺激、需求压力和过程边界触发；Level 1 在有界的个人经验窗口、显著预测误差、连续失败或日边界触发并受冷却/预算限制，自动日边界按 NPC 分别排队；Level 2 只在跨主体异常、资源/关系指标持续偏离或世界周期边界触发。Runtime 先确定性聚合证据，LLM 在一次结构化提案中完成总结、反思和最小创新，之后仍必须经过治理链。Level 1 上下文带有 `target_npc`，只提供该主体的记忆、知识、经验、刺激和关系私域，其他主体最多以地点和运行模式摘要出现；最近事件证据中的 `memory.*`、`knowledge.*`、`experience.*` 和 `drive.adapted` 认知事件也按主体过滤，公共资源、关系和结构事实仍可作为证据。提案的策略/日程操作必须命中该目标，行为配方也必须把目标列入 `available_to`。Level 2 才接收受权限裁剪的跨主体摘要。窗口上限是内容无关的上下文安全上限，排序、可见性和传播范围由 Runtime 的事实权限和配置决定。NPC 的 DecisionContext 使用按主体可见性、地点、关系、承诺和当前候选计划裁剪的 `worldSnapshot`，并分别提供 `selfState`、`planCatalog`、记忆、知识、经验、刺激和约束；不把全量 WorldState 或内部版本号当作模型语义材料。
 
-同一机制可以承载场景实验：例如“在周边小区开一个小店”“提高利率”“发布一个政策”。LLM 把自然语言转成 `ScenarioProposal`，Validator 检查实体、参数和已注册机制，Sandbox 从同一快照克隆并运行 baseline/scenario，Runtime 输出资源、库存、组织指标、需求、位置、关系、承诺、异常和两侧事件序列；LLM 只把这些已计算结果整理为假设、因果链、敏感参数和不确定性说明。缺少经济或社会机制时必须报告“无法评估”，不能用语言补造数值。当前 P2 已实现资源、组织指标和 NPC 需求三类有界 intervention，以及面向不必填用的 CLI；小店、利率和政策只有在对应事实模型落地后才能增加专用 intervention。
+同一机制可以承载场景实验：例如“在周边小区开一个小店”“提高利率”“发布一个政策”。LLM 把自然语言转成 `ScenarioProposal`，Validator 检查实体、参数和已注册机制，Sandbox 从同一快照克隆并运行 baseline/scenario，Runtime 输出资源、库存、组织指标、需求、位置、关系、承诺、异常和两侧事件序列；LLM 只把这些已计算结果整理为假设、因果链、敏感参数和不确定性说明。缺少经济或社会机制时必须报告“无法评估”，不能用语言补造数值。当前已实现资源、组织指标和 NPC 需求三类有界 intervention，以及面向不必填用的 CLI；小店、利率和政策只有在对应事实模型落地后才能增加专用 intervention。
 
 `DecisionContext` 的窗口由内容包的 `decision_context` 配置约束：刺激按显著性保留前 N 条，记忆/知识/经验按时间保留最近 N 条，同地点实体和相邻连接按稳定顺序截断，关系按主体可见范围截断。截断只影响模型观察窗口，不删除事实、事件或 NPC 的长期认知；上下文预算应随 Intelligence Profile 校准，而不能通过扩大快照把所有世界状态塞给模型。
 
 Provider 使用一个共享模型槽位和串行队列；本地 llama.cpp 是产品入口的默认语义 Provider，服务失败时玩家对话和 NPC 自驱提案都明确失败且不提交事实。Runtime 可以继续推进时间、衰减和已批准的过程，但不会用确定性候选冒充 LLM 的主体决策。若 LLM 返回的计划结构通过 JSON Schema 却不满足 Runtime 的参数契约，在线同步请求和异步请求都最多获得一次结构化 validator feedback；资源不足、权限、拓扑、Revision 或过期错误不重复调用模型。Mock Provider 只由测试、沙箱重放和离线可重复回归显式注入；它不是产品默认行为。云 Provider 可用于调试或高质量表达，但不改变事实接口。API Key 不写入内容包、存档、日志、Prompt、崩溃报告或版本库。
 
-P0 的结构化 `IntentProposal` 是短输出任务；玩家对白拆成独立的 `utterance_understanding` 和 `player_dialogue` 两次结构化调用。前者需要理解自然语言和歧义，默认使用约 128 token 的 thinking；后者只根据已解析的通信意图和当前事实生成简短回答，默认关闭 thinking。自驱审议没有玩家给出的明确目标，需要依据内驱、外驱和结构约束进行短权衡，因此默认开启约 128 token 的 thinking。Provider 通过顶层 `reasoning_budget_tokens` 限制思考段预算；该预算不等于最终 JSON 的总输出预算。无论是否开启 thinking，Runtime 只解析最终 JSON，`reasoning_content` 永远不进入对白、记忆或世界事实。
+当前实现的结构化 `IntentProposal` 是短输出任务；玩家对白拆成独立的 `utterance_understanding` 和 `player_dialogue` 两次结构化调用。前者需要理解自然语言和歧义，默认使用约 128 token 的 thinking；后者只根据已解析的通信意图和当前事实生成简短回答，默认关闭 thinking。自驱审议没有玩家给出的明确目标，需要依据内驱、外驱和结构约束进行短权衡，因此默认开启约 128 token 的 thinking。Provider 通过顶层 `reasoning_budget_tokens` 限制思考段预算；该预算不等于最终 JSON 的总输出预算。无论是否开启 thinking，Runtime 只解析最终 JSON，`reasoning_content` 永远不进入对白、记忆或世界事实。
 
 小模型的 Provider 策略按决策价值分档，而不是固定追求最大思考预算：普通对白和低风险动作关闭 thinking；候选之间存在社会冲突、秘密或承诺权衡时使用约 128 token 的 reasoning budget；低置信度或校验失败才升级到 256。512 以上只用于演化提案、沙箱解释和离线分析，不进入每个 NPC Turn。预算升级必须记录原因、耗时、最终候选和校验结果，便于以后用真实回放重新校准。
 
@@ -335,9 +344,25 @@ Provider 的 thinking、reasoning budget、max tokens 和 timeout 只从版本�
 
 ## 7. Runtime 核心契约
 
-`WorldService` 是应用入口，`WorldState` 是事实，`EntityRegistry` 是投影，Domain Systems 执行规则。`WorldCommandSystem` 只协调实体、拓扑、资源转移、交易、关系、组织成员和移动命令；它不拥有第二份状态，也不绕过 `WorldService` 的事务和事件边界。`EntityProjectionSystem` 只根据已提交 `WorldState + ContentPack` 重建和同步 `EntityRegistry`，不拥有可独立修改的实体事实；`DecisionContextProjector` 是只读的主体视图边界：它根据 `WorldState + ContentPack` 和主体身份生成位置、所有权、关系、需求、记忆、知识、经验、刺激、约束、候选计划和 BT 摘要；它不能提交命令，也不拥有事实。`ResourceSystem` 负责与 NPC/故事无关的资源数量、公共池/实体库存解析、转移、预留和释放校验；`SocialSystem` 负责关系轴、组织指标和成员关系的通用事实变换；`CognitionSystem` 负责 NPC 作用域的知识和经验写入、来源事件校验、置信度合并和审计事件，行为执行器不能直接改写这些容器；`StimulusSystem` 负责按内容声明把已提交事件投射为主体可见的外驱、重复刺激习惯化、容量淘汰和到期，不拥有事件事实；`NpcSimulationSystem` 负责内容声明的 Activity/ProcessExecution、预留抢占、挂起恢复和日界策略投影；`BehaviorExecutionSystem` 负责将候选计划解析为 BehaviorRecipe/BT、评估注册条件、绑定参数并调用有限元动作，同时把移动、资源、关系、合同和安全效果交给 WorldService 的高层命令；`CommandDispatcher` 只负责解析 Runtime 公共命令协议并路由到这些高层命令，不拥有事实或内容规则；`WorldIntelligenceSystem` 负责把按主体裁剪的 DecisionContext 交给 Provider、校验返回的意图、启动 ProcessExecution 并处理异步结果，`IntelligenceCoordinator` 只管理 Provider 队列和请求生命周期；`WorldEvolutionSystem` 负责 Level 1/2 提案所需的世界摘要、证据窗口、Provider 请求以及已批准 Overlay 的激活/回退协调，`EvolutionManager` 负责纯验证、沙箱和审批策略；`SecuritySystem` 负责内容声明的冲突、威胁、防守、撤离和修复参数，解析主体与目标并把安全事实交给统一事务入口；`SimulationCoordinator` 负责从当前游戏时间选择下一个调度边界、打开一次事实事务、协调活动/合同/日程系统、在提交后泵送 Provider 结果和 durable checkpoint；它不拥有资源或 NPC 事实，`SimulationScheduler` 仍是纯边界计算器。这些系统都不打开独立事实边界、不发布事件，由 `WorldService` 协调事务和审计。`MetaActionExecutor` 只接收内容绑定的 operator 定义和参数，执行已注册的有限 Primitive；需要创建 Promise、移动、交易或安全事实时只调用 `WorldService` 注入的高层命令回调。这样 JSON 可以组合 operator，LLM 可以提出新的 BT 配方，但不能由配置或模型直接执行任意代码。时间边界由纯函数式 `SimulationScheduler` 计算；被合并的安静分钟仍逐分钟计入 `world_revision` 与模拟时间，因此分段推进和一次大跳在无外部干预时保持相同事实。`TransactionManager` 独占保存点、Revision 和提交/回滚，`EventJournal` 独占事件身份、因果和提交后发布，`IntelligenceCoordinator` 独占异步 Provider 队列和挂起请求身份；这些模块都不拥有资源、NPC 或社会规则。`EventLog` 记录提交事实，`EventBus` 只通知已提交事件，View/Renderer 只读。Snapshot 与 JSONL Replay 通过可注入的 `IWorldPersistence` 写入；`JsonFilePersistence` 先写临时文件、刷新并完成后再替换目标路径，`SqlitePersistence`（构建发现 sqlite3 时可选）则把同名快照或 Replay 工件替换放在单个 SQLite 事务中。两者都只保存已提交表示，不产生第二份可写 WorldState；当前 SQLite 适配器也不宣称已经把 WorldState、EventLog、Revision 和幂等记录统一到 durable commit boundary。当前原型的 `data/` 只保存静态输入，运行存档写到外部 run 目录；持久化取舍和升级条件记录在 [ADR 0001](adr/0001-persistence-storage.md)。未来的生产化数据库仍应在提交后更新投影并发布 EventBus。
+```mermaid
+flowchart TB
+    Content[Content Pack + Game Instance] --> Projection[DecisionContext / Entity Projection]
+    World[WorldState facts] --> Projection
+    Projection --> Intelligence[LLM Intelligence Profile]
+    Intelligence --> Proposal[IntentProposal / EvolutionProposal]
+    Proposal --> Validate[Schema + Permission + Invariant Validation]
+    Validate --> Activity[NpcActivity / ProcessExecution / BT]
+    Activity --> Tx[TransactionManager]
+    Tx --> World
+    Tx --> Journal[EventJournal]
+    Journal --> Memory[Stimulus / Memory / Knowledge / Experience]
+    Journal --> Persist[JSON or static SQLite checkpoint]
+    Evolution[EvolutionManager + Sandbox + Approval] --> Content
+```
 
-Runtime Core 只保证实体、组件存储、事务、Revision、事件、调度、持久化、回放和权限；Needs、Drive、Perception、Goal、Behavior、Resource 和 Relationship 是可组合的 World Simulation Framework 能力。P0 可以把这组能力编译在同一进程中，但不能把村庄角色或某一套心理模型写进 Core。这样同一 Runtime 才能加载不同内容实例，且 LLM 只能通过已注册能力提出变化。
+`WorldService` 是应用入口，`WorldState` 是事实，`EntityRegistry` 是投影，Domain Systems 执行规则。`WorldCommandSystem` 只协调实体、拓扑、资源转移、交易、关系、组织成员和移动命令；它不拥有第二份状态，也不绕过 `WorldService` 的事务和事件边界。`EntityProjectionSystem` 只根据已提交 `WorldState + ContentPack` 重建和同步 `EntityRegistry`，不拥有可独立修改的实体事实；`DecisionContextProjector` 是只读的主体视图边界：它根据 `WorldState + ContentPack` 和主体身份生成位置、所有权、关系、需求、记忆、知识、经验、刺激、约束、候选计划和 BT 摘要；它不能提交命令，也不拥有事实。`ResourceSystem` 负责与 NPC/故事无关的资源数量、公共池/实体库存解析、转移、预留和释放校验；`SocialSystem` 负责关系轴、组织指标和成员关系的通用事实变换；`CognitionSystem` 负责 NPC 作用域的知识和经验写入、来源事件校验、置信度合并和审计事件，行为执行器不能直接改写这些容器；`StimulusSystem` 负责按内容声明把已提交事件投射为主体可见的外驱、重复刺激习惯化、容量淘汰和到期，不拥有事件事实；`NpcSimulationSystem` 负责内容声明的 Activity/ProcessExecution、预留抢占、挂起恢复和日界策略投影；`BehaviorExecutionSystem` 负责将候选计划解析为 BehaviorRecipe/BT、评估注册条件、绑定参数并调用有限元动作，同时把移动、资源、关系、合同和安全效果交给 WorldService 的高层命令；`CommandDispatcher` 只负责解析 Runtime 公共命令协议并路由到这些高层命令，不拥有事实或内容规则；`WorldIntelligenceSystem` 负责把按主体裁剪的 DecisionContext 交给 Provider、校验返回的意图、启动 ProcessExecution 并处理异步结果，`IntelligenceCoordinator` 只管理 Provider 队列和请求生命周期；`WorldEvolutionSystem` 负责 Level 1/2 提案所需的世界摘要、证据窗口、Provider 请求以及已批准 Overlay 的激活/回退协调，`EvolutionManager` 负责纯验证、沙箱和审批策略；`SecuritySystem` 负责内容声明的冲突、威胁、防守、撤离和修复参数，解析主体与目标并把安全事实交给统一事务入口；`SimulationCoordinator` 负责从当前游戏时间选择下一个调度边界、打开一次事实事务、协调活动/合同/日程系统、在提交后泵送 Provider 结果和 durable checkpoint；它不拥有资源或 NPC 事实，`SimulationScheduler` 仍是纯边界计算器。这些系统都不打开独立事实边界、不发布事件，由 `WorldService` 协调事务和审计。`MetaActionExecutor` 只接收内容绑定的 operator 定义和参数，执行已注册的有限 Primitive；需要创建 Promise、移动、交易或安全事实时只调用 `WorldService` 注入的高层命令回调。这样 JSON 可以组合 operator，LLM 可以提出新的 BT 配方，但不能由配置或模型直接执行任意代码。时间边界由纯函数式 `SimulationScheduler` 计算；被合并的安静分钟仍逐分钟计入 `world_revision` 与模拟时间，因此分段推进和一次大跳在无外部干预时保持相同事实。`TransactionManager` 独占保存点、Revision 和提交/回滚，`EventJournal` 独占事件身份、因果和提交后发布，`IntelligenceCoordinator` 独占异步 Provider 队列和挂起请求身份；这些模块都不拥有资源、NPC 或社会规则。`EventLog` 记录提交事实，`EventBus` 只通知已提交事件，View/Renderer 只读。Snapshot 与 JSONL Replay 通过可注入的 `IWorldPersistence` 写入；`JsonFilePersistence` 先写临时文件、刷新并完成后再替换目标路径，`SqlitePersistence`（由 CMake 固定构建的静态 SQLite 适配器）则把同名快照或 Replay 工件替换放在单个 SQLite 事务中。两者都只保存已提交表示，不产生第二份可写 WorldState。当前逻辑提交与 durable checkpoint 是明确的两层契约：内存事务保证 WorldState/EventLog 一致，显式 checkpoint 保证提交表示的一致替换；每个根事务自动 durable commit 和崩溃恢复协议属于后续生产化工作。当前原型的 `data/` 只保存静态输入，运行存档写到外部 run 目录；未来的持久化实现仍应在提交后更新投影并发布 EventBus。
+
+Runtime Core 只保证实体、组件存储、事务、Revision、事件、持久化、回放、权限和调度基础原语；具体的 `SimulationScheduler`/`SimulationCoordinator` 推进策略，以及 Needs、Drive、Perception、Goal、Behavior、Resource 和 Relationship，都是可组合的 World Simulation Framework 能力。当前实现可以把这组能力编译在同一进程中，但不能把村庄角色或某一套心理模型写进 Core。这样同一 Runtime 才能加载不同内容实例，且 LLM 只能通过已注册能力提出变化。
 
 ### 实体、组件和拓扑
 
@@ -346,6 +371,21 @@ Runtime Core 只保证实体、组件存储、事务、Revision、事件、调�
 NPC 的 `schedule` 是 Content Pack 中的基线可用性/位置规则，不是当前目标，也不是 LLM 的隐式控制权。例如 `"06:00-18:00": "ferry_dock"` 表示游戏时间每天 06:00（含）到 18:00（不含）默认位于 `ferry_dock`；跨午夜的 `"18:00-06:00"` 覆盖 18:00 至次日 06:00 前。当前原型在小时边界按该规则确定性更新运行态 `location` 和 `schedule_label`，因此模型不会每个 Tick 重写日程，也不会因为一次对话自动修改源文件。LLM 可以在 Level 1 反思后提出 `overlay_schedule`，但它必须声明 NPC、完整时间槽和已存在地点，经过验证、沙箱、独立批准后才作为版本化 Overlay 激活；临时离开仍是运行态行动，不等于改变基线日程。
 
 日程的持久改变属于结构/策略演化：`overlay_schedule` 是当前已实现的最小 `ScheduleProposal`，经过 Schema/权限/回放或沙箱验证后，按治理策略批准并作为版本化 Overlay 激活。当前操作替换指定 NPC 的完整日程，位置必须来自内容拓扑，时间边界必须在一天范围内；未来可增加有效期、冲突承诺和指标约束。任何批准都产生版本、来源和生效时间事件，不能静默改写原始 Content Pack。
+
+### 世界不变量
+
+以下不变量在命令提交、Snapshot 加载、Replay 校验和 Evolution Sandbox 中使用同一组检查器：
+
+| 范畴 | 不变量 |
+|---|---|
+| 资源 | `0 <= reserved <= amount`；可用量不能为负；所有权转移必须有合法来源和容量 |
+| 实体 | `destroyed` 实体不能移动、启动活动、创建合同或成为新提案目标 |
+| 活动 | 一个 NPC 最多一个主 `NpcActivity`；非空 Goal/Process 的身份和阶段必须与 Activity 一致；挂起必须有可恢复条件 |
+| 合同 | `Settled`、`Expired` 等终止状态不可重复结算或重新接受 |
+| 认知 | Knowledge/Experience/Memory 必须引用已提交来源事件；私有认知只能出现在授权主体上下文 |
+| 内容 | 配方、节点、条件、Operator 和参数引用必须能解析；Overlay 不能修改 Runtime Core |
+
+不变量失败时，事务在写入前拒绝；Snapshot/Replay/Sandbox 发现损坏时直接失败，不静默修正。
 
 ### 事务和事件
 
@@ -361,7 +401,9 @@ Command / IntentProposal / EvolutionProposal
 
 提交前失败不改变状态、Revision 或事件；提交后订阅者失败只能进入诊断计数，不能回滚事实。跨实体操作使用同一事务和版本检查；命令使用幂等键。
 
-事务只覆盖一次状态转换，不跨越整个长过程。长过程采用“启动事务 → 资源预留与 `ProcessExecution` → 时间推进/中断检查 → 完成或失败事务”的边界。完成时消费本过程拥有的预留并写入效果；被高显著性外驱打断时进入 `ActivityStatus::Suspended`，同一事务释放预留并记录 `npc.process_suspended`，保留目标、进度和计划需求；刺激失效且资源仍可满足时，当前活动生命周期逻辑按原计划重新预留并恢复，`completesAt` 顺延暂停时长，记录 `npc.process_resumed`。资源被更高优先级过程合法抢占时使用同一挂起/恢复生命周期，但暂停原因记录为 `resource_preempted`，事件同时引用抢占者和新过程；仲裁先只读计算完整资源方案，只有全部缺口都能由符合策略的过程释放时才一次提交。若资源无法满足或目标已失效，则请求在写入前拒绝，原过程继续运行，不能留下“暂停了一部分参与者”的中间状态。这样既保持单次提交原子性，也允许捕鱼、维修、搬运、等待交易和移动持续多个 tick。
+逻辑提交和 durable commit 是两层契约。逻辑提交保证内存中的 `WorldState`、`EventLog`、Revision 和幂等记录作为一个状态转换成功或失败；durable commit 通过当前持久化适配器把已提交 Snapshot、Replay 和索引载荷作为一个检查点替换。当前原型不会为每个根事务同步写盘，因此进程崩溃可能丢失最近一个检查点，但不会在内存中产生事实与事件分叉；需要逐事务崩溃恢复时，必须先定义数据库 schema、恢复顺序和幂等协议。EventBus 只在逻辑提交成功后通知，不能成为事实提交的一部分。
+
+事务只覆盖一次状态转换，不跨越整个长过程。长过程采用“启动事务 → 资源预留与 `ProcessExecution` → 时间推进/中断检查 → 完成或失败事务”的边界。当前配方的中间 Tick 不产生虚假的完成效果；如果未来行为需要真实的中间物理效果，必须把它拆成声明式阶段，每个阶段拥有独立提交事件和可选补偿，而不是让 BT 在事务外直接写事实。完成时消费本过程拥有的预留并写入效果；被高显著性外驱打断时进入 `ActivityStatus::Suspended`，同一事务释放预留并记录 `npc.process_suspended`，保留目标、进度和计划需求；刺激失效且资源仍可满足时，当前活动生命周期逻辑按原计划重新预留并恢复，`completesAt` 顺延暂停时长，记录 `npc.process_resumed`。资源被更高优先级过程合法抢占时使用同一挂起/恢复生命周期，但暂停原因记录为 `resource_preempted`，事件同时引用抢占者和新过程；仲裁先只读计算完整资源方案，只有全部缺口都能由符合策略的过程释放时才一次提交。若资源无法满足或目标已失效，则请求在写入前拒绝，原过程继续运行，不能留下“暂停了一部分参与者”的中间状态。这样既保持单次提交原子性，也允许捕鱼、维修、搬运、等待交易和移动持续多个 tick。
 
 这里的回滚有四个明确边界：校验失败发生在写入前，直接拒绝且不改变事实；复合 `BehaviorRecipe` 在校验通过后若某个后续元动作失败，嵌套事务只撤销本次短效果提交里已经暂存的前置效果，不撤销 BT、Goal、FSM 或世界时间；长过程失败不倒退世界时间，而是释放预留、取消过程或执行声明式补偿，活动转为 `Failed` 后由 Goal/Drive 在下一次唤醒时重新规划；Evolution Overlay 回滚只恢复未来使用的内容/策略视图，已经发生的 WorldState 和 EventLog 永远保留。它们不能混称为把整个世界倒回上一个 tick。
 
@@ -369,30 +411,30 @@ Command / IntentProposal / EvolutionProposal
 
 Runtime 只向内容和模型暴露一组可审计的原子元动作。元动作不是任意字段写入器，而是带有 `id`、参数 Schema、前置条件、目标范围、权限、资源成本、直接效果、产生事件的规则和失败码的注册执行器。注册表还必须标记 `implemented`；未实现的设计目录项不能被内容加载器接受。后续能力必须通过注册表和 C++ 执行器增加，不能由 JSON 指向任意函数或代码。
 
-小村庄 P0 的元动作目录分为“当前已实现的运行时能力”和“尚未实现、只能作为 P1 设计入口的能力”。设计目录不能被误读为已注册执行器：
+小村庄 的元动作目录分为“当前已实现的运行时能力”和“尚未实现、属于后续能力设计入口的能力”。设计目录不能被误读为已注册执行器：
 
 | 状态 | 组 | 元动作/接口 | 说明 |
 |---|---|---|---|
-| P0 operator | 资源 | `consume_resource` / `produce_resource` | 检查可用量、单位、质量和预留后扣减或增加资源 |
-| P0 operator | 资源 | `reserve_resource` / `release_resource` | 为当前过程预留或释放资源，避免并发超用 |
-| P0 operator | 需求 | `relieve_need` | 依据已提交行动和来源事件降低需求缺口 |
-| P0 operator | 关系 | `adjust_relationship` | 按 trust、respect、fear、owed 单轴调整并记录原因 |
-| P0 operator | 拓扑 | `set_link_state` | 开关、锁定或改变连接通行状态 |
-| P1 operator | 资源 | `transfer_resource` | 已实现为 `resource.transfer`：在实体库存或公共池之间转移数量，校验参与方、生命周期、余额和容量并产生 `resource.transferred` |
-| P1 operator | 移动 | `movement.traverse` / `movement.arrive` | 已实现：通过活动拓扑规划路线，校验通行状态后提交 `entity.moved` |
-| P1 operator | 冲突 | `conflict.attack` / `conflict.sabotage` | 已实现安全事实入口：只改变完整性、可用性、威胁和暴露，不直接销毁实体或改需求数值 |
-| P1 operator | 安全 | `security.threaten` / `security.defend` / `security.evacuate` / `security.repair` | 已实现：更新 `SecurityState` 并由 StimulusRule 投射安全外驱；修复可消费已定义资源 |
-| P1 operator | 承诺 | `promise.create` / `promise.transition` | 建立、接受、重谈、兑现或违约；命令与 Behavior Recipe 共用同一事务和事件边界 |
-| P1 operator | 合同 | `exchange.create` / `exchange.transition` / `exchange.settle` | 提案、接受/拒绝/取消、截止和两侧原子结算；合同状态与资源所有权都进入 Snapshot/EventLog |
-| P1 operator | 知识/经验 | `memory.append` / `knowledge.assert` / `experience.record` | 已实现为 NPC 作用域投影：记忆、知识和经验都必须引用已提交事件，保存时间、范围和置信度；它们不能直接改写客观事实 |
-| P1 operator | 生产 | `production.execute` | 先验证全部输入余量、资源注册和输出容量，再一次性交换，输入不足或容量溢出不产生部分事实 |
-| P0 command API | 实体 | `create_entity` / `set_entity_lifecycle` | 从注册原型创建实体，或休眠/销毁；当前不是 Behavior DSL operator |
+| 已实现 operator | 资源 | `consume_resource` / `produce_resource` | 检查可用量、单位、质量和预留后扣减或增加资源 |
+| 已实现 operator | 资源 | `reserve_resource` / `release_resource` | 为当前过程预留或释放资源，避免并发超用 |
+| 已实现 operator | 需求 | `relieve_need` | 依据已提交行动和来源事件降低需求缺口 |
+| 已实现 operator | 关系 | `adjust_relationship` | 按 trust、respect、fear、owed 单轴调整并记录原因 |
+| 已实现 operator | 拓扑 | `set_link_state` | 开关、锁定或改变连接通行状态 |
+| 已实现 operator | 资源 | `transfer_resource` | 已实现为 `resource.transfer`：在实体库存或公共池之间转移数量，校验参与方、生命周期、余额和容量并产生 `resource.transferred` |
+| 已实现 operator | 移动 | `movement.traverse` / `movement.arrive` | 已实现：通过活动拓扑规划路线，校验通行状态后提交 `entity.moved` |
+| 已实现 operator | 冲突 | `conflict.attack` / `conflict.sabotage` | 已实现安全事实入口：只改变完整性、可用性、威胁和暴露，不直接销毁实体或改需求数值 |
+| 已实现 operator | 安全 | `security.threaten` / `security.defend` / `security.evacuate` / `security.repair` | 已实现：更新 `SecurityState` 并由 StimulusRule 投射安全外驱；修复可消费已定义资源 |
+| 已实现 operator | 承诺 | `promise.create` / `promise.transition` | 建立、接受、重谈、兑现或违约；命令与 Behavior Recipe 共用同一事务和事件边界 |
+| 已实现 operator | 合同 | `exchange.create` / `exchange.transition` / `exchange.settle` | 提案、接受/拒绝/取消、截止和两侧原子结算；合同状态与资源所有权都进入 Snapshot/EventLog |
+| 已实现 operator | 知识/经验 | `memory.append` / `knowledge.assert` / `experience.record` | 已实现为 NPC 作用域投影：记忆、知识和经验都必须引用已提交事件，保存时间、范围和置信度；它们不能直接改写客观事实 |
+| 已实现 operator | 生产 | `production.execute` | 先验证全部输入余量、资源注册和输出容量，再一次性交换，输入不足或容量溢出不产生部分事实 |
+| 已实现 command API | 实体 | `create_entity` / `set_entity_lifecycle` | 从注册原型创建实体，或休眠/销毁；当前不是 Behavior DSL operator |
 
 `emit_event` 不作为可由模型自由调用的独立“改写动作”；每个成功元动作和事务由 Runtime 自动产生 WorldEvent，避免事实与事件分开提交。`set_resource`、`adjust_resource` 和 `set_npc_resource` 这类可写入任意绝对值或第二份库存的接口不向内容和 LLM 暴露，内容使用受单位、所有权、预留、前置条件和容量约束的语义化元动作。
 
 村庄复合行为可以由当前已注册元动作自然生成：配给是“检查粮食 → 消耗粮食 → 满足需求 → 记录”；修船是“检查粮食和船况 → 消耗粮食 → 增加船况 → 调整关系”；档案整理使用资源/需求配方；资源转移、生产、移动、安全和承诺都可以作为配方节点进入内容包，知识、经验和记忆通过带来源约束的 operator 写入主体投影。
 
-资源账本是可复用的 World Simulation Framework 能力，不是村庄专用规则。Runtime 只实现通用的数量、容量、所有权、转移、生产、消耗、预留和释放算子；资源 ID、单位、容量、衰减和替代关系由 Content Pack 声明。资源能力是可选的，未声明资源的世界不会因为 Runtime 存在资源算子而产生资源事实。
+资源账本是可复用的 World Simulation Framework 能力，不是村庄专用规则。Runtime 只实现通用的数量、容量、所有权、转移、生产、消耗、预留和释放算子；资源 ID、单位、容量、衰减和替代关系由 Content Pack 声明。资源能力是可选的，未声明资源的世界不会因为 Runtime 存在资源算子而产生资源事实。需要实体属性语义的修船过程可以生产 `repair_material`，再由 `security.repair` 在同一过程的声明阶段修改渡船实体的 `SecurityState.integrity`；当前村庄的 `boat_integrity` 仍是内容明确声明的条件资源示例，不代表所有世界都应采用该建模方式。
 
 长过程是否预留输入由行为配方的 `reservation_mode` 声明，当前值为 `none` 或 `input_resources`。Runtime 不根据持续时间、资源名称或 NPC 身份推断预留策略。`input_resources` 只建立本过程的计划占用，完成时消费并释放，暂停/取消时释放；它不改变资源事实数量。资源仲裁同样完全由内容声明：`priority` 是非负分配优先级，`preemption_policy=none` 表示只接受当前可用资源，`lower_priority` 表示请求可暂停持有所需预留、优先级更低且声明为可中断的其他过程。相同或更高优先级不会被抢占，被选中的过程按优先级和稳定 ID 确定顺序，整组暂停在同一事务中完成。抢占者完成后，受害者只有在刺激条件清除且资源重新可用时才恢复，`completesAt` 顺延实际暂停时长；`npc.process_suspended` 和 `npc.process_resumed` 保存原因、抢占者、过程 ID、资源方案与优先级证据。该机制属于通用资源基础设施，村庄、港区和未来经济实例只配置数值和策略，不增加 C++ 特例。
 
@@ -413,9 +455,15 @@ IntentProposal + BehaviorRecipe
 
 ### 时间、移动和模拟等级
 
-物理时间、游戏时间和事件时间分开。近场物理固定步长，NPC 事件唤醒或低频更新，远端跳到下一个有意义的日程、会面、资源结算或承诺截止。P0 由 `WorldService::advanceMinutes` 顺序推进分钟并在边界执行结算；未来的 `WorldScheduler::advance_to` 必须保持同一契约，需求结算、目标唤醒和资源冲突不能各自维护时钟。
+物理时间、游戏时间和事件时间分开。近场物理固定步长，NPC 事件唤醒或低频更新，远端跳到下一个有意义的日程、会面、资源结算或承诺截止。当前实现由 `WorldService::advanceMinutes` 顺序推进分钟并在边界执行结算；未来的 `WorldScheduler::advance_to` 必须保持同一契约，需求结算、目标唤醒和资源冲突不能各自维护时钟。 `advanceTo(target_time)` 是统一推进接口：Scheduler 先找出不可跳过的事实边界（过程完成、承诺截止、刺激到期、资源耗尽、日程/唤醒和外部事件），连续衰减可以一次解析推进；所有边界按时间、稳定 ID 和事件优先级确定性排序。`world_revision` 标识权威状态事务，`simulation_time` 标识世界时间，`scheduler_epoch` 标识一次调度批次，`npc_state_version` 标识主体状态；异步提案按实际依赖的版本检查，不把无关主体变化误当作自身状态变化。
 
 近场和远端共享 `MovementIntent`/`MovementResult`，包含起点、终点、路线、预计到达时间、资源消耗和失败原因；模拟等级只改变执行精度，不改变业务规则。内容包的 `simulation_policy.near_tick_minutes` 和 `far_tick_minutes` 决定 NPC 唤醒节奏，NPC 的需求衰减使用该 NPC 上次驱动结算时间到当前时间的实际跨度，因此远端跳过多个小时不会丢失需求变化。`SimulationMetrics` 记录近/远场唤醒、跳过检查和离线推进分钟数；快照序列化大小与事件数量由性能基准测试测量。Navigation 与 Physics 分离；物理观察必须经过 WorldService 才能成为业务事实。
+
+### 运行环境身份与性能观测
+
+每个 Snapshot 和 Replay 都记录可复现环境身份：Runtime/Simulation 版本、Content Pack 与 Game Instance 版本、Intelligence Profile/Prompt 版本、活动 Overlay 版本、随机源配置、Provider/模型和决策通道。模型输出不是事实，但必须作为决策审计输入保存；恢复和 Replay 不重新调用 Provider。
+
+持续运行的规模指标由 `SimulationMetrics` 和 Provider 队列指标记录：主体数量、每游戏日推进耗时、决策平均/P95 延迟和过期率、队列积压、DecisionContext token 预算、事件量、Snapshot/Replay 大小与耗时、资源竞争冲突率和演化沙箱耗时。当前共享模型槽位服务小世界；扩大主体数量前先测量这些指标，再决定并发和调度策略。
 
 ## 8. JSON 内容、行为和提案契约
 
@@ -454,7 +502,7 @@ Behavior DSL 只组合注册节点、条件和元动作，例如：
 }
 ```
 
- P0 不把这套 DSL 误称为通用编程语言，但它已经支持由 JSON 构造一棵受约束的行为树。内容包声明 `meta_actions`（故事动作 ID 到 Runtime 通用 operator 的绑定）、`conditions`（条件 ID 到只读谓词的绑定）和 `recipes`；加载器校验引用，`BehaviorRecipeRuntime` 在运行时编译 `Sequence`、`Selector`、`Interruptible`、`Timeout`、`Condition` 和 `Action` 节点。游戏代码不会为 Mira、Lorn、Eve 或某个故事动作创建专用 BT。`GoalSelector`/LLM 只选择候选 `recipe_id`，接受后由 Runtime 创建 `ProcessExecution` 并记录该 recipe；长过程等待由 ProcessExecution 管理，过程完成时才在事务中运行已编译配方的原子效果。Recipe 可以声明参数 JSON Schema，节点通过 `{"bind":"parameter_name"}` 引用运行时输入；因此 `goto`、交易对象、协作对象和调查目标都是能力参数，而不是写死在 operator 中的故事 ID。普通决策只能选择已批准计划并填写参数；LLM 要创建全新的 BT，必须通过 Level 1/2 的 `register_behavior_recipe` 提案，经过引用验证、沙箱和独立批准后才会进入候选目录。新增行为只需新增 JSON 配方、参数契约和已登记的通用 operator；只有新增底层事实变换原语才需要扩展 Runtime。
+ 当前实现不把这套 DSL 误称为通用编程语言，但它已经支持由 JSON 构造一棵受约束的行为树。内容包声明 `meta_actions`（故事动作 ID 到 Runtime 通用 operator 的绑定）、`conditions`（条件 ID 到只读谓词的绑定）和 `recipes`；加载器校验引用，`BehaviorRecipeRuntime` 在运行时编译 `Sequence`、`Selector`、`Interruptible`、`Timeout`、`Condition` 和 `Action` 节点。游戏代码不会为 Mira、Lorn、Eve 或某个故事动作创建专用 BT。`GoalSelector`/LLM 只选择候选 `recipe_id`，接受后由 Runtime 创建 `ProcessExecution` 并记录该 recipe；长过程等待由 ProcessExecution 管理，过程完成时才在事务中运行已编译配方的原子效果。Recipe 可以声明参数 JSON Schema，节点通过 `{"bind":"parameter_name"}` 引用运行时输入；因此 `goto`、交易对象、协作对象和调查目标都是能力参数，而不是写死在 operator 中的故事 ID。普通决策只能选择已批准计划并填写参数；LLM 要创建全新的 BT，必须通过 Level 1/2 的 `register_behavior_recipe` 提案，经过引用验证、沙箱和独立批准后才会进入候选目录。新增行为只需新增 JSON 配方、参数契约和已登记的通用 operator；只有新增底层事实变换原语才需要扩展 Runtime。
 
 演化操作是类型化的，例如 `create_entity_archetype`、`overlay_strategy`、`overlay_schedule`、`register_behavior_recipe`、`add_relationship` 和 `schedule_event`；不是任意 JSON Patch。新增 C++ Component、System、权限、调度、事件格式、存档迁移或可执行代码必须由开发者发布。
 
@@ -480,7 +528,7 @@ Behavior DSL 只组合注册节点、条件和元动作，例如：
   "schema_version": 1,
   "id": "repair_ferry",
   "inputs": [{"resource": "grain", "quantity": 5, "unit": "ration"}],
-  "outputs": [{"resource": "boat_integrity", "quantity": 8, "unit": "points"}],
+  "outputs": [{"resource": "repair_material", "quantity": 8, "unit": "point"}],
   "actor_role": "ferryman",
   "facility": "ferry_dock",
   "duration_minutes": 60,
@@ -506,45 +554,63 @@ Behavior DSL 只组合注册节点、条件和元动作，例如：
 }
 ```
 
-交易合同至少记录双方、交换资源、数量/质量、报价或支付物、预留、交付地点和时间、有效期、结算及违约路径。承诺状态变化对关系轴的影响由内容包 `promise_policy` 声明，包括违约双方、拒绝方和接受方的 `trust/respect/fear/owed` 增量以及重谈延长时长；Runtime 只负责把增量原子写入事务，不在代码里写死数值。聊天记录至少包含 `speech_act`、发送者、接收者/观察者、渠道、事实引用、来源和置信度、会话轮次、回复期限及预期后果。对话里的“我答应给你粮食”只能提交 `promise.offer` 或合同提案，不能直接增加粮食或关系。P1 注册对应 operator 后，运行时才把确认后的定义编译成 `transfer_resource`、`create_promise`、`append_memory` 等元动作事务；当前配方可使用已注册资源、需求、关系、拓扑、移动、安全和记忆/知识 operator，未注册能力仍会被内容加载器拒绝。Event 由提交器自动产生。LLM 可以提出新的过程组合，但不能只凭一段文字生成不存在的产量、所有权或承诺结果。
+交易合同至少记录双方、交换资源、数量/质量、报价或支付物、预留、交付地点和时间、有效期、结算及违约路径。承诺状态变化对关系轴的影响由内容包 `promise_policy` 声明，包括违约双方、拒绝方和接受方的 `trust/respect/fear/owed` 增量以及重谈延长时长；Runtime 只负责把增量原子写入事务，不在代码里写死数值。聊天记录至少包含 `speech_act`、发送者、接收者/观察者、渠道、事实引用、来源和置信度、会话轮次、回复期限及预期后果。对话里的“我答应给你粮食”只能提交 `promise.offer` 或合同提案，不能直接增加粮食或关系。注册对应 operator 后，运行时才把确认后的定义编译成 `transfer_resource`、`create_promise`、`append_memory` 等元动作事务；当前配方可使用已注册资源、需求、关系、拓扑、移动、安全和记忆/知识 operator，未注册能力仍会被内容加载器拒绝。Event 由提交器自动产生。LLM 可以提出新的过程组合，但不能只凭一段文字生成不存在的产量、所有权或承诺结果。
 
 ## 9. 存档、回放和调试
 
-Snapshot 包含 `save_schema_version`、`simulation_version`、`content_version/hash`、`world_id`、`instance_id`、`world_revision`、`event_sequence`、游戏时间、实体生命周期、需求状态、社会关系、组织成员与指标、承诺、交换合同、进行中的 `ProcessExecution`、NPC 的 `lastSimulationTick/lastDriveTick`、幂等键和需要的 RNG 状态。运行态 NPC 只保存 `definition_id`，不复制内容包里的角色定义；角色名、角色、公开/隐藏目标等静态数据在加载时从当前内容包解析。`instance_id` 与 `content_version` 共同锁定这次运行所使用的 Game Instance 和 Content Pack，任何一个不匹配都直接拒绝恢复。`event_sequence` 是快照截断点，后续 EventLog 从其后追加。加载时校验 `definition_id` 可解析且 `content_version`、`instance_id` 与当前内容一致，并验证事件序号、因果链和事件版本来源，任一不满足直接拒绝并报出差异，不回退到旧字段或静默重置。当前未发布，不保留旧存档兼容路径；schema 改变时同步更新存档读写、测试和文档。当前快照 schema 为 18，模拟版本为 `adaptive-runtime-p1.19`；实体库存与公共资源池分开保存，资源转移只能通过注册 operator 改变两者。激活中的 overlay 以有序记录保存 proposal ID、基线内容版本、激活版本和类型化操作；恢复时从基线 Content Pack 重放这些已批准操作，回滚也由同一版本栈重建。已经提交的世界事实和 EventLog 不随 overlay 回退。需要显式 durable checkpoint 时，`WorldService::saveDurableCommit` 把已提交 Snapshot 与 Replay 交给当前持久化适配器；SQLite 在一个事务中保存状态载荷、事件载荷、Revision、幂等键和 Overlay 投影。`DurableCheckpointPolicy` 默认关闭，可选择在已提交调度边界按分钟周期或日边界写入；它不会把 I/O 放进每个 Tick 或打开的事务，逐根事务自动写盘仍需更高的生产化崩溃恢复契约。
+Snapshot 包含 `save_schema_version`、`simulation_version`、`content_version/hash`、`world_id`、`instance_id`、`world_revision`、`event_sequence`、游戏时间、实体生命周期、需求状态、社会关系、组织成员与指标、承诺、交换合同、进行中的 `ProcessExecution`、NPC 的 `lastSimulationTick/lastDriveTick`、幂等键和需要的 RNG 状态。运行态 NPC 只保存 `definition_id`，不复制内容包里的角色定义；角色名、角色、公开/隐藏目标等静态数据在加载时从当前内容包解析。`instance_id` 与 `content_version` 共同锁定这次运行所使用的 Game Instance 和 Content Pack，任何一个不匹配都直接拒绝恢复。`event_sequence` 是快照截断点，后续 EventLog 从其后追加。加载时校验 `definition_id` 可解析且 `content_version`、`instance_id` 与当前内容一致，并验证事件序号、因果链和事件版本来源，任一不满足直接拒绝并报出差异，不回退到旧字段或静默重置。当前未发布，不保留旧存档兼容路径；schema 改变时同步更新存档读写、测试和文档。当前快照 schema 为 18，模拟版本为 `adaptive-runtime-1.20`；实体库存与公共资源池分开保存，资源转移只能通过注册 operator 改变两者。激活中的 overlay 以有序记录保存 proposal ID、基线内容版本、激活版本和类型化操作；恢复时从基线 Content Pack 重放这些已批准操作，回滚也由同一版本栈重建。已经提交的世界事实和 EventLog 不随 overlay 回退。需要显式 durable checkpoint 时，`WorldService::saveDurableCommit` 把已提交 Snapshot 与 Replay 交给当前持久化适配器；SQLite 在一个事务中保存状态载荷、事件载荷、Revision、幂等键和 Overlay 投影。`DurableCheckpointPolicy` 默认关闭，可选择在已提交调度边界按分钟周期或日边界写入；它不会把 I/O 放进每个 Tick 或打开的事务，逐根事务自动写盘仍需更高的生产化崩溃恢复契约。
 
-P0 同时支持两种产物：Snapshot 负责普通检查点恢复；可选 Replay Package 保存基线状态、从基线到当前状态的聚合 JSON Patch、事件范围、World Revision 和状态摘要。`replay()` 会实际应用该 Patch，追加事件并通过最终 Snapshot 校验，所以它能验证“这份审计包是否重建出同一事实”；它同时接受独立 JSONL Replay Package 和 `saveDurableCommit()` 生成的显式 checkpoint artifact。这仍不是 Event Sourcing：事件载荷尚未被定义为逐领域 reducer，不能声称仅靠事件从初始状态重建；Replay Package 是提交效果重放和因果审计。Replay 只在显式生成时做一次聚合 diff，不进入每个 tick 的运行路径。未来确定性模拟回放还要重跑命令、Provider 响应、上下文版本、RNG 和规则版本；不能把检查点恢复宣传成完整确定性重算。Bullet 只承诺固定环境下尽量复现，规则层和远端 LifeEvent 才是跨平台确定性目标。
+当前实现同时支持两种产物：Snapshot 负责普通检查点恢复；可选 Replay Package 保存基线状态、从基线到当前状态的聚合 JSON Patch、事件范围、World Revision 和状态摘要。`replay()` 会实际应用该 Patch，追加事件并通过最终 Snapshot 校验，所以它能验证“这份审计包是否重建出同一事实”；它同时接受独立 JSONL Replay Package 和 `saveDurableCommit()` 生成的显式 checkpoint artifact。这仍不是 Event Sourcing：事件载荷尚未被定义为逐领域 reducer，不能声称仅靠事件从初始状态重建；Replay Package 是提交效果重放和因果审计。Replay 只在显式生成时做一次聚合 diff，不进入每个 tick 的运行路径。未来确定性模拟回放还要重跑命令、Provider 响应、上下文版本、RNG 和规则版本；不能把检查点恢复宣传成完整确定性重算。Bullet 只承诺固定环境下尽量复现，规则层和远端 LifeEvent 才是跨平台确定性目标。
 
 文本调试界面和事件检查器至少显示：当前时间、Revision、实体生命周期、NPC 需求缺口/驱动力、当前意图和目标、行为树节点、最近 Command/Proposal、拒绝原因、事件序列、Provider 响应分类、保存截断点和回放差异。所有诊断读取已提交状态，暂存提案必须明确标记。
 
-## 10. 产品路线、第一验证场和验收
+## 10. 当前能力、验收闭环和后续扩展
 
-### P0：三 NPC 小村庄验证平台和模型
+### 已经稳定的纵向闭环
 
-小村庄只提供简单故事背景：一个公共资源、三个重要 NPC、日程、需求、关系、承诺、记忆和一个可观察的资源冲突。验收的重点不是剧情数量，而是以下因果链：
+当前 Runtime 已经用三个内容实例验证同一条因果链：
 
 ```text
-资源变化 -> 需求缺口 -> 驱动力/目标 -> NPC 意图 -> 规则行动
--> 他人或公共资源变化 -> 关系/记忆/策略变化 -> 次日计划变化
--> EventLog 和 Snapshot/Replay 可解释
+资源/环境变化 -> 需求缺口与外驱 -> LLM 理解和权衡
+-> 已登记计划/BT -> ProcessExecution 跨 Tick 推进
+-> 元动作事务提交 -> 资源、关系、记忆、知识和经验变化
+-> 下一轮主体上下文与计划变化 -> EventLog/Snapshot 可审计
 ```
 
-P0 必须支持：任意最小内容包启动；NPC 无玩家继续运行并由默认 LLM 产生自主提案；需求随时间衰减并产生 `need.*` 事件；已提交行动产生满足；Goal/FSM/BT 分层；非法动作不改变事实；实体生命周期可审计；LLM 不可用时已批准规则和存档仍可恢复，但不会伪造新的 NPC 意图；Snapshot 恢复和回放不调用 LLM；文本界面能显示驱动力和拒绝原因。
+已验证的能力包括：
 
-首个验收场景要求玩家与三个重要 NPC 各交谈多轮后仍保持角色底稿、知识边界和已确认事实；接受、拒绝和违背同一承诺会产生不同任务、关系和后续表达；玩家推进两天时至少两个 NPC 在无玩家参与下改变位置、资源或目标阶段；未知实体、过期承诺、版本冲突、非法动作和重复 turn 不改变事实。模型服务关闭时，世界时间推进、任务和存档仍可用；玩家对话返回可重试错误且不猜测语义、不提交行动。
+- 小村庄、潮门港和 Glass Orchard 使用同一 Runtime，角色、地点、动作和需求域来自 Content Pack；
+- 默认产品路径使用配置的本地 LLM。玩家对白先做话语行为理解，再生成回答；自驱决策选择一个已登记计划并启动跨 Tick 的 BT/ProcessExecution。模型不可用时规则时间和已经批准的过程仍可推进，但 Runtime 不伪造新的主体意图；
+- Goal、ProcessExecution、FSM 和 BT 由唯一 `NpcActivity` 生命周期统一，BT 每个 Tick 只报告 `Running/Success/Failure/Interrupted`，不直接写 Goal 或 WorldState；
+- 元动作、条件、行为树节点、参数和资源策略来自内容注册表；`goto` 等目标是运行时参数，不在 C++ 中写死角色或地点；
+- 需求、外驱、关系、资源、生产、承诺、交易、冲突/安全、知识/经验、近远场模拟和可替换实例均通过统一的校验、事务和事件路径；
+- Level 1 个体策略演化和 Level 2 世界底座演化都由真实 LLM 提案，经过证据校验、沙箱、独立审批和版本化 Overlay；它们不能改 Runtime Core，不能自我批准，也不能把私有经验直接传播给没有授权的主体；
+- Snapshot 用于读档，Replay Package 用于显式的提交效果验证和审计；Replay 不在每个 Tick 写盘，也不宣称已经实现仅靠事件 reducer 的完整 Event Sourcing；
+- CMake 固定下载并静态编译 SQLite amalgamation，`SqlitePersistence` 始终可用，不存在改变 Runtime 语义的 SQLite 编译开关。JSON 文件适配器仍保留为可读的开发/测试格式；两者都保存已提交表示，不拥有第二份 WorldState。
 
-### P1：潮门港内容和集体驱力
+### 首个体验的验收标准
 
-已完成一个可替换的潮门港纵向切片：独立 Content Pack 声明市场、两名 NPC、组织成员和集体指标；Game Instance 声明两方库存；定时 Activity 通过注册的 `trade.execute`、`group.metric_adjust` 和 `relationship.adjust` 形成“交换→组织士气→跨 NPC 信任”的事件链，`ExchangeContract` 还覆盖提案、接受、两侧原子结算和过期，并能从 Snapshot 恢复。近远场节奏和 `advance_to` 基准也已覆盖。家庭、失踪任务、完整 UI、物理机关和内容迁移仍是后续港区扩展，不进入 Runtime Core。
+首个小世界必须持续满足以下事实，而不是依赖一段预写剧情：
 
-### P2：World Intelligence 演化和沙箱
+1. 玩家不输入时，时间、日程、需求衰减、已接受过程和远端生活继续推进。
+2. 需要主体作出新判断时，Runtime 生成裁剪后的 `DecisionContext`，默认 LLM 选择内容允许的计划或只生成对白；模型返回的参数经过 Schema、权限、可见性、拓扑、资源和 Revision 校验。
+3. 计划接受后只启动一个 `ProcessExecution`；每次 Tick 推进当前 BT，不重复调用 LLM。完成、失败、显著打断或配置的重评估边界才再次唤醒模型。
+4. 每个事实变化均通过统一事务提交并产生事件；事件包含来源、版本和因果关联，下一轮上下文能解释变化。
+5. 关闭模型服务时，已经批准的规则和活动仍可恢复，错误是可审计且失败关闭的，不会用关键词、固定目标或 Mock 冒充 LLM 决策。
+6. 同一 Runtime 更换 Content Pack 后，不能出现角色名、世界名或故事动作相关的 C++ 分支。
 
-已完成 Proposal Schema、提案库、异常检测、回放沙箱、策略/内容 overlay、指标评估、审批策略、版本化激活、回滚和审计。异常规则和 Scenario intervention 都是内容可声明、Runtime 可验证的通用边界；先支持声明式能力和已有组件组合，不热加载任意代码。场景实验不进入 P0 游戏门槛，缺少事实模型时明确拒绝。
+### 已知边界与后续扩展
 
-### P3：群岛和可替换世界实例
+以下工作不属于当前闭环，必须先补齐事实模型、校准数据和失败标准，再通过同一内容/治理契约加入：
 
-已完成最小可替换性纵向切片：`Glass Orchard` 使用跨区域拓扑、两个组织/阵营、制度指标、资源交换、自定义 `stewardship` 与 `ecological` 需求域，以及逾期承诺造成的关系余波。它证明新的小说语义不需要进入 Runtime Core；Headless 的实例标题、对话参与者和回放内容根也来自当前内容，而不是固定村庄。
+- 抵押、价格发现、利率、税费、政策和复杂合同仲裁；
+- 更大规模的社会网络、家庭、任务链、组织协商和跨世界服务；
+- 持久化每个根事务的崩溃原子提交、快照迁移和长期事件保留策略；
+- 事件 reducer 驱动的完整 Event Sourcing，以及跨平台的全量确定性重算；
+- 大规模主体的事件驱动调度、多模型并发和分布式部署；
+- 需要新增 C++ Primitive 的新能力。LLM 只能提出 capability request，不能在线注入代码或任意脚本。
 
-群岛的多区域剧情、世界自发聚落和更大规模经济仍属于内容扩展和能力演化，不应靠增加 C++ 特例完成。现实世界实验只有在定义了相应实体、数据边界、校准方法和机制后才有意义，不能把 LLM 泛化能力当作缺失模型的替代品。
+这些扩展不能通过增加更多角色特例来完成。每一项都要回答：新增了什么可观察事实，哪个注册 Operator 提交它，事件和 Snapshot 如何保存，主体如何获得授权视图，LLM 如何提出但不能越权，以及怎样从同一 Snapshot 重复验证结果。
 
 ## 11. 研究依据与边界
 
@@ -564,7 +630,7 @@ P0 必须支持：任意最小内容包启动；NPC 无玩家继续运行并由�
 - Smith, *The Contract Net Protocol: High-Level Communication and Control in a Distributed Problem Solver*, IEEE Transactions on Computers C-29(12), 1980, DOI: 10.1109/TC.1980.1675516。用于区分任务公告、报价/提议、授予/接受和执行，支持交易与协作合同的显式状态。
 - Akerlof, *The Market for Lemons: Quality Uncertainty and the Market Mechanism*, Quarterly Journal of Economics 84(3), 1970, DOI: 10.2307/1879431。用于要求交易对象记录质量、信息不对称、来源和担保，不能只用数量表示商品。
 - Searle, *Speech Acts: An Essay in the Philosophy of Language*, 1969；结合 Clark & Brennan 的 grounding 研究。用于把聊天拆成话语行为、事实引用、共同确认和后续承诺，而不是把自然语言文本当作世界事实。
-- AgentSociety v1, *Large-Scale Simulation of LLM-Driven Generative Agents*, arXiv:2502.08691；AgentSociety 2, arXiv:2607.11895。借鉴其环境模块化、实验回放、工作区隔离和研究工作流；不把分布式执行框架直接带入 P0。
+- AgentSociety v1, *Large-Scale Simulation of LLM-Driven Generative Agents*, arXiv:2502.08691；AgentSociety 2, arXiv:2607.11895。借鉴其环境模块化、实验回放、工作区隔离和研究工作流；不把分布式执行框架直接带入 。
 - AgentTorch / Large Population Models 的公开架构。借鉴其组合式机制、LLM 与机制模型分离和跨领域泛化方向；不把可微分大规模训练作为小村庄 Runtime 的前置条件。
 - SimCity 系列的城市模拟实践。借鉴其资源流、交通、土地/设施约束和政策反馈必须由规则持续结算的思想；具体实现以本项目的事实、事务和事件契约为准。
 - GenSim、CUP 等名称对应多个不同项目或论文，待确认具体版本后再纳入正式依赖或引用；当前只采用可核验的公开机制，不以名称作为架构依据。

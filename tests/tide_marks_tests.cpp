@@ -430,6 +430,27 @@ void goal_ranking_aggregates_all_satisfied_needs() {
     }
 }
 
+void drive_confidence_is_applied_once() {
+    NeedContent need;
+    need.id = "food";
+    need.domain = "physiological";
+    need.weight = 1.0;
+    need.priority = 0.2;
+    need.criticalThreshold = 0.8;
+    need.satisfiers["share"] = NeedSatisfier{0.4, {}};
+    NeedState state;
+    state.deficit = 0.9;
+    state.sensitivity = 1.0;
+    state.evidenceConfidence = 0.5;
+    state.expectedRelief["share"] = 0.4;
+    const auto evaluation = DriveSystem::evaluate(need, state, "share");
+    const double expected = evaluation.effectiveWeight * evaluation.expectedRelief * evaluation.confidence;
+    expect(std::abs(evaluation.utilityContribution - expected) < 1e-9,
+           "drive confidence is applied once at the final utility boundary");
+    expect(std::abs(evaluation.expectedRelief - 0.4) < 1e-9,
+           "expected relief remains the learned amount instead of embedding confidence");
+}
+
 void private_traits_change_stable_action_order() {
     NpcState npc;
     NeedContent need;
@@ -1558,7 +1579,6 @@ void durable_checkpoint_policy_is_boundary_driven_and_opt_in() {
            "disabling the policy stops automatic durable writes while simulation continues");
 }
 
-#ifdef TIDE_MARKS_HAS_SQLITE
 void sqlite_persistence_roundtrips_versioned_artifacts() {
     const auto path = (std::filesystem::temp_directory_path() / "tide_marks-persistence-test.sqlite").string();
     std::filesystem::remove(path);
@@ -1606,7 +1626,6 @@ void sqlite_persistence_roundtrips_versioned_artifacts() {
            "SQLite reports a missing durable checkpoint without leaking or double-closing its handle");
     std::filesystem::remove(path);
 }
-#endif
 
 void event_history_has_causal_identity() {
     auto service = WorldService::load(ContentPackLoader::defaultRoot(), std::make_unique<MockProvider>());
@@ -2943,6 +2962,7 @@ int main() {
     };
     run("village_has_three_independent_npcs", village_has_three_independent_npcs);
     run("goal_ranking_aggregates_all_satisfied_needs", goal_ranking_aggregates_all_satisfied_needs);
+    run("drive_confidence_is_applied_once", drive_confidence_is_applied_once);
     run("private_traits_change_stable_action_order", private_traits_change_stable_action_order);
     run("authored_utility_profile_is_bounded_and_auditable",
         authored_utility_profile_is_bounded_and_auditable);
@@ -2995,10 +3015,8 @@ int main() {
     run("json_file_persistence_creates_run_directories", json_file_persistence_creates_run_directories);
     run("durable_checkpoint_policy_is_boundary_driven_and_opt_in",
         durable_checkpoint_policy_is_boundary_driven_and_opt_in);
-#ifdef TIDE_MARKS_HAS_SQLITE
     run("sqlite_persistence_roundtrips_versioned_artifacts",
         sqlite_persistence_roundtrips_versioned_artifacts);
-#endif
     run("event_history_has_causal_identity", event_history_has_causal_identity);
     run("physics_events_are_deterministic_and_drained", physics_events_are_deterministic_and_drained);
     run("event_bus_is_ordered_and_filterable", event_bus_is_ordered_and_filterable);

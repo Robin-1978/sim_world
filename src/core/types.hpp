@@ -15,7 +15,7 @@ inline constexpr std::int64_t kMinutesPerHour = 60;
 inline constexpr std::int64_t kMinutesPerDay = 1440;
 inline constexpr int kWorldEventSchemaVersion = 4;
 inline constexpr int kSnapshotSchemaVersion = 18;
-inline constexpr char kSimulationVersion[] = "adaptive-runtime-p1.19";
+inline constexpr char kSimulationVersion[] = "adaptive-runtime-1.20";
 
 struct GameTime {
     std::int64_t minute{0};

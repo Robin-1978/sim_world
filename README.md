@@ -198,7 +198,7 @@ no automatic durable write:
   --checkpoint-every-minutes 60
 ```
 
-JSON is the inspectable default; SQLite is an optional adapter for the same committed
-Snapshot/Replay boundary. Replay is an explicit verification artifact, not per-tick persistence
-and not full Event Sourcing. The SQLite adapter is built and tested in a separate CI job with
-`TIDE_MARKS_REQUIRE_SQLITE=ON`.
+JSON is the inspectable default; SQLite is a statically compiled adapter for the same committed
+Snapshot/Replay boundary. CMake downloads the pinned SQLite amalgamation, so deployment does not
+require a system sqlite3 package. Replay is an explicit verification artifact, not per-tick
+persistence and not full Event Sourcing.

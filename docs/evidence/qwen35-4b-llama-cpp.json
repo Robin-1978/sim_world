@@ -41,7 +41,7 @@
       "predicted_tokens": 18
     }
   ],
-  "result": "P0 village IntentProposal returned valid JSON, cited_stimulus_ids was empty when no stimuli were supplied, and Runtime accepted the authored action",
+  "result": "village IntentProposal returned valid JSON, cited_stimulus_ids was empty when no stimuli were supplied, and Runtime accepted the authored action",
   "thinking_budget_probe": {
     "enabled": true,
     "reasoning_budget_tokens": 256,
@@ -97,7 +97,7 @@
           "protect_secret",
           "explain_ration"
         ],
-        "assessment": "best cost-quality balance in this P0 decision set"
+        "assessment": "best cost-quality balance in this decision set"
       },
       {
         "mode": "thinking_256",
@@ -160,7 +160,7 @@
           "protect_secret",
           "explain_ration"
         ],
-        "assessment": "no material P0 quality gain; reserve for evolution analysis"
+        "assessment": "no material quality gain; reserve for evolution analysis"
       }
     ],
     "recommendation": {

@@ -53,8 +53,6 @@ void JsonFilePersistence::saveDurableCommit(const std::string& path, const Json&
     replaceFile(path, artifact.dump(2) + "\n");
 }
 
-#ifdef TIDE_MARKS_HAS_SQLITE
-
 SqlitePersistence::SqlitePersistence(std::string databasePath) : databasePath_(std::move(databasePath)) {
     if (databasePath_.empty()) throw std::invalid_argument("SQLite database path must not be empty");
     const auto parent = std::filesystem::path(databasePath_).parent_path();
@@ -312,7 +310,5 @@ Json SqlitePersistence::loadDurableCommit(const std::string& path) const {
         throw;
     }
 }
-
-#endif
 
 }  // namespace tide_marks
