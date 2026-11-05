@@ -347,6 +347,17 @@ Json WorldEvolutionSystem::reflectionContext(const WorldService& world,
         (void)definition;
         contentSummary["registered_conditions"].push_back(id);
     }
+    Json failureCandidates = Json::array();
+    for (const auto& event : world.state_.events) {
+        if (event.sequence <= npc.reflectionCursor.lastEventSequence ||
+            event.type != "npc.process_failed" || event.actor != targetNpcId) {
+            continue;
+        }
+        failureCandidates.push_back(Json{{"sequence", event.sequence},
+                                         {"action_id", event.data.value("action_id", event.target)},
+                                         {"process_id", event.data.value("process_id", "")}});
+        if (failureCandidates.size() >= 8) break;
+    }
     return Json{{"schema_version", 1}, {"trigger", "daily_reflection"},
                 {"target_npc", targetNpcId}, {"base_world_revision", world.state_.revision},
                 {"world_time", world.state_.now.minute},
@@ -376,6 +387,11 @@ Json WorldEvolutionSystem::reflectionContext(const WorldService& world,
                                              {"last_reflection_day", npc.reflectionCursor.lastReflectionDay},
                                              {"reflection_revision", npc.reflectionCursor.reflectionRevision}}},
                 {"new_evidence", reflectionEvidence(world.state_, npc)},
+                // This deterministic hint prevents the model from spending
+                // innovation tokens on ordinary successes. Runtime still
+                // checks the cited sequences and repeats the admission gate;
+                // the hint is advisory context, never authority.
+                {"failure_candidates", failureCandidates},
                 {"unresolved_issues", npc.unresolvedIssues},
                 {"pending_innovation_hypotheses", npc.innovationHypotheses}, {"content", contentSummary}};
 }

@@ -860,7 +860,7 @@ ProviderResponse LlamaCppProvider::proposeReflection(const Json& context,
         "Innovation is optional and must be a private Level 1 hypothesis using exactly one register_behavior_recipe operation "
         "whose available_to contains only target_npc. Do not claim that a proposal was applied or that an experiment succeeded. "
         "Keep this reflection small: at most two belief updates, two experience updates, and two memory updates. "
-        "innovation_hypotheses is optional: when a persistent problem is present and new evidence shows at least two matching failures of the same authored process, return at most one small private hypothesis; otherwise return []. Reuse registered meta actions, keep available_to exactly target_npc, and include a bounded test plan with Runtime metrics. "
+        "innovation_hypotheses is optional: when a persistent problem is present and failure_candidates contains at least two entries with the same action_id, return at most one small private hypothesis and cite both matching failure sequence values in evidence_event_sequences; otherwise return []. Ordinary successes, need relief and day-boundary events are not innovation evidence. Reuse registered meta actions, keep available_to exactly target_npc, and include a bounded test plan with Runtime metrics. "
         "When pending_innovation_hypotheses is empty, return innovation_actions=[]; lifecycle actions may reference only persisted hypotheses. "
         "resolved_issues may contain only exact strings from unresolved_issues; when that list is empty, return resolved_issues=[]. "
         "When current_state.activity has no active goal, keep goal_adjustment={} and never request status=cancelled. "
