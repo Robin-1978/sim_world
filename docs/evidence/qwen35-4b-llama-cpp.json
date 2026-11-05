@@ -395,5 +395,22 @@
       "action_validator_enforces_recursive_schema_constraints"
     ],
     "provider_feedback_path": "invalid schema remains fail-closed and is eligible for the existing bounded structured repair"
+  },
+  "latest_live_smoke_2026_11_05": {
+    "commands": [
+      "./build/tide_marks_headless --profile data/intelligence-profile.json --provider profile --days 0",
+      "./build/tide_marks_headless --profile data/intelligence-profile.json --provider profile --days 0 --evolve level1"
+    ],
+    "provider": "llama.cpp",
+    "model": "Huihui-Qwen3.5-4B-abliterated.Q4_K_M",
+    "observations": {
+      "dialogue": "I’m not in an active process right now; I’m at the granary.",
+      "dialogue_world_revision": 2,
+      "level1_operation": "overlay_strategy",
+      "level1_status": "proposed",
+      "level1_source_world_revision": 1,
+      "level1_source_world_mutated": false
+    },
+    "result": "passed"
   }
 }
