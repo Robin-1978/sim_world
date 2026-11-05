@@ -865,6 +865,8 @@ ProviderResponse LlamaCppProvider::proposeReflection(const Json& context,
         "whose available_to contains only target_npc. Do not claim that a proposal was applied or that an experiment succeeded. "
         "Keep this reflection small: at most two belief updates, two experience updates, and two memory updates. "
         "When pending_innovation_hypotheses is empty, return innovation_hypotheses=[] and innovation_actions=[]. "
+        "resolved_issues may contain only exact strings from unresolved_issues; when that list is empty, return resolved_issues=[]. "
+        "When current_state.activity has no active goal, keep goal_adjustment={} and never request status=cancelled. "
         "If evidence is insufficient, return empty updates and preserve unresolved issues. "
         "If validation_feedback is present, repair only the reported field error and keep all other empty/default fields.";
     Json beliefItem{{"type", "object"}, {"additionalProperties", false},
@@ -937,6 +939,16 @@ ProviderResponse LlamaCppProvider::proposeReflection(const Json& context,
     if (!pendingHypotheses.is_array() || pendingHypotheses.empty()) {
         schema["properties"]["innovation_hypotheses"] = Json{{"type", "array"}, {"maxItems", 0}};
         schema["properties"]["innovation_actions"] = Json{{"type", "array"}, {"maxItems", 0}};
+    }
+    const auto unresolvedIssues = context.value("unresolved_issues", Json::array());
+    Json resolvedIssueItem{{"type", "string"}, {"maxLength", 256}};
+    if (unresolvedIssues.is_array() && !unresolvedIssues.empty()) {
+        resolvedIssueItem["enum"] = unresolvedIssues;
+    } else {
+        schema["properties"]["resolved_issues"] = Json{{"type", "array"}, {"maxItems", 0}};
+    }
+    if (unresolvedIssues.is_array() && !unresolvedIssues.empty()) {
+        schema["properties"]["resolved_issues"]["items"] = std::move(resolvedIssueItem);
     }
     Json modelContext = context;
     // The authored role prompt belongs in the trusted system prefix. Keeping

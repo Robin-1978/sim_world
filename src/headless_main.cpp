@@ -177,6 +177,18 @@ int main(int argc, char** argv) {
         service.advanceMinutes(totalMinutes);
     }
     if (waitLlmMilliseconds > 0) {
+        // A day/hour loop uses a bounded wait so simulation time cannot be
+        // held hostage by a provider.  Before reporting a long-run result,
+        // give the serial provider lane one explicit final drain window; this
+        // prevents a valid reflection or repair that finished at the boundary
+        // from being mistaken for a permanently pending evolution.
+        if (service.pendingAsyncTurns() > 0) {
+            const auto finalDrainMilliseconds = std::max<std::int64_t>(waitLlmMilliseconds, 120000);
+            drainedTurns += service.waitForAsyncTurns(finalDrainMilliseconds);
+            std::cout << "llm-final-drain: consumed=" << drainedTurns
+                      << " pending=" << service.pendingAsyncTurns()
+                      << " timeout_ms=" << finalDrainMilliseconds << '\n';
+        }
         std::cout << "llm-drain: consumed=" << drainedTurns
                   << " pending=" << service.pendingAsyncTurns() << '\n';
     }
