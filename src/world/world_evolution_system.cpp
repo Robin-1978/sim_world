@@ -5,6 +5,7 @@
 #include "world/world_service.hpp"
 
 #include <algorithm>
+#include <map>
 
 namespace tide_marks {
 
@@ -728,6 +729,31 @@ CommandResult WorldEvolutionSystem::commitReflection(const EvolutionRequest& req
     const auto hypotheses = result.value("innovation_hypotheses", Json::array());
     if (!hypotheses.is_array() || hypotheses.size() > 2) {
         return world_.reject("invalid_reflection_innovation", "Innovation hypotheses are optional and bounded.");
+    }
+    if (!hypotheses.empty()) {
+        // A reflection may suggest innovation only after a durable problem
+        // exists and the cited window contains two failures of the same
+        // authored process.  This is a deterministic admission gate: the
+        // model may describe a hypothesis, but it cannot manufacture the
+        // evidence needed to create one.
+        std::map<std::string, std::size_t> failureCounts;
+        for (const auto& event : world_.state_.events) {
+            if (event.sequence <= npc.reflectionCursor.lastEventSequence ||
+                event.sequence > boundarySequence || !evidence.contains(event.sequence) ||
+                event.type != "npc.process_failed" || event.actor != request.targetNpcId) {
+                continue;
+            }
+            const auto actionId = event.data.value("action_id", event.target);
+            if (!actionId.empty()) ++failureCounts[actionId];
+        }
+        const bool repeatedFailure = std::any_of(
+            failureCounts.begin(), failureCounts.end(),
+            [](const auto& item) { return item.second >= 2; });
+        if (npc.unresolvedIssues.empty() || !repeatedFailure) {
+            return world_.reject(
+                "innovation_evidence_insufficient",
+                "An innovation hypothesis requires a persisted unresolved issue and two cited failures of the same process.");
+        }
     }
     std::vector<EvolutionProposal> normalizedHypotheses;
     for (const auto& hypothesis : hypotheses) {

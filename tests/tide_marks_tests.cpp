@@ -415,6 +415,36 @@ public:
                     {"resolved_issues", Json::array()}, {"innovation_hypotheses", Json::array()},
                     {"innovation_actions", Json::array()},
                     {"rationale", "The evidence supports a bounded belief update."}};
+        if (emitInnovation && source != 0) {
+            result["innovation_hypotheses"] = Json::array({Json{
+                {"id", "reflection-test-innovation"}, {"proposal_kind", "innovation"},
+                {"evidence_event_sequences", Json::array({source})},
+                {"operations", Json::array({Json{
+                    {"operation", "register_behavior_recipe"}, {"id", "private_reflection"},
+                    {"plan_id", "private_reflection"}, {"duration_minutes", 5},
+                    {"interruptible", true}, {"interrupt_salience_threshold", 1.0},
+                    {"reservation_mode", "none"}, {"priority", 1},
+                    {"preemption_policy", "none"}, {"parameters", Json::object()},
+                    {"available_to", Json::array({targetNpcId})},
+                    {"root", Json{{"type", "meta_action"}, {"id", "root"},
+                                    {"name", "relieve_need"}, {"args", Json::object()},
+                                    {"max_ticks", 0}, {"children", Json::array()}}}}})},
+                {"innovation", Json{
+                    {"hypothesis", "A private reflection recipe can reduce a repeated deficit."},
+                    {"novelty_basis", "new_combination"},
+                    {"operation_ids", Json::array({"private_reflection"})},
+                    {"expected_benefits", Json::array({"lower deficit"})},
+                    {"risks", Json::array({"consumes time"})},
+                    {"test_plan", Json{{"horizon_minutes", 10},
+                                         {"metrics", Json::array({"advance_minutes"})},
+                                         {"baseline", "authored routine"},
+                                         {"scenario", "private recipe"},
+                                         {"expected_metrics", Json{{"advance_minutes", 5.0}}},
+                                         {"constraints", Json::array({"do not change shared content"})},
+                                         {"resource_budget", Json{{"minutes", 5.0}}},
+                                         {"success_criteria", "recipe completes"},
+                                         {"failure_criteria", "recipe fails"}}}}}}});
+        }
         ProviderResponse response;
         response.ok = true;
         response.reflectionResult = std::move(result);
@@ -426,6 +456,7 @@ public:
         return ProviderCapabilities{true, true, true};
     }
     std::vector<Json> reflectionContexts;
+    bool emitInnovation{false};
 };
 
 void village_has_three_independent_npcs() {
@@ -3290,6 +3321,29 @@ void daily_reflection_routes_updates_and_keeps_incremental_cursor() {
            "Level 2 receives committed hypothesis evidence without a private Level 1 proposal payload");
 }
 
+void daily_reflection_requires_failure_evidence_for_innovation() {
+    auto provider = std::make_unique<ReflectionProvider>();
+    auto* providerRaw = provider.get();
+    auto content = ContentPackLoader::load(ContentPackLoader::defaultRoot());
+    content.evolutionPolicy.enabled = true;
+    content.evolutionPolicy.level1IntervalDays = 1;
+    content.evolutionPolicy.level2IntervalDays = 0;
+    content.npcDeliberation.enabled = false;
+    providerRaw->emitInnovation = true;
+    auto service = WorldService::fromContent(content, std::move(provider));
+    service.advanceMinutes(kMinutesPerDay - (service.state().now.minute % kMinutesPerDay));
+    service.waitForAsyncTurns(1000);
+    expect(std::any_of(service.state().events.begin(), service.state().events.end(),
+                       [](const auto& event) {
+                           return event.type == "reflection.rejected" &&
+                                  event.data.value("code", "") == "innovation_evidence_insufficient";
+                       }),
+           "Runtime rejects a reflection innovation without a persisted issue and two cited process failures");
+    expect(std::none_of(service.state().events.begin(), service.state().events.end(),
+                        [](const auto& event) { return event.type == "innovation.hypothesis_created"; }),
+           "insufficient innovation evidence cannot create a durable hypothesis");
+}
+
 void intelligence_profile_configures_decision_budgets() {
     const auto profile = loadIntelligenceProfile(defaultIntelligenceProfilePath());
     const auto& decision = profile.purposes.at("decision");
@@ -3560,6 +3614,8 @@ int main() {
         automatic_evolution_uses_async_llm_and_audits_sandbox);
     run("daily_reflection_routes_updates_and_keeps_incremental_cursor",
         daily_reflection_routes_updates_and_keeps_incremental_cursor);
+    run("daily_reflection_requires_failure_evidence_for_innovation",
+        daily_reflection_requires_failure_evidence_for_innovation);
     run("intelligence_profile_configures_decision_budgets", intelligence_profile_configures_decision_budgets);
     run("intelligence_profile_decouples_models_from_api_keys",
         intelligence_profile_decouples_models_from_api_keys);
