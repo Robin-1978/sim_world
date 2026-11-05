@@ -947,6 +947,90 @@ ProviderResponse LlamaCppProvider::proposeReflection(const Json& context,
             {"resolved_issues", Json{{"type", "array"}, {"maxItems", 16}, {"items", Json{{"type", "string"}, {"maxLength", 256}}}}},
             {"innovation_hypotheses", Json{{"type", "array"}, {"maxItems", 2}, {"items", Json{{"type", "object"}}}}},
             {"innovation_actions", Json{{"type", "array"}, {"maxItems", 8}, {"items", Json{{"type", "object"}}}}}}}};
+    // Keep the optional innovation branch typed as well.  Leaving it as an
+    // unconstrained object makes Qwen emit a proposal_kind without the
+    // required innovation envelope, which then fails Runtime validation after
+    // an expensive reflection call.  The operation/root schema is deliberately
+    // bounded but still leaves recursive child nodes open for Runtime's BT
+    // validator to check against the registered content vocabulary.
+    Json recipeRoot = Json::object();
+    recipeRoot["type"] = "object";
+    recipeRoot["additionalProperties"] = false;
+    recipeRoot["required"] = Json::array({"type", "id", "name", "args", "max_ticks", "children"});
+    recipeRoot["properties"] = Json::object();
+    recipeRoot["properties"]["type"] = Json{{"enum", Json::array({"sequence", "selector", "condition", "meta_action", "interruptible", "timeout"})}};
+    recipeRoot["properties"]["id"] = Json{{"type", "string"}, {"minLength", 1}};
+    recipeRoot["properties"]["name"] = Json{{"type", "string"}, {"minLength", 1}};
+    recipeRoot["properties"]["args"] = Json{{"type", "object"}};
+    recipeRoot["properties"]["max_ticks"] = Json{{"type", "integer"}, {"minimum", 0}};
+    recipeRoot["properties"]["children"] = Json{{"type", "array"}, {"items", Json{{"type", "object"}}}};
+
+    Json recipeOperation = Json::object();
+    recipeOperation["type"] = "object";
+    recipeOperation["additionalProperties"] = false;
+    recipeOperation["required"] = Json::array({"operation", "id", "plan_id", "duration_minutes", "interruptible",
+                                                  "interrupt_salience_threshold", "reservation_mode", "priority",
+                                                  "preemption_policy", "parameters", "available_to", "root"});
+    recipeOperation["properties"] = Json::object();
+    recipeOperation["properties"]["operation"] = Json{{"const", "register_behavior_recipe"}};
+    recipeOperation["properties"]["id"] = Json{{"type", "string"}, {"minLength", 1}};
+    recipeOperation["properties"]["plan_id"] = Json{{"type", "string"}, {"minLength", 1}};
+    recipeOperation["properties"]["duration_minutes"] = Json{{"type", "integer"}, {"minimum", 0}};
+    recipeOperation["properties"]["interruptible"] = Json{{"type", "boolean"}};
+    recipeOperation["properties"]["interrupt_salience_threshold"] = Json{{"type", "number"}, {"minimum", 0.0}, {"maximum", 1.0}};
+    recipeOperation["properties"]["reservation_mode"] = Json{{"enum", Json::array({"none", "input_resources"})}};
+    recipeOperation["properties"]["priority"] = Json{{"type", "integer"}, {"minimum", 0}};
+    recipeOperation["properties"]["preemption_policy"] = Json{{"enum", Json::array({"none", "lower_priority"})}};
+    recipeOperation["properties"]["parameters"] = Json{{"type", "object"}};
+    recipeOperation["properties"]["available_to"] = Json{{"type", "array"}, {"minItems", 1}, {"maxItems", 1}, {"items", Json{{"const", targetNpcId}}}};
+    recipeOperation["properties"]["root"] = std::move(recipeRoot);
+
+    Json testPlan = Json::object();
+    testPlan["type"] = "object";
+    testPlan["additionalProperties"] = false;
+    testPlan["required"] = Json::array({"horizon_minutes", "metrics", "baseline", "scenario", "expected_metrics", "constraints", "resource_budget", "success_criteria", "failure_criteria"});
+    testPlan["properties"] = Json::object();
+    testPlan["properties"]["horizon_minutes"] = Json{{"type", "integer"}, {"minimum", 1}, {"maximum", 10080}};
+    testPlan["properties"]["metrics"] = Json{{"type", "array"}, {"minItems", 1}, {"maxItems", 6}, {"uniqueItems", true}, {"items", Json{{"type", "string"}, {"enum", Json::array({"events_added", "final_revision", "npc_count", "knowledge_count", "experience_count", "advance_minutes", "resource_total"})}}}};
+    testPlan["properties"]["baseline"] = Json{{"type", "string"}, {"minLength", 1}, {"maxLength", 512}};
+    testPlan["properties"]["scenario"] = Json{{"type", "string"}, {"minLength", 1}, {"maxLength", 512}};
+    testPlan["properties"]["expected_metrics"] = Json{{"type", "object"}, {"minProperties", 1}, {"maxProperties", 6}};
+    testPlan["properties"]["constraints"] = Json{{"type", "array"}, {"minItems", 1}, {"maxItems", 6}, {"items", Json{{"type", "string"}, {"minLength", 1}, {"maxLength", 512}}}};
+    testPlan["properties"]["resource_budget"] = Json{{"type", "object"}, {"minProperties", 1}, {"maxProperties", 8}};
+    testPlan["properties"]["success_criteria"] = Json{{"type", "string"}, {"minLength", 1}, {"maxLength", 512}};
+    testPlan["properties"]["failure_criteria"] = Json{{"type", "string"}, {"minLength", 1}, {"maxLength", 512}};
+
+    Json innovation = Json::object();
+    innovation["type"] = "object";
+    innovation["additionalProperties"] = false;
+    innovation["required"] = Json::array({"hypothesis", "novelty_basis", "operation_ids", "expected_benefits", "risks", "test_plan"});
+    innovation["properties"] = Json::object();
+    innovation["properties"]["hypothesis"] = Json{{"type", "string"}, {"minLength", 1}, {"maxLength", 1024}};
+    innovation["properties"]["novelty_basis"] = Json{{"enum", Json::array({"new_combination", "new_capability", "new_archetype"})}};
+    innovation["properties"]["operation_ids"] = Json{{"type", "array"}, {"minItems", 1}, {"uniqueItems", true}, {"items", Json{{"type", "string"}, {"minLength", 1}}}};
+    innovation["properties"]["expected_benefits"] = Json{{"type", "array"}, {"minItems", 1}, {"maxItems", 4}, {"items", Json{{"type", "string"}, {"minLength", 1}, {"maxLength", 512}}}};
+    innovation["properties"]["risks"] = Json{{"type", "array"}, {"minItems", 1}, {"maxItems", 4}, {"items", Json{{"type", "string"}, {"minLength", 1}, {"maxLength", 512}}}};
+    innovation["properties"]["test_plan"] = std::move(testPlan);
+
+    Json innovationHypothesis = Json::object();
+    innovationHypothesis["type"] = "object";
+    innovationHypothesis["additionalProperties"] = false;
+    innovationHypothesis["required"] = Json::array({"id", "proposal_kind", "evidence_event_sequences", "operations", "innovation"});
+    innovationHypothesis["properties"] = Json::object();
+    innovationHypothesis["properties"]["id"] = Json{{"type", "string"}, {"minLength", 1}};
+    innovationHypothesis["properties"]["proposal_kind"] = Json{{"const", "innovation"}};
+    innovationHypothesis["properties"]["evidence_event_sequences"] = Json{{"type", "array"}, {"minItems", 1}, {"uniqueItems", true}};
+    innovationHypothesis["properties"]["operations"] = Json{{"type", "array"}, {"minItems", 1}, {"maxItems", 1}, {"items", std::move(recipeOperation)}};
+    innovationHypothesis["properties"]["innovation"] = std::move(innovation);
+    if (!sourceSequences.empty()) {
+        innovationHypothesis["properties"]["evidence_event_sequences"]["items"] =
+            Json{{"type", "integer"}, {"minimum", 1}, {"enum", sourceSequences}};
+    } else {
+        innovationHypothesis["properties"]["evidence_event_sequences"]["items"] =
+            Json{{"type", "integer"}, {"minimum", 1}};
+    }
+    schema["properties"]["innovation_hypotheses"] =
+        Json{{"type", "array"}, {"maxItems", 1}, {"items", std::move(innovationHypothesis)}};
     const auto pendingHypotheses = context.value("pending_innovation_hypotheses", Json::array());
     if (!pendingHypotheses.is_array() || pendingHypotheses.empty()) {
         schema["properties"]["innovation_actions"] = Json{{"type", "array"}, {"maxItems", 0}};
