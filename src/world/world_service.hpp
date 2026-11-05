@@ -192,6 +192,10 @@ public:
                           const std::string& turnId = {});
     CommandResult activateOverlay(const EvolutionProposal& proposal, const EvolutionSandboxResult& sandbox);
     CommandResult rollbackOverlay(const std::string& proposalId);
+    CommandResult transitionInnovationHypothesis(const std::string& npcId,
+                                                  const std::string& proposalId,
+                                                  const std::string& nextStatus,
+                                                  const std::string& actor = "developer");
     CommandResult startInnovationAdoption(const std::string& npcId, const std::string& proposalId);
     CommandResult transitionInnovationAdoption(const std::string& npcId, const std::string& proposalId,
                                                InnovationAdoptionStatus status,

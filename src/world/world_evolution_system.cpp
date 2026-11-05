@@ -1086,6 +1086,39 @@ CommandResult WorldEvolutionSystem::startAdoption(const std::string& npcId,
     return CommandResult{true, "executing", "adoption process started", event};
 }
 
+CommandResult WorldEvolutionSystem::transitionInnovationHypothesis(const std::string& npcId,
+                                                                    const std::string& proposalId,
+                                                                    const std::string& nextStatus,
+                                                                    const std::string& actor) {
+    WorldService::TransactionScope transaction(world_);
+    const auto npcFound = world_.state_.npcs.find(npcId);
+    if (npcFound == world_.state_.npcs.end()) {
+        return world_.reject("unknown_npc", "Innovation hypothesis owner does not exist.");
+    }
+    const auto found = std::find_if(npcFound->second.innovationHypotheses.begin(),
+                                    npcFound->second.innovationHypotheses.end(),
+                                    [&proposalId](const Json& item) {
+                                        return item.value("id", "") == proposalId;
+                                    });
+    if (found == npcFound->second.innovationHypotheses.end()) {
+        return world_.reject("unknown_innovation_hypothesis", "The innovation hypothesis is not owned by this NPC.");
+    }
+    try {
+        auto proposal = EvolutionManager::fromJson(*found);
+        const auto changed = EvolutionManager::transitionInnovation(proposal, nextStatus);
+        if (!changed.valid) return world_.reject(changed.code, changed.message);
+        *found = EvolutionManager::toJson(proposal);
+        ++npcFound->second.stateVersion;
+        const auto event = world_.addEvent(
+            "innovation.hypothesis_transitioned", npcId, proposalId,
+            "An independent governance actor advanced a private innovation hypothesis",
+            Json{{"proposal_id", proposalId}, {"status", proposal.innovationStatus}, {"actor", actor}});
+        return CommandResult{true, "ok", "innovation hypothesis transitioned", event};
+    } catch (const std::exception& error) {
+        return world_.reject("invalid_innovation_hypothesis", error.what());
+    }
+}
+
 CommandResult WorldEvolutionSystem::transitionAdoption(const std::string& npcId,
                                                        const std::string& proposalId,
                                                        InnovationAdoptionStatus status,

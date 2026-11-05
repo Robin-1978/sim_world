@@ -19,11 +19,72 @@ void usage(const char* program) {
                  " [--provider mock|profile|llama_cpp] [--replay PATH] [--dump-events]"
                  " [--database PATH]"
                  " [--anomalies] [--experiment PATH] [--evolve level1|level2]"
+                 " [--governance-auto]"
                  " [--wait-llm-ms N] [--durable-checkpoint PATH]"
                  " [--checkpoint-every-minutes N|--checkpoint-daily]\n";
 }
 
 }  // namespace
+
+// This is an explicit external-governance harness for long-running evidence
+// runs. It is opt-in and lives in the headless tool, not in the Runtime or
+// Provider: the LLM can only produce a proposal, while this separately named
+// actor re-runs the deterministic sandbox, approves it, activates the overlay,
+// and (for a private innovation) starts adoption through the normal APIs.
+void runGovernanceHarness(WorldService& service, std::size_t& cursor) {
+    while (cursor < service.state().events.size()) {
+        // Copy before calling a mutating governance API: activation and
+        // adoption append events and may reallocate the authoritative vector.
+        const auto event = service.state().events[cursor++];
+        if (event.type == "evolution.proposal_ready" && event.data.is_object() &&
+            event.data.contains("proposal") && event.data.at("proposal").is_object()) {
+            try {
+                auto proposal = EvolutionManager::fromJson(event.data.at("proposal"));
+                proposal.baseWorldRevision = service.state().revision;
+                const auto sandbox = EvolutionManager::sandbox(proposal, service);
+                if (!sandbox.passed) continue;
+                proposal.status = EvolutionProposalStatus::Validated;
+                const auto approval = EvolutionManager::approve(proposal, "headless_governor", true);
+                if (!approval.valid) continue;
+                const auto activated = service.activateOverlay(proposal, sandbox);
+                std::cout << "governance: proposal=" << proposal.id
+                          << " activation=" << (activated.accepted ? "active" : activated.code) << '\n';
+            } catch (const std::exception& error) {
+                std::cerr << "governance: proposal error=" << error.what() << '\n';
+            }
+            continue;
+        }
+        if (event.type != "innovation.hypothesis_created" || !event.data.is_object() ||
+            !event.data.contains("proposal") || !event.data.at("proposal").is_object()) {
+            continue;
+        }
+        const std::string npcId = event.data.value("target_npc", event.actor);
+        const std::string proposalId = event.data.value("proposal_id", "");
+        if (npcId.empty() || proposalId.empty()) continue;
+        try {
+            const auto accepted = service.transitionInnovationHypothesis(
+                npcId, proposalId, "accepted", "headless_governor");
+            if (!accepted.accepted) continue;
+            auto proposal = EvolutionManager::fromJson(event.data.at("proposal"));
+            proposal.innovationStatus = "accepted";
+            proposal.baseWorldRevision = service.state().revision;
+            const auto validation = EvolutionManager::validate(proposal, service.content(), service.state());
+            if (!validation.valid) continue;
+            const auto sandbox = EvolutionManager::sandbox(proposal, service);
+            if (!sandbox.passed) continue;
+            proposal.status = EvolutionProposalStatus::Validated;
+            const auto approval = EvolutionManager::approve(proposal, "headless_governor", true);
+            if (!approval.valid) continue;
+            const auto activated = service.activateOverlay(proposal, sandbox);
+            if (!activated.accepted) continue;
+            const auto adoption = service.startInnovationAdoption(npcId, proposalId);
+            std::cout << "governance: hypothesis=" << proposalId
+                      << " activation=active adoption=" << adoption.code << '\n';
+        } catch (const std::exception& error) {
+            std::cerr << "governance: hypothesis error=" << error.what() << '\n';
+        }
+    }
+}
 
 int main(int argc, char** argv) {
     int days = 2;
@@ -39,6 +100,7 @@ int main(int argc, char** argv) {
     std::int64_t checkpointIntervalMinutes = 0;
     bool checkpointDaily = false;
     bool dumpEvents = false;
+    bool governanceAuto = false;
     bool dumpAnomalies = false;
     for (int i = 1; i < argc; ++i) {
         const std::string argument = argv[i];
@@ -54,6 +116,8 @@ int main(int argc, char** argv) {
             dumpAnomalies = true;
         } else if (argument == "--evolve" && i + 1 < argc) {
             evolutionLevel = argv[++i];
+        } else if (argument == "--governance-auto") {
+            governanceAuto = true;
         } else if (argument == "--days" && i + 1 < argc) {
             days = std::max(0, std::atoi(argv[++i]));
         } else if (argument == "--replay" && i + 1 < argc) {
@@ -160,6 +224,7 @@ int main(int argc, char** argv) {
     }
     const auto totalMinutes = static_cast<std::int64_t>(days) * kMinutesPerDay;
     std::size_t drainedTurns = 0;
+    std::size_t governanceCursor = 0;
     if (waitLlmMilliseconds > 0) {
         // A large offline jump would make every asynchronous decision older
         // than its authored game-time deadline before the worker can answer.
@@ -171,6 +236,7 @@ int main(int argc, char** argv) {
             const auto step = std::min<std::int64_t>(kMinutesPerHour, remaining);
             service.advanceMinutes(step);
             drainedTurns += service.waitForAsyncTurns(waitLlmMilliseconds);
+            if (governanceAuto) runGovernanceHarness(service, governanceCursor);
             remaining -= step;
         }
     } else {
@@ -185,10 +251,12 @@ int main(int argc, char** argv) {
         if (service.pendingAsyncTurns() > 0) {
             const auto finalDrainMilliseconds = std::max<std::int64_t>(waitLlmMilliseconds, 120000);
             drainedTurns += service.waitForAsyncTurns(finalDrainMilliseconds);
+            if (governanceAuto) runGovernanceHarness(service, governanceCursor);
             std::cout << "llm-final-drain: consumed=" << drainedTurns
                       << " pending=" << service.pendingAsyncTurns()
                       << " timeout_ms=" << finalDrainMilliseconds << '\n';
         }
+        if (governanceAuto) runGovernanceHarness(service, governanceCursor);
         std::cout << "llm-drain: consumed=" << drainedTurns
                   << " pending=" << service.pendingAsyncTurns() << '\n';
     }
