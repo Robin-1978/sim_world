@@ -444,12 +444,16 @@ std::size_t WorldIntelligenceSystem::pumpAsyncTurns() {
                    code == "invalid_action_parameters" || code == "invalid_action_parameter_value" ||
                    code == "invalid_expected_relief";
         };
+        const auto retryableProviderFailure = [](const std::string& code) {
+            return code.starts_with("provider_truncated:") ||
+                   code.starts_with("invalid_provider_json:");
+        };
         const auto queuedChannel = world_.content_.decisionChannels.find(queued.request.channelId);
         const bool allowInterveningWorldChanges =
             queuedChannel != world_.content_.decisionChannels.end() &&
             queuedChannel->second.allowInterveningWorldChanges;
         if (world_.provider_->capabilities().structuredRepair && queued.request.validationFeedback.empty() &&
-            retryable(turn.error) &&
+            (retryable(turn.error) || retryableProviderFailure(turn.error)) &&
             (!allowInterveningWorldChanges || world_.state_.revision >= queued.request.worldRevision) &&
             world_.hasNpc(queued.request.npcId) &&
             world_.state_.npcs.at(queued.request.npcId).stateVersion == queued.request.npcStateVersion) {
@@ -457,7 +461,9 @@ std::size_t WorldIntelligenceSystem::pumpAsyncTurns() {
             repair.validationFeedback = Json{
                 {"attempt", 1},
                 {"code", turn.error},
-                {"message", "Runtime rejected a structured proposal field; repair only the declared plan input or expected relief keys."},
+                {"message", retryableProviderFailure(turn.error)
+                                 ? "The previous response was truncated or invalid. Return one complete compact JSON object now; shorten rationale, dialogue and tradeoffs."
+                                 : "Runtime rejected a structured proposal field; repair only the declared plan input or expected relief keys."},
                 {"previous_turn_id", queued.request.turnId},
                 {"previous_action_id", previousResponse.proposal.actionId},
                 {"previous_parameters", previousResponse.proposal.parameters},
