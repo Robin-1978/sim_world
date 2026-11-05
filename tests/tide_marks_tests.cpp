@@ -2833,9 +2833,11 @@ void level_one_evolution_is_scoped_to_target_npc() {
            "Level 1 proposals retain the NPC target used to build their context");
     expect(providerRaw->observedContext.value("target_npc", "") == "lorn" &&
                providerRaw->observedContext.at("npcs").at("lorn").contains("knowledge") &&
+               providerRaw->observedContext.at("npcs").at("lorn").contains("private_traits") &&
                !providerRaw->observedContext.at("npcs").at("mira").contains("knowledge") &&
+               !providerRaw->observedContext.at("npcs").at("mira").contains("private_traits") &&
                !providerRaw->observedContext.at("npcs").at("mira").contains("experiences"),
-           "Level 1 exposes private cognitive evidence only for the target NPC");
+           "Level 1 exposes private cognitive evidence and traits only for the target NPC");
     expect(std::none_of(providerRaw->observedContext.at("evidence_events").begin(),
                         providerRaw->observedContext.at("evidence_events").end(), [](const auto& event) {
                             return event.value("type", "") == "experience.recorded" &&

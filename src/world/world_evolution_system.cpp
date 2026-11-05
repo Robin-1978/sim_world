@@ -166,6 +166,14 @@ Json WorldEvolutionSystem::proposalContext(const WorldService& world,
                         {"experience_count", npc.experiences.size()}, {"knowledge", knowledgeEvidence(npc)},
                         {"experiences", experienceEvidence(npc)}, {"memories", memoryEvidence(npc)},
                         {"relationships", relationshipEvidence(npc)}, {"stimuli", stimulusEvidence(npc)}};
+        if (evolutionLevel == "level1" && id == scopedTarget) {
+            const auto* authored = world.authoredNpc(id);
+            if (authored != nullptr) {
+                Json traits = Json::object();
+                for (const auto& [trait, value] : authored->definition.privateTraits) traits[trait] = value;
+                npcs[id]["private_traits"] = std::move(traits);
+            }
+        }
     }
     Json allowedOperations = evolutionLevel == "level1"
                                  ? Json::array({"overlay_strategy", "overlay_schedule", "register_behavior_recipe"})
