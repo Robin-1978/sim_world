@@ -36,6 +36,12 @@ struct ActionCandidate {
     // Content-authored coefficients for private trait preferences. Runtime
     // multiplies each coefficient by a bounded nonlinear centered response.
     std::map<std::string, double> traitEffects;
+    // Deterministic projection state at the captured decision revision. The
+    // provider only receives true entries; Runtime keeps false entries in the
+    // request context so a stale or adversarial response still fails closed
+    // with the original validation reason.
+    bool availableNow{true};
+    std::string unavailableReason;
 };
 
 struct StructuralConstraintView {
@@ -149,6 +155,16 @@ struct ProviderResponse {
     Json reflectionResult = Json::object();
 };
 
+// Runtime decisions are based on adapter capabilities, never on a display
+// name or a concrete model/backend string.  A capability only describes what
+// the adapter can do at its boundary; it does not grant authority to mutate
+// WorldState.
+struct ProviderCapabilities {
+    bool structuredRepair{false};
+    bool automaticEvolution{false};
+    bool promptPrefixCaching{false};
+};
+
 // A decision policy is content/runtime configuration, not a model name
 // special case.  The same provider can use cheap output for a player turn and
 // a bounded reasoning pass for an autonomous reappraisal.
@@ -197,11 +213,21 @@ public:
         (void)targetNpcId;
         return ProviderResponse{false, {}, {}, "reflection_provider_unavailable", Json::object(), Json::object()};
     }
+    virtual ProviderResponse proposeReflection(const Json& context,
+                                               const std::string& targetNpcId,
+                                               const Json& validationFeedback) {
+        (void)validationFeedback;
+        return proposeReflection(context, targetNpcId);
+    }
     // Returns non-secret execution identity for audit envelopes.  It never
     // includes API key values or environment variable contents.
     [[nodiscard]] virtual Json runtimeMetadata(const std::string& purpose) const {
         return Json{{"provider_id", name()}, {"provider_type", name()}, {"purpose", purpose}};
     }
+    // Adapters opt into bounded Runtime validation repair and automatic
+    // evolution explicitly. Runtime must not infer capabilities from a
+    // provider display name.
+    [[nodiscard]] virtual ProviderCapabilities capabilities() const { return {}; }
     [[nodiscard]] virtual std::string name() const = 0;
 };
 
@@ -267,7 +293,13 @@ public:
                                       const Json& validationFeedback) override;
     ProviderResponse proposeReflection(const Json& context,
                                        const std::string& targetNpcId) override;
+    ProviderResponse proposeReflection(const Json& context,
+                                       const std::string& targetNpcId,
+                                       const Json& validationFeedback) override;
     [[nodiscard]] Json runtimeMetadata(const std::string& purpose) const override;
+    [[nodiscard]] ProviderCapabilities capabilities() const override {
+        return ProviderCapabilities{true, true, true};
+    }
     [[nodiscard]] std::string name() const override { return "llama.cpp"; }
 
 private:

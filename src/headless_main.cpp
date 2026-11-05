@@ -192,7 +192,8 @@ int main(int argc, char** argv) {
                       << event.type << ' ' << event.actor << " -> " << event.target
                       << " | " << event.detail << " | id=" << event.eventId
                       << " correlation=" << event.correlationId
-                      << " causation=" << event.causationSequence << '\n';
+                      << " causation=" << event.causationSequence
+                      << " data=" << event.data.dump() << '\n';
         }
     }
     return 0;

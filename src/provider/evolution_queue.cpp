@@ -68,7 +68,8 @@ void EvolutionQueue::run() {
         ProviderResponse response;
         try {
             if (request.requestKind == "reflection") {
-                response = provider_.proposeReflection(request.context, request.targetNpcId);
+                response = provider_.proposeReflection(request.context, request.targetNpcId,
+                                                        request.validationFeedback);
             } else {
                 response = provider_.proposeEvolution(request.context, request.evolutionLevel,
                                                       request.validationFeedback);

@@ -81,6 +81,11 @@ public:
     [[nodiscard]] static BehaviorRecipeRunResult run(const BehaviorRecipeContent& recipe,
                                                       ConditionHandler condition,
                                                       ActionHandler action);
+    // Checks only the conditions that must hold before the first action leaf
+    // can start. It is a read-only projection helper; Runtime still evaluates
+    // the full tree again at process completion.
+    [[nodiscard]] static bool canStart(const BehaviorRecipeContent& recipe,
+                                       ConditionHandler condition);
     static void validate(const BehaviorRecipeContent& recipe);
 };
 

@@ -132,7 +132,8 @@ DialogueTurn WorldIntelligenceSystem::executeTurn(const std::string& npcId, cons
                code == "invalid_expected_relief" || code == "missing_dialogue" ||
                code == "speech_act_disallows_world_action";
     };
-    if (!turnResult.accepted && response.ok && world_.provider_->name() == "llama.cpp" && retryable(turnResult.error)) {
+    if (!turnResult.accepted && response.ok && world_.provider_->capabilities().structuredRepair &&
+        retryable(turnResult.error)) {
         const Json feedback{{"attempt", 1},
                             {"code", turnResult.error},
                             {"message", turnResult.error == "missing_dialogue"
@@ -142,7 +143,9 @@ DialogueTurn WorldIntelligenceSystem::executeTurn(const std::string& npcId, cons
                                                  : "Runtime rejected a structured proposal field; repair only the declared plan input or expected relief keys."},
                             {"previous_action_id", response.proposal.actionId},
                             {"previous_parameters", response.proposal.parameters},
-                            {"previous_dialogue", response.dialogue}};
+                            {"previous_dialogue", response.dialogue},
+                            {"previous_speech_act", response.proposal.speechAct},
+                            {"previous_utterance_understanding", response.proposal.utteranceUnderstanding}};
         auto repaired = world_.provider_->decide(request.context, input, feedback);
         if (repaired.ok) turnResult = commitTurn(request, std::move(repaired));
     }
@@ -432,6 +435,7 @@ std::size_t WorldIntelligenceSystem::pumpAsyncTurns() {
     for (auto& queued : results) {
         ++consumed;
         world_.intelligence_->forget(queued.request.turnId);
+        const auto previousResponse = queued.response;
         const auto turn = commitTurn(queued.request, std::move(queued.response));
         if (turn.accepted) continue;
         const auto retryable = [](const std::string& code) {
@@ -444,7 +448,8 @@ std::size_t WorldIntelligenceSystem::pumpAsyncTurns() {
         const bool allowInterveningWorldChanges =
             queuedChannel != world_.content_.decisionChannels.end() &&
             queuedChannel->second.allowInterveningWorldChanges;
-        if (queued.provider == "llama.cpp" && queued.request.validationFeedback.empty() && retryable(turn.error) &&
+        if (world_.provider_->capabilities().structuredRepair && queued.request.validationFeedback.empty() &&
+            retryable(turn.error) &&
             (!allowInterveningWorldChanges || world_.state_.revision >= queued.request.worldRevision) &&
             world_.hasNpc(queued.request.npcId) &&
             world_.state_.npcs.at(queued.request.npcId).stateVersion == queued.request.npcStateVersion) {
@@ -453,7 +458,12 @@ std::size_t WorldIntelligenceSystem::pumpAsyncTurns() {
                 {"attempt", 1},
                 {"code", turn.error},
                 {"message", "Runtime rejected a structured proposal field; repair only the declared plan input or expected relief keys."},
-                {"previous_turn_id", queued.request.turnId}};
+                {"previous_turn_id", queued.request.turnId},
+                {"previous_action_id", previousResponse.proposal.actionId},
+                {"previous_parameters", previousResponse.proposal.parameters},
+                {"previous_dialogue", previousResponse.dialogue},
+                {"previous_speech_act", previousResponse.proposal.speechAct},
+                {"previous_utterance_understanding", previousResponse.proposal.utteranceUnderstanding}};
             const auto submitted = world_.intelligence_->submit(std::move(repair));
             if (submitted.accepted) {
                 world_.intelligence_->track(queued.request.turnId);

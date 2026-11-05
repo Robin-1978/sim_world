@@ -340,7 +340,7 @@ void WorldEvolutionSystem::scheduleAutomatic() {
     // Automatic evolution is a content-configured wakeup. It only captures a
     // read-only context and queues a real provider request; validation,
     // sandboxing and independent approval remain in pumpAsyncProposals().
-    if (!world_.evolution_ || world_.provider_->name() == "mock" ||
+    if (!world_.evolution_ || !world_.provider_->capabilities().automaticEvolution ||
         !world_.content_.evolutionPolicy.enabled || world_.state_.now.minute <= 0 ||
         world_.state_.now.minute % kMinutesPerDay != 0) {
         return;
@@ -420,6 +420,16 @@ std::size_t WorldEvolutionSystem::pumpAsyncProposals() {
             } else {
                 const auto result = commitReflection(queued.request, queued.response, queued.provider);
                 if (!result.accepted) {
+                    if (queued.request.attempt < 2 && world_.provider_->capabilities().structuredRepair) {
+                        const Json feedback{{"attempt", queued.request.attempt + 1},
+                                            {"code", result.code}, {"message", result.message},
+                                            {"previous_result", queued.response.reflectionResult}};
+                        auto repair = queued.request;
+                        ++repair.attempt;
+                        repair.requestId += ":repair:" + std::to_string(repair.attempt);
+                        repair.validationFeedback = feedback;
+                        if (world_.evolution_->submit(std::move(repair)).accepted) continue;
+                    }
                     audit("reflection.rejected", "The Runtime rejected a structured daily reflection",
                           Json{{"code", result.code}, {"message", result.message}});
                 }
@@ -454,7 +464,7 @@ std::size_t WorldEvolutionSystem::pumpAsyncProposals() {
             proposal.targetNpcId = queued.request.targetNpcId;
             const auto validation = EvolutionManager::validate(proposal, world_.content_, world_.state_);
             if (!validation.valid) {
-                if (queued.request.attempt < 2 && queued.provider == "llama.cpp") {
+                if (queued.request.attempt < 2 && world_.provider_->capabilities().structuredRepair) {
                     const Json feedback{{"attempt", queued.request.attempt + 1}, {"code", validation.code},
                                         {"message", validation.message},
                                         {"previous_proposal", EvolutionManager::toJson(proposal)}};
@@ -462,7 +472,6 @@ std::size_t WorldEvolutionSystem::pumpAsyncProposals() {
                     ++repair.attempt;
                     repair.requestId += ":repair:" + std::to_string(repair.attempt);
                     repair.validationFeedback = feedback;
-                    repair.context["validation_feedback"] = feedback;
                     if (world_.evolution_->submit(std::move(repair)).accepted) continue;
                 }
                 audit("evolution.proposal_rejected", "The Runtime rejected an automatic evolution proposal",
@@ -484,7 +493,7 @@ std::size_t WorldEvolutionSystem::pumpAsyncProposals() {
                   Json{{"proposal", EvolutionManager::toJson(proposal)}, {"sandbox", sandboxJson}});
             finish();
         } catch (const std::exception& error) {
-            if (queued.request.attempt < 2 && queued.provider == "llama.cpp") {
+            if (queued.request.attempt < 2 && world_.provider_->capabilities().structuredRepair) {
                 const Json feedback{{"attempt", queued.request.attempt + 1},
                                     {"code", "invalid_evolution_proposal"},
                                     {"message", error.what()},
@@ -493,7 +502,6 @@ std::size_t WorldEvolutionSystem::pumpAsyncProposals() {
                 ++repair.attempt;
                 repair.requestId += ":repair:" + std::to_string(repair.attempt);
                 repair.validationFeedback = feedback;
-                repair.context["validation_feedback"] = feedback;
                 if (world_.evolution_->submit(std::move(repair)).accepted) continue;
             }
             audit("evolution.proposal_rejected", "The Runtime could not parse or sandbox an automatic evolution proposal",

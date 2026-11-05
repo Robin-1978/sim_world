@@ -234,6 +234,9 @@ public:
     }
 
     [[nodiscard]] std::string name() const override { return "llama.cpp"; }
+    [[nodiscard]] ProviderCapabilities capabilities() const override {
+        return ProviderCapabilities{true, false, true};
+    }
 
     int calls{0};
     bool sawFeedback{false};
@@ -273,6 +276,9 @@ public:
     }
 
     [[nodiscard]] std::string name() const override { return "llama.cpp"; }
+    [[nodiscard]] ProviderCapabilities capabilities() const override {
+        return ProviderCapabilities{true, false, true};
+    }
 
     int calls{0};
     bool sawFeedback{false};
@@ -378,6 +384,9 @@ public:
     }
 
     [[nodiscard]] std::string name() const override { return "evolution-test-llm"; }
+    [[nodiscard]] ProviderCapabilities capabilities() const override {
+        return ProviderCapabilities{true, true, true};
+    }
     std::string observedLevel;
     Json observedContext = Json::object();
     std::vector<std::string> observedTargets;
@@ -413,6 +422,9 @@ public:
     }
 
     [[nodiscard]] std::string name() const override { return "reflection-test-llm"; }
+    [[nodiscard]] ProviderCapabilities capabilities() const override {
+        return ProviderCapabilities{true, true, true};
+    }
     std::vector<Json> reflectionContexts;
 };
 
@@ -1194,6 +1206,36 @@ void decision_context_projects_location_relevant_resources() {
                mira.structuralConstraints.find("boat_integrity") == std::string::npos &&
                lorn.structuralConstraints.find("grain") == std::string::npos,
            "locationless collective resources remain visible and resource provenance stays explicit");
+}
+
+void decision_context_projects_only_startable_behavior_plans() {
+    auto service = WorldService::load(ContentPackLoader::defaultRoot(), std::make_unique<MockProvider>());
+    auto snapshot = service.snapshotJson();
+    snapshot["resources"]["grain"]["amount"] = 0;
+    snapshot["resources"]["grain"]["reserved"] = 0;
+    auto blocked = WorldService::fromSnapshot(snapshot);
+    const auto mira = blocked.decisionContext("mira");
+    const auto ration = std::find_if(mira.candidates.begin(), mira.candidates.end(),
+                                     [](const auto& candidate) { return candidate.actionId == "offer_ration"; });
+    expect(ration != mira.candidates.end() && !ration->availableNow &&
+               ration->unavailableReason == "insufficient_resource" &&
+               std::none_of(mira.planCatalog.begin(), mira.planCatalog.end(), [](const auto& plan) {
+                   return plan.value("action_id", "") == "offer_ration";
+               }),
+           "a plan whose declared reservation cannot start is retained for Runtime diagnostics but hidden from the model");
+
+    auto ferrySnapshot = service.snapshotJson();
+    ferrySnapshot["resources"]["boat_integrity"]["amount"] = 100;
+    auto ferryBlocked = WorldService::fromSnapshot(ferrySnapshot);
+    const auto lorn = ferryBlocked.decisionContext("lorn");
+    const auto repair = std::find_if(lorn.candidates.begin(), lorn.candidates.end(),
+                                     [](const auto& candidate) { return candidate.actionId == "repair_ferry"; });
+    expect(repair != lorn.candidates.end() && !repair->availableNow &&
+               repair->unavailableReason == "precondition_failed" &&
+               std::none_of(lorn.planCatalog.begin(), lorn.planCatalog.end(), [](const auto& plan) {
+                   return plan.value("action_id", "") == "repair_ferry";
+               }),
+           "a behavior tree whose first condition is false is omitted from the provider decision catalog");
 }
 
 void decision_context_obeys_authored_visibility_budgets() {
@@ -3393,6 +3435,8 @@ int main() {
     run("provider_and_action_validation_are_safe", provider_and_action_validation_are_safe);
     run("decision_context_projects_location_relevant_resources",
         decision_context_projects_location_relevant_resources);
+    run("decision_context_projects_only_startable_behavior_plans",
+        decision_context_projects_only_startable_behavior_plans);
     run("decision_context_obeys_authored_visibility_budgets",
         decision_context_obeys_authored_visibility_budgets);
     run("action_validator_rejects_malformed_nested_schema_without_throwing",

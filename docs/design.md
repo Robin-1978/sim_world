@@ -313,7 +313,13 @@ Innovation Hypothesis 有独立的持久化生命周期：`hypothesized -> refin
 
 `DecisionContext` 的窗口由内容包的 `decision_context` 配置约束：刺激按显著性保留前 N 条，记忆/知识/经验按时间保留最近 N 条，同地点实体和相邻连接按稳定顺序截断，关系按主体可见范围截断。截断只影响模型观察窗口，不删除事实、事件或 NPC 的长期认知；上下文预算应随 Intelligence Profile 校准，而不能通过扩大快照把所有世界状态塞给模型。
 
-Provider 使用一个共享模型槽位和串行队列；本地 llama.cpp 是产品入口的默认语义 Provider，服务失败时玩家对话和 NPC 自驱提案都明确失败且不提交事实。Runtime 可以继续推进时间、衰减和已批准的过程，但不会用确定性候选冒充 LLM 的主体决策。若 LLM 返回的计划结构通过 JSON Schema 却不满足 Runtime 的参数契约，在线同步请求和异步请求都最多获得一次结构化 validator feedback；资源不足、权限、拓扑、Revision 或过期错误不重复调用模型。Mock Provider 只由测试、沙箱重放和离线可重复回归显式注入；它不是产品默认行为。云 Provider 可用于调试或高质量表达，但不改变事实接口。API Key 不写入内容包、存档、日志、Prompt、崩溃报告或版本库。
+Provider 使用一个共享模型槽位和串行队列；本地 llama.cpp 是产品入口的默认语义 Provider，服务失败时玩家对话和 NPC 自驱提案都明确失败且不提交事实。Runtime 可以继续推进时间、衰减和已批准的过程，但不会用确定性候选冒充 LLM 的主体决策。重试资格由 `IProvider::capabilities()` 的能力契约决定，绝不比较 `name()` 或模型字符串；结构化输出适配器可以声明 bounded repair 和 automatic evolution，Mock 默认不声明这些产品能力。若 LLM 返回的计划结构通过 JSON Schema 却不满足 Runtime 的参数契约，同步决策最多追加一次修复请求，异步决策最多追加一次，反思和演化提案最多追加两次；资源不足、权限、拓扑、Revision 或过期错误不重复调用模型。每次修复保留原始的不可变投影和上一轮结构化结果，只把 Runtime 的错误作为新的尾部 observation 追加，不能改变事实权限。Mock Provider 只由测试、沙箱重放和离线可重复回归显式注入；它不是产品默认行为。云 Provider 可用于调试或高质量表达，但不改变事实接口。API Key 不写入内容包、存档、日志、Prompt、崩溃报告或版本库。
+
+重试不是 ReAct，也不是让 LLM 接管 Tick。它是一次有界的 validator-repair continuation：Runtime 先提交或拒绝一次完整的结构化候选，只有可修复的字段契约错误才把 `previous_*` 结果和错误反馈交给同一 Provider；模型仍只选择已有计划或声明式提案。行为树由 Runtime 按叶子元动作逐 Tick 推进，长动作的耗时、资源预留、可打断性和中断阈值来自内容，模型调用只发生在决策、反思或演化唤醒点。
+
+Provider 请求按“稳定前缀、动态尾部”组织：静态系统规则在最前，完整的 Runtime 投影（时间、事实、候选 BT 描述、当前活动和玩家输入）作为一次稳定 user context，校验反馈、上一轮输出和错误 observation 作为最后一条 user message。请求显式设置 `cache_prompt=true`；因此 repair 不会把反馈插入系统提示或重写投影，llama.cpp 可以复用同一 slot 的 KV 前缀。话语理解在 repair 时复用上一轮的 speech-act 结果，不再次发起独立分类调用。是否实际命中缓存仍由 Provider/server 的 usage 或 slot 指标验证，不能从 Runtime 的请求次数推断。
+
+这条会话边界采用主流 tool-calling 的消息顺序：Level 1/2 与 Reflection 的首次响应是强制的函数调用；Runtime 不执行世界写入，而是先做 schema、权限、证据、内容版本和沙箱前校验。若错误属于可修复的结构字段，下一次请求在同一投影后追加上一轮 `assistant.tool_calls` 和 `tool` observation，最多两次；资源、权限、过期和事实冲突仍直接结束。ReAct 的价值在于模型动作后得到真实环境 observation 并据此更新计划，本项目只采用这个“动作—观察—修复”的接口形态，不开放无界思维循环，也不把 Tick 或 BT 叶节点交给模型。参考实践：OpenAI [Function calling](https://developers.openai.com/api/docs/guides/function-calling)、[Conversation state](https://developers.openai.com/api/docs/guides/conversation-state)、[Prompt caching](https://developers.openai.com/api/docs/guides/prompt-caching)；ReAct 原论文 [arXiv:2210.03629](https://arxiv.org/abs/2210.03629)；llama.cpp server [API README](https://github.com/ggml-org/llama.cpp/blob/master/tools/server/README.md)。
 
 当前实现的结构化 `IntentProposal` 是短输出任务；玩家对白拆成独立的 `utterance_understanding` 和 `player_dialogue` 两次结构化调用。前者需要理解自然语言和歧义，默认使用约 128 token 的 thinking；后者只根据已解析的通信意图和当前事实生成简短回答，默认关闭 thinking。自驱审议没有玩家给出的明确目标，需要依据内驱、外驱和结构约束进行短权衡，因此默认开启约 128 token 的 thinking。Provider 通过顶层 `reasoning_budget_tokens` 限制思考段预算；该预算不等于最终 JSON 的总输出预算。无论是否开启 thinking，Runtime 只解析最终 JSON，`reasoning_content` 永远不进入对白、记忆或世界事实。
 

@@ -354,7 +354,7 @@ std::vector<ActionCandidate> parseActions(const Json& beats, const std::string& 
                                       recipe->interruptible, recipe->interruptSalienceThreshold,
                                       recipe->reservationMode, recipe->id, {}, recipe->priority,
                                       recipe->preemptionPolicy, 0.0, Json::object(), Json::object(), 0.0, 0.0, 0.0,
-                                      0.0, 0.0, {}};
+                                      0.0, 0.0, {}, true, ""};
             candidate.parameterSchema = recipe->parameterSchema;
             const auto utility = definition.value("utility_profile", Json::object());
             if (!utility.is_object()) throw std::runtime_error("utility_profile must be an object: " + id);

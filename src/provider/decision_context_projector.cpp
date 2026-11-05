@@ -1,5 +1,6 @@
 #include "provider/decision_context_projector.hpp"
 
+#include "npc/behavior_recipe.hpp"
 #include "npc/drive_system.hpp"
 #include "npc/goal_selector.hpp"
 #include "world/ids.hpp"
@@ -64,6 +65,126 @@ bool activeNpc(const WorldState& state, const std::string& npcId) {
     if (!state.npcs.contains(npcId)) return false;
     const auto entity = state.entities.find(npcEntityId(npcId));
     return entity == state.entities.end() || entity->second.lifecycle == EntityLifecycle::Active;
+}
+
+const NpcContent* findNpcContent(const WorldContentPack& content, const std::string& npcId) {
+    return authoredNpc(content, npcId);
+}
+
+bool evaluateCondition(const WorldState& state, const WorldContentPack& content,
+                      const std::string& npcId, const BehaviorNodeContent& node) {
+    const auto definition = content.conditions.find(node.name);
+    if (definition == content.conditions.end()) return false;
+    Json args = definition->second.args;
+    for (auto item = node.args.begin(); item != node.args.end(); ++item) args[item.key()] = item.value();
+    const auto operation = definition->second.operation;
+    if (operation == "always") return true;
+    if (operation == "resource.available") {
+        const auto resource = state.resources.find(args.value("resource", ""));
+        const int available = resource == state.resources.end() ? 0 : resource->second.amount - resource->second.reserved;
+        return available >= args.value("minimum", 1);
+    }
+    if (operation == "resource.below") {
+        const auto resource = state.resources.find(args.value("resource", ""));
+        const int amount = resource == state.resources.end() ? 0 : resource->second.amount;
+        return amount < args.value("below", 1);
+    }
+    if (operation == "link.traversable" || operation == "link.locked") {
+        const auto link = state.links.find(args.value("link", ""));
+        const bool traversable = link == state.links.end() ||
+                                 (link->second.traversable && !link->second.locked);
+        return operation == "link.traversable" ? traversable : !traversable;
+    }
+    if (operation == "need.critical") {
+        const auto npc = state.npcs.find(npcId);
+        const auto* authored = findNpcContent(content, npcId);
+        if (npc == state.npcs.end() || authored == nullptr) return false;
+        const auto needId = args.value("need", "");
+        const auto definitionNeed = std::find_if(authored->needs.begin(), authored->needs.end(),
+                                                 [&needId](const auto& item) { return item.id == needId; });
+        const auto currentNeed = npc->second.needs.find(needId);
+        return definitionNeed != authored->needs.end() && currentNeed != npc->second.needs.end() &&
+               currentNeed->second.deficit >= definitionNeed->criticalThreshold;
+    }
+    if (operation == "npc.at") {
+        const auto npc = state.npcs.find(npcId);
+        return npc != state.npcs.end() && npc->second.location == args.value("location", "");
+    }
+    if (operation == "time.between") {
+        const int minuteOfDay = state.now.hour() * 60 + state.now.minuteOfHour();
+        return minuteOfDay >= args.value("from_minute", 0) && minuteOfDay < args.value("to_minute", 0);
+    }
+    return false;
+}
+
+bool reservationCanStart(const WorldState& state, const std::string& npcId,
+                         const ActionCandidate& candidate) {
+    if (candidate.reservationMode != "input_resources" || candidate.reservations.empty()) return true;
+    std::map<std::string, int> remaining;
+    for (const auto& [resource, amount] : candidate.reservations) {
+        const auto found = state.resources.find(resource);
+        const int available = found == state.resources.end() ? 0 : found->second.amount - found->second.reserved;
+        remaining[resource] = std::max(0, amount - available);
+    }
+    if (std::all_of(remaining.begin(), remaining.end(), [](const auto& item) { return item.second == 0; })) {
+        return true;
+    }
+    if (candidate.preemptionPolicy != "lower_priority") return false;
+    std::vector<std::pair<std::string, int>> victims;
+    for (const auto& [otherId, other] : state.npcs) {
+        if (otherId == npcId || !other.activity.process ||
+            other.activity.process->status != ProcessStatus::Running ||
+            !other.activity.process->interruptible ||
+            other.activity.process->priority >= candidate.priority) continue;
+        bool contributes = false;
+        for (const auto& [resource, amount] : other.activity.process->reservedResources) {
+            const auto need = remaining.find(resource);
+            if (need == remaining.end() || need->second <= 0 || amount <= 0) continue;
+            contributes = true;
+        }
+        if (contributes) victims.emplace_back(otherId, other.activity.process->priority);
+    }
+    std::sort(victims.begin(), victims.end(), [](const auto& left, const auto& right) {
+        if (left.second != right.second) return left.second < right.second;
+        return left.first < right.first;
+    });
+    for (const auto& [victimId, priority] : victims) {
+        (void)priority;
+        const auto& process = state.npcs.at(victimId).activity.process.value();
+        for (const auto& [resource, amount] : process.reservedResources) {
+            const auto need = remaining.find(resource);
+            if (need != remaining.end()) need->second = std::max(0, need->second - amount);
+        }
+        if (std::all_of(remaining.begin(), remaining.end(), [](const auto& item) { return item.second == 0; })) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void markAvailability(const WorldState& state, const WorldContentPack& content,
+                      const std::string& npcId, ActionCandidate& candidate) {
+    const auto recipe = std::find_if(content.behaviorRecipes.begin(), content.behaviorRecipes.end(),
+                                     [&candidate](const auto& item) {
+                                         return item.id == candidate.recipeId || item.id == candidate.actionId;
+                                     });
+    if (recipe == content.behaviorRecipes.end()) {
+        candidate.availableNow = false;
+        candidate.unavailableReason = "missing_behavior_recipe";
+        return;
+    }
+    if (!reservationCanStart(state, npcId, candidate)) {
+        candidate.availableNow = false;
+        candidate.unavailableReason = "insufficient_resource";
+        return;
+    }
+    if (!BehaviorRecipeRuntime::canStart(
+            *recipe, [&state, &content, &npcId](const BehaviorNodeContent& node) {
+                return evaluateCondition(state, content, npcId, node);
+            })) {
+        candidate.availableNow = false;
+        candidate.unavailableReason = "precondition_failed";
+    }
 }
 
 }  // namespace
@@ -252,6 +373,9 @@ DecisionContext DecisionContextProjector::build(const WorldState& state,
         candidate.parameterSchema = recipe.parameterSchema;
         context.candidates.push_back(std::move(candidate));
     }
+    for (auto& candidate : context.candidates) {
+        markAvailability(state, content, npcId, candidate);
+    }
     for (const auto& needDefinition : needs) {
         const auto need = npc.needs.find(needDefinition.id);
         if (need == npc.needs.end()) continue;
@@ -361,6 +485,7 @@ DecisionContext DecisionContextProjector::build(const WorldState& state,
                  {"fear", relation.fear}, {"owed", relation.owed}};
     }
     for (const auto& candidate : context.candidates) {
+        if (!candidate.availableNow) continue;
         Json plan{{"action_id", candidate.actionId}, {"plan_id", candidate.planId},
                   {"recipe_id", candidate.recipeId}, {"label", candidate.label},
                   {"duration_minutes", candidate.durationMinutes},

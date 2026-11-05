@@ -5,6 +5,39 @@
 namespace tide_marks {
 namespace {
 
+bool canStartNode(const BehaviorNodeContent& node,
+                  const BehaviorRecipeRuntime::ConditionHandler& condition,
+                  bool& actionReached) {
+    if (node.type == "condition") return condition && condition(node);
+    if (node.type == "meta_action") {
+        actionReached = true;
+        return true;
+    }
+    if (node.type == "interruptible" || node.type == "timeout") {
+        return !node.children.empty() && canStartNode(node.children.front(), condition, actionReached);
+    }
+    if (node.type == "sequence") {
+        for (const auto& child : node.children) {
+            if (!canStartNode(child, condition, actionReached)) return false;
+            // The first action leaf is the process start boundary. Conditions
+            // after it may depend on effects produced at completion.
+            if (actionReached) return true;
+        }
+        return actionReached;
+    }
+    if (node.type == "selector") {
+        for (const auto& child : node.children) {
+            bool childActionReached = false;
+            if (canStartNode(child, condition, childActionReached) && childActionReached) {
+                actionReached = true;
+                return true;
+            }
+        }
+        return false;
+    }
+    return false;
+}
+
 struct CompiledTree {
     std::unique_ptr<BehaviorNode> root;
     std::map<std::string, const BehaviorNodeContent*> nodes;
@@ -77,6 +110,12 @@ BehaviorRecipeRunResult BehaviorRecipeRuntime::run(const BehaviorRecipeContent& 
     };
     const auto status = tree.root->tick(context);
     return BehaviorRecipeRunResult{status, status == NodeStatus::Success ? "" : failedNode};
+}
+
+bool BehaviorRecipeRuntime::canStart(const BehaviorRecipeContent& recipe,
+                                     ConditionHandler condition) {
+    bool actionReached = false;
+    return canStartNode(recipe.root, condition, actionReached) && actionReached;
 }
 
 void BehaviorRecipeRuntime::validate(const BehaviorRecipeContent& recipe) {
