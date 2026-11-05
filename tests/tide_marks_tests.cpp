@@ -3334,11 +3334,13 @@ void daily_reflection_requires_failure_evidence_for_innovation() {
     service.advanceMinutes(kMinutesPerDay - (service.state().now.minute % kMinutesPerDay));
     service.waitForAsyncTurns(1000);
     expect(std::any_of(service.state().events.begin(), service.state().events.end(),
-                       [](const auto& event) {
-                           return event.type == "reflection.rejected" &&
-                                  event.data.value("code", "") == "innovation_evidence_insufficient";
-                       }),
-           "Runtime rejects a reflection innovation without a persisted issue and two cited process failures");
+                       [](const auto& event) { return event.type == "reflection.committed"; }) &&
+               std::any_of(service.state().events.begin(), service.state().events.end(),
+                           [](const auto& event) {
+                               return event.type == "innovation.hypothesis_rejected" &&
+                                      event.data.value("code", "") == "innovation_evidence_insufficient";
+                           }),
+           "Runtime commits cognition while soft-rejecting innovation without a persisted issue and two cited failures");
     expect(std::none_of(service.state().events.begin(), service.state().events.end(),
                         [](const auto& event) { return event.type == "innovation.hypothesis_created"; }),
            "insufficient innovation evidence cannot create a durable hypothesis");

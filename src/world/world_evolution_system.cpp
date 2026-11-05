@@ -730,6 +730,7 @@ CommandResult WorldEvolutionSystem::commitReflection(const EvolutionRequest& req
     if (!hypotheses.is_array() || hypotheses.size() > 2) {
         return world_.reject("invalid_reflection_innovation", "Innovation hypotheses are optional and bounded.");
     }
+    Json innovationRejection = Json::object();
     if (!hypotheses.empty()) {
         // A reflection may suggest innovation only after a durable problem
         // exists and the cited window contains two failures of the same
@@ -750,52 +751,72 @@ CommandResult WorldEvolutionSystem::commitReflection(const EvolutionRequest& req
             failureCounts.begin(), failureCounts.end(),
             [](const auto& item) { return item.second >= 2; });
         if (npc.unresolvedIssues.empty() || !repeatedFailure) {
-            return world_.reject(
-                "innovation_evidence_insufficient",
-                "An innovation hypothesis requires a persisted unresolved issue and two cited failures of the same process.");
+            innovationRejection = Json{
+                {"code", "innovation_evidence_insufficient"},
+                {"message", "An innovation hypothesis requires a persisted unresolved issue and two cited failures of the same process."}};
         }
     }
     std::vector<EvolutionProposal> normalizedHypotheses;
-    for (const auto& hypothesis : hypotheses) {
+    if (innovationRejection.empty()) for (const auto& hypothesis : hypotheses) {
         try {
             auto proposal = EvolutionManager::normalizeProviderProposal(hypothesis, world_, "level1", provider);
             proposal.targetNpcId = request.targetNpcId;
             proposal.kind = "innovation";
             proposal.innovationStatus = "hypothesized";
             const auto validation = EvolutionManager::validate(proposal, world_.content_, world_.state_);
-            if (!validation.valid) return world_.reject(validation.code, validation.message);
+            if (!validation.valid) {
+                innovationRejection = Json{{"code", validation.code}, {"message", validation.message}};
+                normalizedHypotheses.clear();
+                break;
+            }
             normalizedHypotheses.push_back(std::move(proposal));
         } catch (const std::exception& error) {
-            return world_.reject("invalid_reflection_innovation", error.what());
+            innovationRejection = Json{{"code", "invalid_reflection_innovation"}, {"message", error.what()}};
+            normalizedHypotheses.clear();
+            break;
         }
     }
     const auto innovationActions = result.value("innovation_actions", Json::array());
     if (!innovationActions.is_array() || innovationActions.size() > 8) {
-        return world_.reject("invalid_reflection_innovation", "Innovation lifecycle actions are bounded.");
+        innovationRejection = Json{{"code", "invalid_reflection_innovation"},
+                                   {"message", "Innovation lifecycle actions are bounded."}};
     }
     struct InnovationTransition { std::size_t index; std::string next; };
     std::vector<InnovationTransition> transitions;
-    for (const auto& action : innovationActions) {
+    if (innovationRejection.empty()) for (const auto& action : innovationActions) {
         if (!action.is_object() || !boundedText(action, "proposal_id", 128) ||
             !boundedText(action, "status", 32)) {
-            return world_.reject("invalid_reflection_innovation", "Innovation lifecycle actions require bounded ids and statuses.");
+            innovationRejection = Json{{"code", "invalid_reflection_innovation"},
+                                       {"message", "Innovation lifecycle actions require bounded ids and statuses."}};
+            transitions.clear();
+            break;
         }
         const auto found = std::find_if(npc.innovationHypotheses.begin(), npc.innovationHypotheses.end(),
                                         [&action](const Json& item) {
                                             return item.value("id", "") == action.at("proposal_id").get<std::string>();
                                         });
         if (found == npc.innovationHypotheses.end()) {
-            return world_.reject("unknown_innovation_hypothesis", "A reflection may transition only its persisted hypotheses.");
+            innovationRejection = Json{{"code", "unknown_innovation_hypothesis"},
+                                       {"message", "A reflection may transition only its persisted hypotheses."}};
+            transitions.clear();
+            break;
         }
         const auto next = action.at("status").get<std::string>();
         if (next != "refining" && next != "evaluated" && next != "accepted" &&
             next != "rejected" && next != "abandoned") {
-            return world_.reject("invalid_reflection_innovation", "Innovation lifecycle status is not registered.");
+            innovationRejection = Json{{"code", "invalid_reflection_innovation"},
+                                       {"message", "Innovation lifecycle status is not registered."}};
+            transitions.clear();
+            break;
         }
         const auto index = static_cast<std::size_t>(std::distance(npc.innovationHypotheses.begin(), found));
         auto proposal = EvolutionManager::fromJson(*found);
         const auto validation = EvolutionManager::transitionInnovation(proposal, next);
-        if (!validation.valid) return world_.reject(validation.code, validation.message);
+        if (!validation.valid) {
+            innovationRejection = Json{{"code", validation.code}, {"message", validation.message}};
+            transitions.clear();
+            break;
+        }
         transitions.push_back(InnovationTransition{index, next});
     }
     for (std::size_t index = 0; index < beliefs.size(); ++index) {
@@ -831,6 +852,13 @@ CommandResult WorldEvolutionSystem::commitReflection(const EvolutionRequest& req
         world_.addEvent("innovation.hypothesis_transitioned", request.targetNpcId, request.targetNpcId,
                         "Daily reflection advanced a private innovation hypothesis",
                         Json{{"proposal_id", proposal.id}, {"status", proposal.innovationStatus}});
+    }
+    if (!innovationRejection.empty()) {
+        world_.addEvent("innovation.hypothesis_rejected", request.targetNpcId, request.targetNpcId,
+                        "Daily reflection discarded an invalid optional innovation branch",
+                        Json{{"code", innovationRejection.value("code", "invalid_reflection_innovation")},
+                             {"message", innovationRejection.value("message", "innovation branch rejected")},
+                             {"provider", provider}});
     }
     if (strategy.contains("strategy")) {
         npc.strategy = strategy.at("strategy");
@@ -880,7 +908,8 @@ CommandResult WorldEvolutionSystem::commitReflection(const EvolutionRequest& req
         "reflection.committed", request.targetNpcId, request.targetNpcId,
         "The Runtime committed a structured daily reflection",
         Json{{"provider", provider}, {"evidence_event_sequences", evidenceJson},
-             {"innovation_count", normalizedHypotheses.size()}, {"unresolved_issue_count", npc.unresolvedIssues.size()}});
+             {"innovation_count", normalizedHypotheses.size()}, {"unresolved_issue_count", npc.unresolvedIssues.size()},
+             {"innovation_rejected", !innovationRejection.empty()}});
     npc.reflectionCursor.lastEventSequence = reflectionEvent.sequence;
     npc.reflectionCursor.reflectionRevision = reflectionEvent.worldRevision;
     ++npc.stateVersion;
