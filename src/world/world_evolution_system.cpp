@@ -11,6 +11,52 @@ namespace tide_marks {
 namespace {
 constexpr std::size_t kMaxEvolutionEvidenceEntries = 8;
 
+// EventLog is authoritative and remains complete in WorldState.  Providers
+// receive a deterministic evidence projection instead of the raw event data:
+// intent/dialogue events often contain the entire decision context and tool
+// diagnostics, which are neither needed to cite an event nor safe to replay
+// into a later prompt.  Keep bounded scalar/object data that explains the
+// result while dropping duplicated reasoning payloads.
+Json compactEvidenceJson(const Json& value, int depth = 0) {
+    if (depth > 2) return value.is_object() ? Json::object() : Json();
+    if (value.is_string()) {
+        const auto text = value.get<std::string>();
+        return text.size() <= 256 ? value : Json(text.substr(0, 256) + "…");
+    }
+    if (value.is_array()) {
+        Json result = Json::array();
+        const auto limit = std::min<std::size_t>(value.size(), 8);
+        for (std::size_t index = 0; index < limit; ++index) {
+            result.push_back(compactEvidenceJson(value.at(index), depth + 1));
+        }
+        if (value.size() > limit) result.push_back("…");
+        return result;
+    }
+    if (!value.is_object()) return value;
+    Json result = Json::object();
+    std::size_t fields = 0;
+    for (auto item = value.begin(); item != value.end() && fields < 16; ++item) {
+        // These fields are provider diagnostics or a copy of the complete
+        // decision projection. The event's typed summary and source sequence
+        // remain available to the model and to replay.
+        if (item.key() == "rationale" || item.key() == "motivation" ||
+            item.key() == "tradeoffs" || item.key() == "utterance_understanding" ||
+            item.key() == "world_snapshot" || item.key() == "self_state" ||
+            item.key() == "plan_catalog" || item.key() == "candidates" ||
+            item.key() == "context" || item.key() == "proposal") {
+            continue;
+        }
+        result[item.key()] = compactEvidenceJson(item.value(), depth + 1);
+        ++fields;
+    }
+    if (value.size() > fields) result["fields_truncated"] = true;
+    return result;
+}
+
+Json compactEventData(const WorldEvent& event) {
+    return compactEvidenceJson(event.data);
+}
+
 std::vector<std::string> overlayIds(const WorldState& state) {
     std::vector<std::string> ids;
     ids.reserve(state.activeOverlays.size());
@@ -100,7 +146,9 @@ Json reflectionEvidence(const WorldState& state, const NpcState& npc) {
             event.target != npcEntityId(npc.definitionId)) continue;
         events.push_back(Json{{"sequence", event.sequence}, {"at", event.at.minute},
                               {"type", event.type}, {"actor", event.actor}, {"target", event.target},
-                              {"detail", event.detail}, {"data", event.data}});
+                              {"detail", event.detail.size() <= 256 ? event.detail
+                                                                      : event.detail.substr(0, 256) + "…"},
+                              {"data", compactEventData(event)}});
         if (events.size() >= kMaxEvolutionEvidenceEntries * 4) break;
     }
     return events;
@@ -152,7 +200,9 @@ Json WorldEvolutionSystem::proposalContext(const WorldService& world,
         }
         events.push_back(Json{{"sequence", event.sequence}, {"at", event.at.minute},
                               {"type", event.type}, {"actor", event.actor}, {"target", event.target},
-                              {"detail", event.detail}, {"data", eventData}});
+                              {"detail", event.detail.size() <= 256 ? event.detail
+                                                                      : event.detail.substr(0, 256) + "…"},
+                              {"data", compactEvidenceJson(eventData)}});
     }
     Json resources = Json::object();
     for (const auto& [id, resource] : state.resources) {
