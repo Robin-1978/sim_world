@@ -197,16 +197,30 @@ public:
     [[nodiscard]] std::string name() const override { return "mock"; }
 };
 
-// Connection settings for one semantic workload. API keys are never stored
-// here; apiKeyEnv is only the name of an environment variable read at request
-// time by the HTTP adapter.
-struct ProviderEndpoint {
+// A reusable Provider definition. API keys are never stored here; apiKeyEnv is
+// only the name of an environment variable read at request time by the HTTP
+// adapter.
+struct ProviderDefinition {
+    std::string type{"llama_cpp"};
+    std::string baseUrl;
+    std::string model;
+    std::string apiKeyEnv;
+    int timeoutMs{120000};
+    double temperature{0.2};
+};
+
+// A purpose selects one reusable Provider and may override only the transport
+// or sampling fields needed for that workload. An explicit null api_key_env
+// disables the selected Provider's credential for this purpose.
+struct PurposeProvider {
+    std::string providerId;
     std::string baseUrl;
     std::string model;
     std::string apiKeyEnv;
     bool apiKeyConfigured{false};
     int timeoutMs{0};
     double temperature{-1.0};
+    std::map<std::string, DecisionPolicy> policies;
 };
 
 struct LlamaCppConfig {
@@ -217,10 +231,9 @@ struct LlamaCppConfig {
     double temperature{0.2};
     DecisionPolicy fallbackPolicy;
     std::map<std::string, DecisionPolicy> decisionPolicies;
-    // Optional workload overrides. Supported keys are decision,
-    // level1_evolution and level2_evolution. Missing fields inherit the
-    // top-level provider settings.
-    std::map<std::string, ProviderEndpoint> purposeEndpoints;
+    std::map<std::string, DecisionPolicy> purposePolicies;
+    std::map<std::string, ProviderDefinition> providers;
+    std::map<std::string, PurposeProvider> purposes;
 };
 
 class LlamaCppProvider final : public IProvider {

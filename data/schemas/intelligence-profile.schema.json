@@ -1,61 +1,109 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Tide Marks intelligence profile",
+  "description": "Schema 2: reusable provider definitions plus one binding for each fixed purpose.",
   "type": "object",
-  "required": ["kind", "schema_version", "id", "provider", "decision_policy"],
+  "required": ["kind", "schema_version", "id", "providers", "purposes"],
   "properties": {
     "kind": {"const": "intelligence_profile"},
-    "schema_version": {"const": 1},
+    "schema_version": {"const": 2},
     "id": {"type": "string", "minLength": 1},
+    "providers": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {"minLength": 1},
+      "additionalProperties": {"$ref": "#/$defs/provider"}
+    },
+    "purposes": {
+      "type": "object",
+      "required": ["decision", "npc_evolution", "world_evolution"],
+      "properties": {
+        "decision": {"$ref": "#/$defs/decision_purpose"},
+        "npc_evolution": {"$ref": "#/$defs/evolution_purpose"},
+        "world_evolution": {"$ref": "#/$defs/evolution_purpose"}
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
     "provider": {
       "type": "object",
+      "description": "A reusable endpoint definition. Purposes select a provider by its key in providers.",
       "required": ["type"],
       "properties": {
         "type": {"enum": ["mock", "llama_cpp", "openai_compatible"]},
         "base_url": {"type": "string"},
         "model": {"type": "string"},
-        "api_key_env": {"type": ["string", "null"]},
-        "timeout_ms": {"type": "integer", "minimum": 1},
-        "temperature": {"type": "number", "minimum": 0, "maximum": 2},
-        "purpose_endpoints": {
-          "type": "object",
-          "properties": {
-            "decision": {"$ref": "#/$defs/provider_endpoint"},
-            "level1_evolution": {"$ref": "#/$defs/provider_endpoint"},
-            "level2_evolution": {"$ref": "#/$defs/provider_endpoint"}
-          },
-          "additionalProperties": false
-        }
+        "api_key_env": {
+          "type": ["string", "null"],
+          "description": "Name of the environment variable that holds the API key; the key itself is never stored. null means no credential."
+        },
+        "timeout_ms": {"type": "integer", "minimum": 1, "default": 120000},
+        "temperature": {"type": "number", "minimum": 0, "maximum": 2, "default": 0.2}
       },
+      "allOf": [
+        {"if": {"required": ["type"], "properties": {"type": {"enum": ["llama_cpp", "openai_compatible"]}}},
+         "then": {"required": ["base_url", "model"],
+                  "properties": {"base_url": {"minLength": 1}, "model": {"minLength": 1}}}}
+      ],
       "additionalProperties": false
     },
-    "decision_policy": {
+    "purpose_binding": {
       "type": "object",
-      "minProperties": 1,
-      "additionalProperties": {"$ref": "#/$defs/decision_policy"}
-    }
-  },
-  "additionalProperties": false,
-  "$defs": {
-    "decision_policy": {
+      "description": "Selects one provider and may override only the transport or sampling fields this purpose needs. Omitted fields inherit the provider's value.",
+      "required": ["provider"],
+      "properties": {
+        "provider": {"type": "string", "minLength": 1, "description": "A key of providers."},
+        "base_url": {"type": "string", "minLength": 1},
+        "model": {"type": "string", "minLength": 1},
+        "api_key_env": {
+          "type": ["string", "null"],
+          "description": "Overrides the provider's api_key_env for this purpose. An explicit null disables the credential inherited from the provider."
+        },
+        "timeout_ms": {"type": "integer", "minimum": 1},
+        "temperature": {"type": "number", "minimum": 0, "maximum": 2}
+      }
+    },
+    "decision_purpose": {
+      "description": "NPC decisions and dialogue. Content channels select one of policies through provider_policy.",
+      "allOf": [{"$ref": "#/$defs/purpose_binding"}],
       "type": "object",
+      "required": ["policies"],
+      "properties": {
+        "policies": {
+          "type": "object",
+          "required": ["utterance_understanding", "player_dialogue", "autonomous_reappraisal"],
+          "minProperties": 3,
+          "additionalProperties": {"$ref": "#/$defs/policy"}
+        }
+      },
+      "unevaluatedProperties": false
+    },
+    "evolution_purpose": {
+      "description": "Evolution proposals. npc_evolution serves Level 1 and world_evolution serves Level 2.",
+      "allOf": [{"$ref": "#/$defs/purpose_binding"}],
+      "type": "object",
+      "required": ["policy"],
+      "properties": {
+        "policy": {"$ref": "#/$defs/policy"}
+      },
+      "unevaluatedProperties": false
+    },
+    "policy": {
+      "type": "object",
+      "description": "Per-request thinking and token budget. The loader also requires max_tokens to exceed reasoning_budget_tokens when thinking is true; JSON Schema cannot compare two fields.",
       "required": ["thinking", "max_tokens"],
       "properties": {
         "thinking": {"type": "boolean"},
         "reasoning_budget_tokens": {"type": "integer", "minimum": 0},
         "max_tokens": {"type": "integer", "minimum": 1}
       },
-      "additionalProperties": false
-    },
-    "provider_endpoint": {
-      "type": "object",
-      "properties": {
-        "base_url": {"type": "string", "minLength": 1},
-        "model": {"type": "string", "minLength": 1},
-        "api_key_env": {"type": ["string", "null"]},
-        "timeout_ms": {"type": "integer", "minimum": 1},
-        "temperature": {"type": "number", "minimum": 0, "maximum": 2}
-      },
+      "allOf": [
+        {"if": {"required": ["thinking"], "properties": {"thinking": {"const": true}}},
+         "then": {"required": ["reasoning_budget_tokens"],
+                  "properties": {"reasoning_budget_tokens": {"minimum": 1}}}}
+      ],
       "additionalProperties": false
     }
   }

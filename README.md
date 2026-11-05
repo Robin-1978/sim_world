@@ -98,7 +98,7 @@ cmake --build build -j2
 
 ## Local LLM
 
-`data/intelligence-profile.json` selects the local llama.cpp endpoint, model, per-decision token policy, and optional purpose-specific endpoints. `decision`, `level1_evolution`, and `level2_evolution` can each use a different compatible model or endpoint. Set `api_key_env` to the name of an environment variable when a remote endpoint requires a key; the secret value is never written to the profile, logs, Snapshot, or SQLite instance.
+`data/intelligence-profile.json` selects reusable providers and binds them to `purposes.decision`, `purposes.npc_evolution`, and `purposes.world_evolution`. Each purpose can use a different compatible model or endpoint, while `purposes.decision.policies` owns the three decision-stage budgets. Set `api_key_env` to the name of an environment variable when a remote endpoint requires a key; the secret value is never written to the profile, logs, Snapshot, or SQLite instance.
 
 With llama.cpp serving OpenAI-compatible HTTP on `127.0.0.1:8192`:
 

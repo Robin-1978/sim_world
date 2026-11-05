@@ -2945,37 +2945,123 @@ void automatic_evolution_uses_async_llm_and_audits_sandbox() {
 
 void intelligence_profile_configures_decision_budgets() {
     const auto profile = loadIntelligenceProfile(defaultIntelligenceProfilePath());
-    expect(profile.id == "village-qwen35-4b-v1", "village runs from an explicit intelligence profile");
-    expect(profile.providerType == "llama_cpp", "profile selects the local llama.cpp provider");
-    expect(!profile.llama.decisionPolicies.at("player_dialogue").enableThinking &&
-               profile.llama.decisionPolicies.at("player_dialogue").maxTokens == 512,
+    const auto& decision = profile.purposes.at("decision");
+    const auto& policies = decision.policies;
+    expect(profile.id == "village-qwen35-4b-v2", "village runs from an explicit intelligence profile");
+    expect(profile.providers.at("local_qwen").type == "llama_cpp" &&
+               decision.providerId == "local_qwen",
+           "the decision purpose references the reusable local llama.cpp provider");
+    expect(!policies.at("player_dialogue").enableThinking &&
+               policies.at("player_dialogue").maxTokens == 512,
            "player dialogue uses the fast answer policy after utterance understanding");
-    expect(profile.llama.decisionPolicies.at("utterance_understanding").enableThinking &&
-               profile.llama.decisionPolicies.at("utterance_understanding").reasoningBudgetTokens == 128 &&
-               profile.llama.decisionPolicies.at("utterance_understanding").maxTokens == 512,
+    expect(policies.at("utterance_understanding").enableThinking &&
+               policies.at("utterance_understanding").reasoningBudgetTokens == 128 &&
+               policies.at("utterance_understanding").maxTokens == 512,
            "utterance understanding has its own bounded reasoning policy");
-    expect(profile.llama.decisionPolicies.at("autonomous_reappraisal").enableThinking &&
-               profile.llama.decisionPolicies.at("autonomous_reappraisal").reasoningBudgetTokens == 128 &&
-               profile.llama.decisionPolicies.at("autonomous_reappraisal").maxTokens == 1024,
+    expect(policies.at("autonomous_reappraisal").enableThinking &&
+               policies.at("autonomous_reappraisal").reasoningBudgetTokens == 128 &&
+               policies.at("autonomous_reappraisal").maxTokens == 1024,
            "autonomous reappraisal uses its bounded thinking policy");
-    expect(profile.llama.decisionPolicies.contains("player_dialogue") &&
-               profile.llama.decisionPolicies.contains("utterance_understanding") &&
-               profile.llama.decisionPolicies.contains("autonomous_reappraisal") &&
-               profile.llama.decisionPolicies.contains("evolution_proposal"),
-           "named decision policies are loaded independently of channel ids");
-    expect(profile.llama.decisionPolicies.at("evolution_proposal").enableThinking &&
-               profile.llama.decisionPolicies.at("evolution_proposal").reasoningBudgetTokens == 256,
-           "Level 1 and Level 2 evolution use a separate bounded thinking policy");
-    expect(profile.llama.purposeEndpoints.contains("decision") &&
-               profile.llama.purposeEndpoints.contains("level1_evolution") &&
-               profile.llama.purposeEndpoints.contains("level2_evolution"),
-           "the profile exposes independent endpoints for decisions and both evolution levels");
-    expect(profile.llama.purposeEndpoints.at("decision").apiKeyConfigured &&
-               profile.llama.purposeEndpoints.at("decision").apiKeyEnv.empty() &&
-               profile.llama.purposeEndpoints.at("level1_evolution").model == profile.llama.model,
-           "purpose endpoint credentials are represented by optional environment-variable names");
+    expect(policies.size() == 3 && policies.contains("player_dialogue") &&
+               policies.contains("utterance_understanding") && policies.contains("autonomous_reappraisal"),
+           "decision owns exactly the three required channel policies");
+    expect(profile.purposes.contains("decision") &&
+               profile.purposes.contains("npc_evolution") &&
+               profile.purposes.contains("world_evolution") &&
+               profile.purposes.at("npc_evolution").providerId == "local_qwen" &&
+               profile.purposes.at("world_evolution").providerId == "local_qwen",
+           "the profile exposes independent purpose bindings for decisions and both evolution levels");
+    expect(profile.providers.at("local_qwen").apiKeyEnv.empty() &&
+               profile.purposes.at("decision").providerId == profile.purposes.at("world_evolution").providerId &&
+               profile.purposes.at("npc_evolution").policies.at("proposal").reasoningBudgetTokens == 256 &&
+               profile.purposes.at("world_evolution").policies.at("proposal").reasoningBudgetTokens == 512,
+           "provider credentials are stored on the reusable provider and are not coupled to a purpose");
     const auto provider = makeProviderFromProfile(profile, "mock");
     expect(provider->name() == "mock", "the profile provider can be overridden for offline tests");
+}
+
+void intelligence_profile_decouples_models_from_api_keys() {
+    const auto path = std::filesystem::temp_directory_path() /
+                      "tide_marks-purpose-endpoint-profile.json";
+    const Json profile{
+        {"kind", "intelligence_profile"},
+        {"schema_version", 2},
+        {"id", "purpose-endpoint-test"},
+        {"providers", Json{{"shared", Json{{"type", "openai_compatible"},
+                                             {"base_url", "https://shared.example/v1"},
+                                             {"model", "shared-model"},
+                                             {"api_key_env", "SIM_WORLD_SHARED_KEY"},
+                                             {"timeout_ms", 120000}, {"temperature", 0.2}}},
+                            {"evolution", Json{{"type", "openai_compatible"},
+                                                {"base_url", "https://evolution.example/v1"},
+                                                {"model", "evolution-model"},
+                                                {"api_key_env", "SIM_WORLD_EVOLUTION_KEY"},
+                                                {"timeout_ms", 120000}, {"temperature", 0.3}}}}},
+        {"purposes", Json{{"decision", Json{{"provider", "shared"},
+                                             {"model", "decision-model"},
+                                             {"api_key_env", "SIM_WORLD_DECISION_KEY"},
+                                             {"policies", Json{{"player_dialogue", Json{{"thinking", false}, {"max_tokens", 64}}},
+                                                                  {"utterance_understanding", Json{{"thinking", false}, {"max_tokens", 64}}},
+                                                                  {"autonomous_reappraisal", Json{{"thinking", false}, {"max_tokens", 64}}}}}}},
+                           {"npc_evolution", Json{{"provider", "evolution"},
+                                                   {"api_key_env", nullptr},
+                                                   {"policy", Json{{"thinking", false}, {"max_tokens", 64}}}}},
+                           {"world_evolution", Json{{"provider", "shared"},
+                                                     {"base_url", "https://other.example/v1"},
+                                                     {"policy", Json{{"thinking", false}, {"max_tokens", 64}}}}}}}};
+    {
+        std::ofstream output(path);
+        output << profile.dump(2) << '\n';
+    }
+    const auto loaded = loadIntelligenceProfile(path.string());
+    expect(loaded.purposes.at("decision").providerId == "shared" &&
+               loaded.purposes.at("decision").model == "decision-model" &&
+               loaded.purposes.at("decision").apiKeyEnv == "SIM_WORLD_DECISION_KEY",
+           "a purpose can reference a provider and override its model and API-key environment variable independently");
+    expect(loaded.purposes.at("npc_evolution").providerId == "evolution" &&
+               loaded.purposes.at("npc_evolution").apiKeyConfigured &&
+               loaded.purposes.at("npc_evolution").apiKeyEnv.empty(),
+           "an explicit null API-key override disables the referenced provider credential");
+    expect(loaded.purposes.at("world_evolution").providerId == "shared" &&
+               loaded.purposes.at("world_evolution").baseUrl == "https://other.example/v1",
+           "a purpose can reuse a provider while overriding only its endpoint");
+    std::error_code ignored;
+    std::filesystem::remove(path, ignored);
+}
+
+void intelligence_profile_rejects_legacy_layout() {
+    const auto path = std::filesystem::temp_directory_path() /
+                      "tide_marks-legacy-intelligence-profile.json";
+    Json legacy = Json::object();
+    legacy["kind"] = "intelligence_profile";
+    legacy["schema_version"] = 2;
+    legacy["id"] = "legacy-layout";
+    legacy["providers"] = Json{{"local", Json{{"type", "mock"}}}};
+    legacy["purposes"] = Json::object();
+    legacy["purposes"]["decision"] = Json::object();
+    legacy["purposes"]["decision"]["provider"] = "local";
+    legacy["purposes"]["decision"]["policies"] = Json{
+        {"player_dialogue", Json{{"thinking", false}, {"max_tokens", 64}}},
+        {"utterance_understanding", Json{{"thinking", false}, {"max_tokens", 64}}},
+        {"autonomous_reappraisal", Json{{"thinking", false}, {"max_tokens", 64}}}};
+    for (const auto purpose : {"npc_evolution", "world_evolution"}) {
+        legacy["purposes"][purpose] = Json{{"provider", "local"},
+                                             {"policy", Json{{"thinking", false}, {"max_tokens", 64}}}};
+    }
+    legacy["decision_policy"] = Json{{"player_dialogue", Json{{"thinking", false}, {"max_tokens", 64}}}};
+    {
+        std::ofstream output(path);
+        output << legacy.dump(2) << '\n';
+    }
+    bool rejected = false;
+    try {
+        (void)loadIntelligenceProfile(path.string());
+    } catch (const std::runtime_error&) {
+        rejected = true;
+    }
+    expect(rejected, "schema 2 rejects the legacy top-level decision_policy field");
+    std::error_code ignored;
+    std::filesystem::remove(path, ignored);
 }
 
 int main() {
@@ -3086,6 +3172,9 @@ int main() {
     run("automatic_evolution_uses_async_llm_and_audits_sandbox",
         automatic_evolution_uses_async_llm_and_audits_sandbox);
     run("intelligence_profile_configures_decision_budgets", intelligence_profile_configures_decision_budgets);
+    run("intelligence_profile_decouples_models_from_api_keys",
+        intelligence_profile_decouples_models_from_api_keys);
+    run("intelligence_profile_rejects_legacy_layout", intelligence_profile_rejects_legacy_layout);
     if (failures != 0) {
         std::cerr << failures << " test assertion(s) failed\n";
         return EXIT_FAILURE;

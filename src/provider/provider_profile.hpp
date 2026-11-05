@@ -3,6 +3,7 @@
 #include "provider/provider.hpp"
 
 #include <memory>
+#include <map>
 #include <string>
 
 namespace tide_marks {
@@ -12,8 +13,8 @@ namespace tide_marks {
 // it never grants write access to WorldState.
 struct IntelligenceProfile {
     std::string id;
-    std::string providerType{"mock"};
-    LlamaCppConfig llama;
+    std::map<std::string, ProviderDefinition> providers;
+    std::map<std::string, PurposeProvider> purposes;
 };
 
 [[nodiscard]] std::string defaultIntelligenceProfilePath();

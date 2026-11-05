@@ -1,58 +1,53 @@
 {
   "kind": "intelligence_profile",
-  "schema_version": 1,
-  "id": "village-qwen35-4b-v1",
-  "provider": {
-    "type": "llama_cpp",
-    "base_url": "http://127.0.0.1:8192/v1",
-    "model": "Huihui-Qwen3.5-4B-abliterated.Q4_K_M",
-    "api_key_env": null,
-    "timeout_ms": 120000,
-    "temperature": 0.2,
-    "purpose_endpoints": {
-      "decision": {
-        "base_url": "http://127.0.0.1:8192/v1",
-        "model": "Huihui-Qwen3.5-4B-abliterated.Q4_K_M",
-        "api_key_env": null,
-        "timeout_ms": 120000,
-        "temperature": 0.2
-      },
-      "level1_evolution": {
-        "base_url": "http://127.0.0.1:8192/v1",
-        "model": "Huihui-Qwen3.5-4B-abliterated.Q4_K_M",
-        "api_key_env": null,
-        "timeout_ms": 120000,
-        "temperature": 0.2
-      },
-      "level2_evolution": {
-        "base_url": "http://127.0.0.1:8192/v1",
-        "model": "Huihui-Qwen3.5-4B-abliterated.Q4_K_M",
-        "api_key_env": null,
-        "timeout_ms": 120000,
-        "temperature": 0.2
-      }
+  "schema_version": 2,
+  "id": "village-qwen35-4b-v2",
+  "providers": {
+    "local_qwen": {
+      "type": "llama_cpp",
+      "base_url": "http://127.0.0.1:8192/v1",
+      "model": "Huihui-Qwen3.5-4B-abliterated.Q4_K_M",
+      "api_key_env": null,
+      "timeout_ms": 120000,
+      "temperature": 0.2
     }
   },
-  "decision_policy": {
-    "player_dialogue": {
-      "thinking": false,
-      "reasoning_budget_tokens": 0,
-      "max_tokens": 512
+  "purposes": {
+    "decision": {
+      "provider": "local_qwen",
+      "policies": {
+        "player_dialogue": {
+          "thinking": false,
+          "reasoning_budget_tokens": 0,
+          "max_tokens": 512
+        },
+        "utterance_understanding": {
+          "thinking": true,
+          "reasoning_budget_tokens": 128,
+          "max_tokens": 512
+        },
+        "autonomous_reappraisal": {
+          "thinking": true,
+          "reasoning_budget_tokens": 128,
+          "max_tokens": 1024
+        }
+      }
     },
-    "utterance_understanding": {
-      "thinking": true,
-      "reasoning_budget_tokens": 128,
-      "max_tokens": 512
+    "npc_evolution": {
+      "provider": "local_qwen",
+      "policy": {
+        "thinking": true,
+        "reasoning_budget_tokens": 256,
+        "max_tokens": 1024
+      }
     },
-    "autonomous_reappraisal": {
-      "thinking": true,
-      "reasoning_budget_tokens": 128,
-      "max_tokens": 1024
-    },
-    "evolution_proposal": {
-      "thinking": true,
-      "reasoning_budget_tokens": 256,
-      "max_tokens": 1024
+    "world_evolution": {
+      "provider": "local_qwen",
+      "policy": {
+        "thinking": true,
+        "reasoning_budget_tokens": 512,
+        "max_tokens": 1536
+      }
     }
   }
 }

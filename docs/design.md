@@ -302,37 +302,43 @@ Provider 使用一个共享模型槽位和串行队列；本地 llama.cpp 是产
 
 小模型的 Provider 策略按决策价值分档，而不是固定追求最大思考预算：普通对白和低风险动作关闭 thinking；候选之间存在社会冲突、秘密或承诺权衡时使用约 128 token 的 reasoning budget；低置信度或校验失败才升级到 256。512 以上只用于演化提案、沙箱解释和离线分析，不进入每个 NPC Turn。预算升级必须记录原因、耗时、最终候选和校验结果，便于以后用真实回放重新校准。
 
-Provider 与决策预算由可版本化的 Intelligence Profile 选择，不绑定具体模型。正式配置是 `data/intelligence-profile.json`；`provider.purpose_endpoints.decision`、`level1_evolution` 和 `level2_evolution` 可以分别指定兼容端点、模型、温度、超时和 `api_key_env`。密钥值只从进程环境读取，不进入 Profile、Prompt、日志、快照、Replay 或 SQLite。交互式 client、text UI 和 headless 默认使用 `profile`，测试与可重复离线批处理通过 `--provider mock` 显式选择。Schema 位于 `data/schemas/intelligence-profile.schema.json`。
+Provider 与决策预算由可版本化的 Intelligence Profile 选择，不绑定具体模型。正式配置是 `data/intelligence-profile.json`；`purposes.decision`、`purposes.npc_evolution` 和 `purposes.world_evolution` 分别引用可复用 provider，并可覆盖兼容端点、模型、温度、超时和 `api_key_env`。决策阶段的 `utterance_understanding`、`player_dialogue` 和 `autonomous_reappraisal` 预算归属于 `purposes.decision.policies`；演化阶段分别使用两个演化 purpose 的 `policy`。密钥值只从进程环境读取，不进入 Profile、Prompt、日志、快照、Replay 或 SQLite。交互式 client、text UI 和 headless 默认使用 `profile`，测试与可重复离线批处理通过 `--provider mock` 显式选择。Schema 位于 `data/schemas/intelligence-profile.schema.json`。
 
-Profile 的 `decision_policy` 是按 channel 使用的命名策略表。Provider 接收 Runtime 解析后的 `provider_policy`，只负责执行对应预算和输出格式，不再根据 `player_dialogue` 或 `autonomous_reappraisal` 这样的业务触发字符串猜测决策类型。
+Profile 的 `purposes.decision.policies` 是按 channel 使用的命名策略表。Provider 接收 Runtime 解析后的 `provider_policy`，只负责执行对应预算和输出格式，不再根据 `player_dialogue` 或 `autonomous_reappraisal` 这样的业务触发字符串猜测决策类型。
 
 每次决策还带有独立的 `runtime_metadata` 审计信封，包含 `world_id`、`instance_id`、`content_version`、`simulation_version`、`prompt_version`、`world_revision` 和 `npc_state_version`，以及实际 channel/trigger。它用于日志关联、异步过期校验和回放定位，不属于 NPC 的可见世界事实；`worldSnapshot` 不复制这些工程身份字段，Provider 的系统提示也明确禁止据此推断资源、地点、动机或行动。
 
 ```json
 {
   "kind": "intelligence_profile",
-  "schema_version": 1,
-  "provider": {
-    "type": "llama_cpp",
-    "base_url": "http://127.0.0.1:8192/v1",
-    "model": "local-model",
-    "timeout_ms": 120000,
-    "temperature": 0.2
+  "schema_version": 2,
+  "id": "village-qwen35-4b-v2",
+  "providers": {
+    "local_qwen": {
+      "type": "llama_cpp",
+      "base_url": "http://127.0.0.1:8192/v1",
+      "model": "Huihui-Qwen3.5-4B-abliterated.Q4_K_M",
+      "api_key_env": null,
+      "timeout_ms": 120000,
+      "temperature": 0.2
+    }
   },
-  "decision_policy": {
-    "player_dialogue": {
-      "thinking": false,
-      "max_tokens": 512
+  "purposes": {
+    "decision": {
+      "provider": "local_qwen",
+      "policies": {
+        "player_dialogue": {"thinking": false, "max_tokens": 512},
+        "utterance_understanding": {"thinking": true, "reasoning_budget_tokens": 128, "max_tokens": 512},
+        "autonomous_reappraisal": {"thinking": true, "reasoning_budget_tokens": 128, "max_tokens": 1024}
+      }
     },
-    "utterance_understanding": {
-      "thinking": true,
-      "reasoning_budget_tokens": 128,
-      "max_tokens": 512
+    "npc_evolution": {
+      "provider": "local_qwen",
+      "policy": {"thinking": true, "reasoning_budget_tokens": 256, "max_tokens": 1024}
     },
-    "autonomous_reappraisal": {
-      "thinking": true,
-      "reasoning_budget_tokens": 128,
-      "max_tokens": 1024
+    "world_evolution": {
+      "provider": "local_qwen",
+      "policy": {"thinking": true, "reasoning_budget_tokens": 512, "max_tokens": 1536}
     }
   }
 }

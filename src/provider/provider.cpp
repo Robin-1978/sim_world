@@ -27,15 +27,23 @@ struct ProviderJsonResult {
 };
 
 LlamaCppConfig configForPurpose(const LlamaCppConfig& base, const std::string& purpose) {
-    const auto found = base.purposeEndpoints.find(purpose);
-    if (found == base.purposeEndpoints.end()) return base;
+    const auto purposeFound = base.purposes.find(purpose);
+    if (purposeFound == base.purposes.end()) return base;
+    const auto providerFound = base.providers.find(purposeFound->second.providerId);
+    if (providerFound == base.providers.end()) return base;
     auto selected = base;
-    const auto& endpoint = found->second;
-    if (!endpoint.baseUrl.empty()) selected.baseUrl = endpoint.baseUrl;
-    if (!endpoint.model.empty()) selected.model = endpoint.model;
-    if (endpoint.apiKeyConfigured) selected.apiKeyEnv = endpoint.apiKeyEnv;
-    if (endpoint.timeoutMs > 0) selected.timeoutMs = endpoint.timeoutMs;
-    if (endpoint.temperature >= 0.0) selected.temperature = endpoint.temperature;
+    const auto& provider = providerFound->second;
+    const auto& purposeConfig = purposeFound->second;
+    selected.baseUrl = provider.baseUrl;
+    selected.model = provider.model;
+    selected.apiKeyEnv = provider.apiKeyEnv;
+    selected.timeoutMs = provider.timeoutMs;
+    selected.temperature = provider.temperature;
+    if (!purposeConfig.baseUrl.empty()) selected.baseUrl = purposeConfig.baseUrl;
+    if (!purposeConfig.model.empty()) selected.model = purposeConfig.model;
+    if (purposeConfig.apiKeyConfigured) selected.apiKeyEnv = purposeConfig.apiKeyEnv;
+    if (purposeConfig.timeoutMs > 0) selected.timeoutMs = purposeConfig.timeoutMs;
+    if (purposeConfig.temperature >= 0.0) selected.temperature = purposeConfig.temperature;
     return selected;
 }
 
@@ -467,10 +475,11 @@ ProviderResponse LlamaCppProvider::proposeEvolution(const Json& context,
                                                      const Json& validationFeedback) {
     std::lock_guard lock(callMutex_);
     const auto endpointConfig = configForPurpose(
-        config_, evolutionLevel == "level1" ? "level1_evolution" : "level2_evolution");
-    const auto configuredPolicy = config_.decisionPolicies.find("evolution_proposal");
-    if (configuredPolicy == config_.decisionPolicies.end()) {
-        return ProviderResponse{false, {}, {}, "missing_provider_policy:evolution_proposal", Json::object()};
+        config_, evolutionLevel == "level1" ? "npc_evolution" : "world_evolution");
+    const auto policyPurpose = evolutionLevel == "level1" ? "npc_evolution" : "world_evolution";
+    const auto configuredPolicy = config_.purposePolicies.find(policyPurpose);
+    if (configuredPolicy == config_.purposePolicies.end()) {
+        return ProviderResponse{false, {}, {}, "missing_provider_policy:" + std::string(policyPurpose), Json::object()};
     }
     const DecisionPolicy& policy = configuredPolicy->second;
     const std::string systemPrompt =
