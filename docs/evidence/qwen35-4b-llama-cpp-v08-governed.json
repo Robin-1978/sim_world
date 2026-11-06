@@ -1,0 +1,106 @@
+{
+  "date": "2026-11-06",
+  "command": "TIDE_MARKS_DEBUG_PROVIDER=1 ./build/tide_marks_headless --days 7 --provider profile --wait-llm-ms 60000 --governance-auto --replay /tmp/tide_marks-7d-real-v08-governed.jsonl --dump-events",
+  "provider": "llama.cpp",
+  "model": "Huihui-Qwen3.5-4B-abliterated.Q4_K_M",
+  "days_requested": 7,
+  "final": "day 8 6:00; boat_integrity=91; cooperation=5; grain=0; records_integrity=94; reputation=0; revision=10175; eve@archive_room:stage=0:need=cognition=0.963333; lorn@ferry_dock:stage=0:need=belonging=1; mira@granary:stage=0:need=food_security=0.9",
+  "drain": "consumed=116 pending=0",
+  "replay_equal": true,
+  "stages": {
+    "decision": {
+      "calls": 90,
+      "finish_reason": {
+        "length": 1,
+        "stop": 89
+      },
+      "prompt_tokens_total": 487783,
+      "completion_tokens_total": 33923,
+      "cached_tokens_total": 139268,
+      "cache_ratio": 0.2855,
+      "completion_max": 1024
+    },
+    "evolution_level2": {
+      "calls": 6,
+      "finish_reason": {
+        "tool_calls": 4,
+        "length": 2
+      },
+      "prompt_tokens_total": 48132,
+      "completion_tokens_total": 7026,
+      "cached_tokens_total": 20363,
+      "cache_ratio": 0.4231,
+      "completion_max": 1536
+    },
+    "reflection": {
+      "calls": 21,
+      "finish_reason": {
+        "tool_calls": 21
+      },
+      "prompt_tokens_total": 119099,
+      "completion_tokens_total": 24685,
+      "cached_tokens_total": 56640,
+      "cache_ratio": 0.4756,
+      "completion_max": 1536
+    },
+    "understanding": {
+      "calls": 1,
+      "finish_reason": {
+        "stop": 1
+      },
+      "prompt_tokens_total": 893,
+      "completion_tokens_total": 296,
+      "cached_tokens_total": 0,
+      "cache_ratio": 0.0,
+      "completion_max": 512
+    }
+  },
+  "events": {
+    "action.resource": 11,
+    "drive.adapted": 49,
+    "evolution.proposal_failed": 1,
+    "evolution.proposal_rejected": 1,
+    "experience.observed": 39,
+    "experience.recorded": 70,
+    "goal.cancelled": 6,
+    "goal.reflected": 6,
+    "innovation.hypothesis_rejected": 17,
+    "knowledge.asserted": 32,
+    "life.archive": 7,
+    "life.clue": 7,
+    "life.crossing": 7,
+    "life.day": 7,
+    "life.debt": 7,
+    "life.explain_ration": 7,
+    "life.ferry_decay": 7,
+    "life.protect_secret": 7,
+    "life.ration": 6,
+    "life.repair": 5,
+    "life.rest": 21,
+    "life.withhold": 7,
+    "memory.reflected": 25,
+    "need.critical": 10,
+    "need.deprived": 504,
+    "need.relieved": 205,
+    "npc.intent": 41,
+    "npc.intent_expired": 5,
+    "npc.intent_rejected": 25,
+    "npc.process_completed": 39,
+    "npc.process_failed": 1,
+    "npc.schedule_applied": 50,
+    "reflection.committed": 21,
+    "reflection.update_rejected": 13,
+    "stimulus.habituated": 30,
+    "strategy.reflected": 21,
+    "structure.ferry_closed": 7,
+    "structure.ferry_opened": 7,
+    "world.initialized": 1
+  },
+  "notes": [
+    "This run used the pre-f57f22e autonomous schema, so decision responses still carried optional explanation fields.",
+    "The governance harness completed the seven-day run with pending=0 and replay equality, but no Level 1 adoption or Overlay activation occurred.",
+    "Reflection committed 21 daily results; 13 optional update fields were rejected locally while valid updates committed.",
+    "Level 2 had two truncations and one proposal rejected for an innovation-kind mismatch; no proposal was activated.",
+    "Provider debug output in this evidence predates the compact default debug formatter; a full payload remains in the raw run output."
+  ]
+}
