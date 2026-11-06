@@ -43,10 +43,9 @@ public:
                                    const ProviderResponse& response,
                                    const std::string& provider);
     CommandResult startAdoption(const std::string& npcId, const std::string& proposalId);
-    // An external governance actor may advance a persisted private hypothesis
-    // before it enters the ordinary validate -> sandbox -> approve path. The
-    // provider cannot call this entry point; it is deliberately separate from
-    // daily reflection so approval remains auditable and explicit.
+    // An independent Runtime Governor may advance a persisted private
+    // hypothesis before ordinary preflight -> approve -> activation. The
+    // provider cannot call this entry point; the transition remains auditable.
     CommandResult transitionInnovationHypothesis(const std::string& npcId,
                                                   const std::string& proposalId,
                                                   const std::string& nextStatus,

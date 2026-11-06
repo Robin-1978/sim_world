@@ -3265,7 +3265,7 @@ void level_one_evolution_is_scoped_to_target_npc() {
            "Level 1 validation rejects a proposal without a target NPC");
 }
 
-void automatic_evolution_uses_async_llm_and_audits_sandbox() {
+void automatic_evolution_uses_async_llm_and_runtime_admission() {
     auto provider = std::make_unique<EvolutionProposalProvider>();
     auto* providerRaw = provider.get();
     auto content = ContentPackLoader::load(ContentPackLoader::defaultRoot());
@@ -3287,7 +3287,7 @@ void automatic_evolution_uses_async_llm_and_audits_sandbox() {
            "an asynchronous LLM ReflectionResult is validated, committed, and audited");
     expect(std::none_of(service.state().events.begin(), service.state().events.end(),
                         [](const auto& event) { return event.type == "evolution.overlay_activated"; }),
-           "automatic evolution never self-approves or activates an overlay");
+           "a reflection with no innovation does not create an overlay");
 
     auto level2Provider = std::make_unique<EvolutionProposalProvider>();
     auto* level2ProviderRaw = level2Provider.get();
@@ -3301,6 +3301,14 @@ void automatic_evolution_uses_async_llm_and_audits_sandbox() {
                            [](const auto& event) { return event.type == "evolution.proposal_ready" &&
                                                           event.target == "level2"; }),
            "the same configured queue also drives Level 2 world-foundation proposals through the LLM");
+    expect(std::any_of(level2Service.state().events.begin(), level2Service.state().events.end(),
+                      [](const auto& event) { return event.type == "evolution.approved" &&
+                                                     event.actor == "world"; }) &&
+               std::any_of(level2Service.state().events.begin(), level2Service.state().events.end(),
+                           [](const auto& event) { return event.type == "evolution.overlay_activated" &&
+                                                          event.actor == "runtime_governor"; }) &&
+               level2Service.state().activeOverlays.size() == 1,
+           "a valid Level 2 proposal is autonomously admitted and activated without a human or full sandbox");
 }
 
 void level_two_evolution_waits_for_new_public_problem_evidence() {
@@ -3710,8 +3718,8 @@ int main() {
         llm_proposes_level_one_and_level_two_evolution);
     run("level_one_evolution_is_scoped_to_target_npc",
         level_one_evolution_is_scoped_to_target_npc);
-    run("automatic_evolution_uses_async_llm_and_audits_sandbox",
-        automatic_evolution_uses_async_llm_and_audits_sandbox);
+    run("automatic_evolution_uses_async_llm_and_runtime_admission",
+        automatic_evolution_uses_async_llm_and_runtime_admission);
     run("level_two_evolution_waits_for_new_public_problem_evidence",
         level_two_evolution_waits_for_new_public_problem_evidence);
     run("level_two_reflection_can_commit_no_change", level_two_reflection_can_commit_no_change);

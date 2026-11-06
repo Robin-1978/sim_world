@@ -213,6 +213,53 @@ std::uint64_t lastLevel2EvaluationSequence(const WorldState& state) {
     return sequence;
 }
 
+// Automatic evolution uses a lightweight admissibility check. The full
+// EvolutionManager::sandbox() remains available for explicit counterfactual
+// experiments, but ordinary Level 1/2 overlays do not clone and run a second
+// world before activation. Runtime measures their real execution horizon
+// afterwards and feeds those facts into the next reflection.
+EvolutionSandboxResult preflightOverlay(const EvolutionProposal& proposal,
+                                        const WorldService& world) {
+    EvolutionSandboxResult result;
+    result.proposalId = proposal.id;
+    result.baseContentVersion = world.content().contentVersion;
+    result.baseRevision = world.state().revision;
+    result.finalRevision = world.state().revision;
+    if (proposal.baseContentVersion != world.content().contentVersion ||
+        proposal.baseWorldRevision != world.state().revision) {
+        result.code = "preflight_stale";
+        result.message = "The proposal no longer targets the current content view and world revision.";
+        result.metrics = Json{{"preflight", false}, {"reason", result.code}};
+        return result;
+    }
+    if (proposal.kind == "innovation" && proposal.innovationStatus != "accepted") {
+        result.code = "innovation_acceptance_required";
+        result.message = "The Runtime must accept the bounded innovation hypothesis before activation.";
+        result.metrics = Json{{"preflight", false}, {"reason", result.code}};
+        return result;
+    }
+    // Applying the declarative operations to a copy is the ordinary runtime
+    // preflight. It verifies the same operation registry and BT references as
+    // activation without cloning a world, advancing time, or invoking Mock.
+    auto candidate = world.content();
+    auto candidateProposal = proposal;
+    candidateProposal.status = EvolutionProposalStatus::Approved;
+    const auto applied = EvolutionManager::applyOverlay(candidate, candidateProposal);
+    if (!applied.valid) {
+        result.code = applied.code;
+        result.message = applied.message;
+        result.metrics = Json{{"preflight", false}, {"reason", result.code}};
+        return result;
+    }
+    result.passed = true;
+    result.code = "preflight_passed";
+    result.message = "The Runtime preflight accepted this bounded declarative overlay.";
+    result.overlayVersion = candidate.contentVersion;
+    result.metrics = Json{{"preflight", true}, {"operation_count", proposal.operations.size()},
+                          {"overlay_version", result.overlayVersion}};
+    return result;
+}
+
 bool isPrivateCognitiveEvent(const std::string& type);
 
 Json reflectionEvidence(const WorldState& state, const NpcState& npc) {
@@ -534,8 +581,9 @@ ProviderResponse WorldEvolutionSystem::requestProposal(const WorldService& world
 
 void WorldEvolutionSystem::scheduleAutomatic() {
     // Automatic evolution is a content-configured wakeup. It only captures a
-    // read-only context and queues a real provider request; validation,
-    // sandboxing and independent approval remain in pumpAsyncProposals().
+    // read-only context and queues a real provider request; Runtime validation,
+    // lightweight preflight and autonomous approval happen after the response
+    // returns to the main thread.
     if (!world_.evolution_ || !world_.provider_->capabilities().automaticEvolution ||
         !world_.content_.evolutionPolicy.enabled || world_.state_.now.minute <= 0 ||
         world_.state_.now.minute % kMinutesPerDay != 0) {
@@ -636,6 +684,8 @@ std::size_t WorldEvolutionSystem::pumpAsyncProposals() {
                 audit("reflection.failed", "The configured LLM did not return a daily reflection",
                       Json{{"error", queued.response.error.empty() ? "provider_unavailable" : queued.response.error}});
             } else {
+                std::vector<std::pair<std::string, Json>> createdHypotheses;
+                const auto reflectionEventStart = world_.state_.events.size();
                 const auto result = commitReflection(queued.request, queued.response, queued.provider);
                 if (!result.accepted) {
                     if (queued.request.attempt < 2 && world_.provider_->capabilities().structuredRepair) {
@@ -650,6 +700,100 @@ std::size_t WorldEvolutionSystem::pumpAsyncProposals() {
                     }
                     audit("reflection.rejected", "The Runtime rejected a structured daily reflection",
                           Json{{"code", result.code}, {"message", result.message}});
+                } else {
+                    // A valid private hypothesis is an ordinary autonomous
+                    // evolution candidate. Runtime admits it after the
+                    // reflection transaction, then immediately starts the
+                    // declared adoption process when the NPC is available.
+                    // No human approval or counterfactual world is involved.
+                    for (std::size_t index = reflectionEventStart;
+                         index < world_.state_.events.size(); ++index) {
+                        const auto& event = world_.state_.events.at(index);
+                        if (event.type == "innovation.hypothesis_created" && event.target == queued.request.targetNpcId &&
+                            event.data.is_object() && event.data.contains("proposal") &&
+                            event.data.at("proposal").is_object()) {
+                            createdHypotheses.emplace_back(event.data.value("proposal_id", ""),
+                                                           event.data.at("proposal"));
+                        }
+                    }
+                    for (const auto& [proposalId, serialized] : createdHypotheses) {
+                        if (proposalId.empty()) continue;
+                        try {
+                            auto proposal = EvolutionManager::fromJson(serialized);
+                            proposal.baseContentVersion = world_.content_.contentVersion;
+                            proposal.baseWorldRevision = world_.state_.revision;
+                            proposal.innovationStatus = "accepted";
+                            const auto validation = EvolutionManager::validate(
+                                proposal, world_.content_, world_.state_);
+                            if (!validation.valid) {
+                                static_cast<void>(transitionInnovationHypothesis(
+                                    queued.request.targetNpcId, proposalId, "rejected", "runtime_governor"));
+                                audit("evolution.proposal_rejected",
+                                      "Runtime rejected a private innovation during admissibility validation",
+                                      Json{{"code", validation.code}, {"message", validation.message},
+                                           {"proposal", EvolutionManager::toJson(proposal)}});
+                                continue;
+                            }
+                            const auto preflight = preflightOverlay(proposal, world_);
+                            if (!preflight.passed) {
+                                static_cast<void>(transitionInnovationHypothesis(
+                                    queued.request.targetNpcId, proposalId, "rejected", "runtime_governor"));
+                                audit("evolution.proposal_rejected",
+                                      "Runtime rejected a private innovation during lightweight preflight",
+                                      Json{{"code", preflight.code}, {"message", preflight.message},
+                                           {"proposal", EvolutionManager::toJson(proposal)}});
+                                continue;
+                            }
+                            const auto accepted = transitionInnovationHypothesis(
+                                queued.request.targetNpcId, proposalId, "accepted", "runtime_governor");
+                            if (!accepted.accepted) {
+                                audit("evolution.approval_rejected",
+                                      "Runtime could not persist private innovation acceptance",
+                                      Json{{"code", accepted.code}, {"message", accepted.message},
+                                           {"proposal_id", proposalId}});
+                                continue;
+                            }
+                            proposal.baseWorldRevision = world_.state_.revision;
+                            proposal.status = EvolutionProposalStatus::Validated;
+                            const auto approval = EvolutionManager::approve(
+                                proposal, "runtime_governor", true);
+                            audit(approval.valid ? "evolution.approved" : "evolution.approval_rejected",
+                                  approval.valid ? "Runtime Governor approved a private innovation for activation"
+                                                 : "Runtime Governor rejected a private innovation approval",
+                                  Json{{"code", approval.code}, {"message", approval.message},
+                                       {"proposal", EvolutionManager::toJson(proposal)},
+                                       {"approval_actor", "runtime_governor"}});
+                            if (!approval.valid) continue;
+                            const auto activationPreflight = preflightOverlay(proposal, world_);
+                            if (!activationPreflight.passed) {
+                                audit("evolution.activation_rejected",
+                                      "Runtime preflight became stale before private innovation activation",
+                                      Json{{"code", activationPreflight.code},
+                                           {"message", activationPreflight.message},
+                                           {"proposal", EvolutionManager::toJson(proposal)}});
+                                continue;
+                            }
+                            const auto activation = activateOverlay(proposal, activationPreflight);
+                            if (!activation.accepted) {
+                                audit("evolution.activation_rejected",
+                                      "Runtime could not activate an approved private innovation",
+                                      Json{{"code", activation.code}, {"message", activation.message},
+                                           {"proposal", EvolutionManager::toJson(proposal)}});
+                                continue;
+                            }
+                            const auto adoption = startAdoption(queued.request.targetNpcId, proposalId);
+                            audit(adoption.accepted ? "innovation.adoption_queued" : "innovation.adoption_rejected",
+                                  adoption.accepted ? "Runtime queued the private innovation for NPC adoption"
+                                                     : "Runtime could not start private innovation adoption",
+                                  Json{{"code", adoption.code}, {"message", adoption.message},
+                                       {"proposal_id", proposalId}});
+                        } catch (const std::exception& error) {
+                            audit("evolution.proposal_rejected",
+                                  "Runtime rejected a malformed private innovation candidate",
+                                  Json{{"code", "invalid_innovation_candidate"}, {"error", error.what()},
+                                       {"proposal_id", proposalId}});
+                        }
+                    }
                 }
             }
             finish();
@@ -717,17 +861,51 @@ std::size_t WorldEvolutionSystem::pumpAsyncProposals() {
                 finish();
                 continue;
             }
-            const auto sandbox = EvolutionManager::sandbox(proposal, world_);
-            Json sandboxJson{{"passed", sandbox.passed}, {"code", sandbox.code},
-                             {"message", sandbox.message}, {"proposal_id", sandbox.proposalId},
-                             {"overlay_version", sandbox.overlayVersion},
-                             {"base_content_version", sandbox.baseContentVersion},
-                             {"base_revision", sandbox.baseRevision}, {"final_revision", sandbox.finalRevision},
-                             {"metrics", sandbox.metrics}, {"event_diff", sandbox.eventDiff}};
-            audit(sandbox.passed ? "evolution.proposal_ready" : "evolution.proposal_rejected",
-                  sandbox.passed ? "A validated automatic evolution proposal passed its deterministic sandbox"
-                                 : "An automatic evolution proposal failed its deterministic sandbox",
-                  Json{{"proposal", EvolutionManager::toJson(proposal)}, {"sandbox", sandboxJson}});
+            const auto preflight = preflightOverlay(proposal, world_);
+            Json preflightJson{{"passed", preflight.passed}, {"code", preflight.code},
+                               {"message", preflight.message}, {"proposal_id", preflight.proposalId},
+                               {"overlay_version", preflight.overlayVersion},
+                               {"base_content_version", preflight.baseContentVersion},
+                               {"base_revision", preflight.baseRevision},
+                               {"final_revision", preflight.finalRevision},
+                               {"metrics", preflight.metrics}};
+            audit(preflight.passed ? "evolution.proposal_ready" : "evolution.proposal_rejected",
+                  preflight.passed ? "A validated automatic evolution proposal passed Runtime preflight"
+                                   : "An automatic evolution proposal failed Runtime preflight",
+                  Json{{"proposal", EvolutionManager::toJson(proposal)}, {"preflight", preflightJson}});
+            if (preflight.passed) {
+                proposal.status = EvolutionProposalStatus::Validated;
+                if (proposal.kind == "innovation") proposal.innovationStatus = "accepted";
+                const auto approval = EvolutionManager::approve(proposal, "runtime_governor", true);
+                audit(approval.valid ? "evolution.approved" : "evolution.approval_rejected",
+                      approval.valid ? "Runtime Governor approved a bounded declarative overlay"
+                                     : "Runtime Governor rejected a bounded declarative overlay",
+                      Json{{"code", approval.code}, {"message", approval.message},
+                           {"proposal", EvolutionManager::toJson(proposal)},
+                           {"approval_actor", "runtime_governor"}});
+                if (approval.valid) {
+                    // The approval audit is itself a committed Runtime fact,
+                    // so refresh the revision-bound preflight before applying
+                    // the overlay atomically.
+                    proposal.baseWorldRevision = world_.state_.revision;
+                    const auto activationPreflight = preflightOverlay(proposal, world_);
+                    const auto activated = activationPreflight.passed
+                                               ? activateOverlay(proposal, activationPreflight)
+                                               : world_.reject(activationPreflight.code,
+                                                               activationPreflight.message);
+                    if (!activated.accepted) {
+                        audit("evolution.activation_rejected",
+                              "The Runtime Governor rejected a preflighted overlay at activation",
+                              Json{{"code", activated.code}, {"message", activated.message},
+                                   {"proposal", EvolutionManager::toJson(proposal)}});
+                    }
+                } else {
+                    audit("evolution.approval_rejected",
+                          "The Runtime Governor rejected a preflighted overlay",
+                          Json{{"code", approval.code}, {"message", approval.message},
+                               {"proposal", EvolutionManager::toJson(proposal)}});
+                }
+            }
             finish();
         } catch (const std::exception& error) {
             if (queued.request.attempt < 2 && world_.provider_->capabilities().structuredRepair) {
@@ -916,8 +1094,8 @@ CommandResult WorldEvolutionSystem::commitReflection(const EvolutionRequest& req
         issueSet.erase(item.get<std::string>());
     }
     const auto hypotheses = result.value("innovation_hypotheses", Json::array());
-    if (!hypotheses.is_array() || hypotheses.size() > 2) {
-        return world_.reject("invalid_reflection_innovation", "Innovation hypotheses are optional and bounded.");
+    if (!hypotheses.is_array() || hypotheses.size() > 1) {
+        return world_.reject("invalid_reflection_innovation", "A reflection may create at most one innovation hypothesis.");
     }
     // Count committed failures across reflection windows. A repeated failure
     // deterministically seeds a durable issue key; the LLM still has to cite
@@ -1309,6 +1487,11 @@ CommandResult WorldEvolutionSystem::transitionInnovationHypothesis(const std::st
                                                                     const std::string& nextStatus,
                                                                     const std::string& actor) {
     WorldService::TransactionScope transaction(world_);
+    if (actor != "runtime_governor" && actor != "headless_governor" && actor != "developer" &&
+        actor != "world_designer") {
+        return world_.reject("approval_forbidden",
+                             "Only an independent Runtime Governor or release actor may transition an innovation hypothesis.");
+    }
     const auto npcFound = world_.state_.npcs.find(npcId);
     if (npcFound == world_.state_.npcs.end()) {
         return world_.reject("unknown_npc", "Innovation hypothesis owner does not exist.");
@@ -1379,12 +1562,12 @@ CommandResult WorldEvolutionSystem::activateOverlay(const EvolutionProposal& pro
         return world_.reject("overlay_not_approved", "Only an approved evolution proposal can activate an overlay.");
     }
     if (!sandbox.passed || sandbox.proposalId != proposal.id || sandbox.overlayVersion.empty()) {
-        return world_.reject("overlay_sandbox_required", "A passing sandbox result for this proposal is required.");
+        return world_.reject("overlay_preflight_required", "A passing Runtime preflight result for this proposal is required.");
     }
     if (sandbox.baseContentVersion != proposal.baseContentVersion ||
         sandbox.baseRevision != world_.state_.revision || proposal.baseWorldRevision != world_.state_.revision) {
-        return world_.reject("overlay_sandbox_stale",
-                             "The sandbox and proposal must target the current content version and world revision.");
+        return world_.reject("overlay_preflight_stale",
+                             "The Runtime preflight and proposal must target the current content version and world revision.");
     }
     if (std::any_of(world_.state_.activeOverlays.begin(), world_.state_.activeOverlays.end(),
                     [&proposal](const auto& active) { return active.proposalId == proposal.id; })) {
@@ -1394,7 +1577,7 @@ CommandResult WorldEvolutionSystem::activateOverlay(const EvolutionProposal& pro
     const auto applied = EvolutionManager::applyOverlay(candidate, proposal);
     if (!applied.valid) return world_.reject(applied.code, applied.message);
     if (candidate.contentVersion != sandbox.overlayVersion) {
-        return world_.reject("overlay_version_mismatch", "The sandbox result does not match the activated content version.");
+        return world_.reject("overlay_version_mismatch", "The Runtime preflight does not match the activated content version.");
     }
     const auto previousVersion = world_.content_.contentVersion;
     world_.content_ = std::move(candidate);
@@ -1403,7 +1586,8 @@ CommandResult WorldEvolutionSystem::activateOverlay(const EvolutionProposal& pro
         ActiveOverlayState{proposal.id, proposal.baseContentVersion, world_.content_.contentVersion,
                            proposal.operations});
     const auto event = world_.addEvent(
-        "evolution.overlay_activated", "developer", proposal.id, "An approved content overlay became active",
+        "evolution.overlay_activated", "runtime_governor", proposal.id,
+        "A Runtime-approved content overlay became active",
         Json{{"proposal_id", proposal.id}, {"overlay_version", world_.content_.contentVersion},
              {"previous_content_version", previousVersion},
              {"base_content_version", proposal.baseContentVersion},

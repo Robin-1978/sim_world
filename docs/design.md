@@ -47,7 +47,7 @@ WorldState facts
 
 已有并获准的需求模型在运行时自动推进，不需要人工逐分钟批准。LLM 在已注册候选中选择交互意图，也不需要人工逐句批准，但必须通过版本、权限和业务规则校验。
 
-LLM 提出新的需求类型、驱动力曲线、集体指标、行为配方、内容实体或规则组合时，才进入演化治理：`Candidate -> Validate -> Sandbox/Replay -> Runtime Governor Decision -> Versioned Activate -> Execute Horizon -> Measure -> Reflect -> Retain/Refine/Rollback`。Level 1 私有行为和 Level 2 声明式共享内容在通过确定性验证、沙箱、范围、风险和指标门槛后，由独立 Runtime Governor 自动批准；提案 LLM 只能提出候选和解释，不能批准或激活自己的候选。涉及 Runtime Core、权限模型、任意脚本、制度规则、不可逆外部副作用或指标约束失败的候选必须停在治理队列，交给开发者/世界设计者通过发布流程处理。`--governance-auto` 只是把同一 Runtime Governor 显式打开用于长跑和回归，不是另一套审批逻辑。事务、权限、事件格式、存档、调度、组件存储和其他 Runtime Core 永远不能由 LLM 在线修改，只能由开发者改代码、测试、迁移和发布。
+LLM 提出新的需求类型、驱动力曲线、集体指标、行为配方、内容实体或规则组合时，才进入演化治理：`Candidate -> Validate/Preflight -> Runtime Governor Admissibility -> Versioned Activate -> Execute Horizon -> Measure -> Reflect -> Retain/Refine/Rollback`。Level 1 私有行为和 Level 2 声明式共享内容只要通过确定性 Schema、权限、范围、Revision、资源、BT/operator 引用和硬不变量预检，就由 Runtime Governor 自动批准并激活；普通路径不需要人工审批，也不把重型反事实沙箱作为上线前门槛。提案 LLM 只能提出候选和解释，不能批准或激活自己的候选。涉及 Runtime Core、权限模型、任意脚本、不可逆外部副作用或违反硬不变量的候选直接拒绝；需要新 C++ 能力时仍交给开发者发布。`--governance-auto` 保留为审计兼容入口，但不再代表一套不同的审批逻辑。事务、权限、事件格式、存档、调度、组件存储和其他 Runtime Core 永远不能由 LLM 在线修改，只能由开发者改代码、测试、迁移和发布。
 
 ## 3. 世界实例与内容边界
 
@@ -124,7 +124,7 @@ expected_relief(action, need) = learned_expectation
 
 自动适应发生在单个主体的状态上，且必须有界、可审计、可回滚。例如行动前预测会缓解 0.2，实际结算为 0.05，DriveSystem 在内容声明的学习率、单次步长和冷却期内校准该需求的预期满足，并产生 `drive.adapted`；外驱习惯化则在校准该类刺激的敏感度。适应参数属于世界规则；LLM 可以解释误差和提出策略提案，但不能直接写权重、阈值或衰减率。个体适应不等于社会规则或 Runtime Core 演化。
 
-当前实现采用确定性驱动力内核，确保世界不调用模型也能运行、测试和回放。内驱是主体内部连续状态，外驱是世界对主体施加的已记录刺激，结构约束是意图能否执行的条件。LLM 不替代内稳态计算，但会实际参与高价值决策：读取授权的需求、事件、关系和后果，解释处境，比较满足路径的代价与社会影响，引用它依赖的 Stimulus，生成 `tradeoffs` 和 `expected_relief`，再提出候选意图。C++ 只接受经过版本、权限、资源、可见性和业务规则校验的行动；模型不能直接写缺口、敏感度、资源、关系或事件。LLM 也可以提出新的需求定义、刺激类型、结构规则、行为配方和策略，但提案未通过沙箱和批准前不改变需求模型。
+当前实现采用确定性驱动力内核，确保世界不调用模型也能运行、测试和回放。内驱是主体内部连续状态，外驱是世界对主体施加的已记录刺激，结构约束是意图能否执行的条件。LLM 不替代内稳态计算，但会实际参与高价值决策：读取授权的需求、事件、关系和后果，解释处境，比较满足路径的代价与社会影响，引用它依赖的 Stimulus，生成 `tradeoffs` 和 `expected_relief`，再提出候选意图。C++ 只接受经过版本、权限、资源、可见性和业务规则校验的行动；模型不能直接写缺口、敏感度、资源、关系或事件。LLM 也可以提出新的需求定义、刺激类型、结构规则、行为配方和策略，但提案未通过 Runtime 预检和 Governor 准入前不改变需求模型。
 
 该模型是用于可信模拟的可解释近似，不声称还原真实人类心理。理论依据用于确定状态语义和边界，具体阈值、曲线与满足强度必须由内容或经批准的演化提案定义并通过回放校准。
 
@@ -139,7 +139,7 @@ effective_salience = salience × adapted_sensitivity(source_type, actor)
 
 事件提交后，C++ 的 `StimulusProjector` 依据可见性、距离、关系和规则生成刺激事实；不能感知的主体不会获得该 Stimulus。LLM 读取已授权的 Stimulus 和证据，解释它对自己意味着什么、提出 `IntentProposal` 或记忆候选，但不能改写原始事件。相同来源的重复刺激可以触发内容声明的习惯化，使敏感度在上下限内下降；意外结果、目标失效或关系变化可能重新提高敏感度。适应产生 `stimulus.habituated` 或 `stimulus.reappraised`，并在 Snapshot 中恢复。
 
-外驱的“自动演化”有两层：第一层是在已批准规则内，事件自动生成刺激、到期、聚合、习惯化和重新评价；第二层是新的刺激类型、评价规则或聚合方式，只能通过 `EvolutionProposal` 进入沙箱和版本化激活。后者不能由 LLM 直接登记为活动规则。
+外驱的“自动演化”有两层：第一层是在已批准规则内，事件自动生成刺激、到期、聚合、习惯化和重新评价；第二层是新的刺激类型、评价规则或聚合方式，只能通过 `EvolutionProposal` 进入 Runtime 预检和版本化激活。后者不能由 LLM 直接登记为活动规则。
 
 安全需求必须有真实的威胁来源。早期验证曾只用 `crossing_safety` 验证“安全状态衰减—修复—满足”；现已增加 `conflict.attack`、`conflict.sabotage`、`security.threaten`、`security.defend`、`security.evacuate` 和 `security.repair`。攻击或破坏是对目标的行动尝试，威胁和恐吓可以只改变威胁与暴露而不造成物理损伤，防守、撤离和修复是独立响应。它们先提交可审计事件，再由 `StimulusProjector` 投射为威胁刺激；实际安全缺口由事件、暴露时间、完整性/可用性变化和主体可信感知共同计算，LLM 只能权衡风险和响应，不能直接把安全感改成某个数值。
 
@@ -160,9 +160,9 @@ StructureObservation
   -> retain / revise / rollback
 ```
 
-批准权属于平台治理策略，而不是提出提案的 LLM。Level 1 私有行为和 Level 2 声明式共享内容在生产或回归环境都可以由独立 Runtime Governor 按同一确定性条件自动批准；这不是 LLM 自批。涉及新的需求定义、权限/制度/拓扑规则、Runtime Core、脚本、不可逆副作用或指标约束失败的候选必须交给开发者或世界设计者发布审批。激活后必须运行声明的效果 horizon，Runtime 计算指标并写入 Adoption/Overlay 事件；下一次反思才把这些已提交结果提供给 LLM，用于保留、细化、接受、放弃或提出新候选。每次批准和激活都记录 Governor/审批者、内容版本、模拟版本、指标、激活 Revision 和回滚结果。
+批准权属于 Runtime Governor，而不是提出提案的 LLM。Level 1 私有行为和 Level 2 声明式共享内容只经过轻量确定性预检即可自动批准并激活；“批准”只表示它在当前世界中可安全运行，不表示它已经有效。激活后必须运行声明的效果 horizon，Runtime 计算指标并写入 Adoption/Overlay 事件；下一次 Level 1/Level 2 反思才把这些已提交结果提供给 LLM，用于保留、细化、接受、放弃或提出新候选。指标恶化、资源不足和过程失败是运行结果，不由模型口头覆盖；违反硬安全/权限不变量时 Runtime 立即拒绝或回滚。每次批准和激活都记录 Governor、内容版本、模拟版本、指标、激活 Revision 和回滚结果。
 
-治理策略按风险分级而不是对所有提案执行同样重的流程：个体策略调整要求目标范围、Schema、回放不变量和可回滚指标；日程和私有行为配方可由 Runtime Governor 在沙箱通过后自动批准；共享实体原型、制度规则和跨主体传播要求 baseline/scenario 指标比较、权限审查，必要时转人工批准；Runtime Core、任意脚本、权限模型和存档格式只能通过开发者代码发布。所有等级都保留同一 Proposal 契约和审计字段。
+治理策略按风险分级而不是对所有提案执行同样重的流程：个体策略调整要求目标范围、Schema 和硬不变量；日程、私有行为配方、共享行为配方和实体原型只要是可回滚声明式内容，均可由 Runtime Governor 预检后自动批准；执行 horizon 和 Runtime 指标负责验证实际效果。跨世界外部副作用、制度/权限模型、不可回滚拓扑和 Runtime Core 不能在线激活，只能通过开发者代码发布。所有等级都保留同一 Proposal 契约和审计字段。
 
 ### 意图、目标与行动
 
@@ -224,7 +224,7 @@ utility(a) = Σ(DriveEvaluation.utilityContribution_i)
 生产、创造、交易、消费和聊天是同一套过程语义的不同入口，而不是五套互相独立的逻辑：
 
 - **生产**是一个有输入、输出、设施、能力、持续时间和失败结果的 `ProductionProcess`。输入可按过程的 `reservation_mode` 预留，完成时按过程规则结算；不能由 LLM 直接写“产出 10 个物品”。
-- **创造**分为运行时实体实例化和内容/能力演化。运行时只能从已登记的 archetype 创建实体；新实体类型、行为配方或规则组合属于 `EvolutionProposal`，要经过验证、沙箱、批准、版本化激活和回滚。
+- **创造**分为运行时实体实例化和内容/能力演化。运行时只能从已登记的 archetype 创建实体；新实体类型、行为配方或规则组合属于 `EvolutionProposal`，要经过验证、Runtime 预检、自动准入、版本化激活和回滚。
 - **交易**先创建 `ExchangeContract`，接受不等于交付，交付不等于结算；合同保存双方、两侧资源、截止时间、版本和状态，只有 `Accepted -> Settled` 的结算事务才移动双方资源。任何一侧余额不足都会撤销本次结算暂存，合同保留 `Accepted`，并产生引用失败码的 `exchange.settlement_rejected` 审计事实；截止时间进入 `Expired` 时产生指向合同 ID 的独立事件。每次决定和结算都会重新校验参与方生命周期，休眠、销毁或非参与方不能取得旧合同的操作权。价格、税费、抵押、预留和补偿条款属于内容/制度配置，不能由对话文本凭空改变。
 - **消费**把资源转成需求满足、效用和副作用，同时记录实际消耗、替代品、浪费和短缺；需求数值由 Runtime 衰减和结算。
 - **聊天**是带可见范围和话语行为的 `Communication`。自然语言由 LLM 生成或解释，询问、请求、承诺、撒谎和威胁是结构化意图；只有经过事实、权限和承诺规则验证的结果才能进入 WorldState。
@@ -293,11 +293,11 @@ Observe -> Understand / Evaluate -> Intent or Evolution Proposal
 -> Measure -> Retain or Roll Back
 ```
 
-世界演化对象包括 Content、Knowledge、Strategy 和 Declarative Capability。提案统一使用 `schema_version=1` 的 JSON，带提案 ID、来源模型和上下文、依据事实的事件 Sequence、影响范围、类型化 operations、预期指标、资源预算、过期时间、兼容版本、沙箱结果和回滚点。当前 Runtime 强制校验 `source`、治理类别和 `evidence_event_sequences`：只接受当前 EventLog 中真实存在且不重复的事件引用，不能用一个模型名称或虚构事实替代审计依据。候选不要求一定是新内容：反思可以返回 `no_change`，让正常 Decision 重新选择已有行为/策略，调整主体 Strategy，或继续评估已有假设；只有现有注册能力无法解决持续问题时，才创建新的版本化创新 proposal。对已批准 Overlay 的修改必须表现为新的、可回滚的声明式 operation，不能由反思直接改写旧版本。模型可以提出新聚落、路线、组织、策略、需求或行为组合；不能修改 Runtime Core、注入 C++、任意加载脚本或绕过权限。
+世界演化对象包括 Content、Knowledge、Strategy 和 Declarative Capability。提案统一使用 `schema_version=1` 的 JSON，带提案 ID、来源模型和上下文、依据事实的事件 Sequence、影响范围、类型化 operations、预期指标、资源预算、过期时间、兼容版本、Runtime 预检结果和回滚点；完整 Sandbox/Replay 只用于显式反事实实验。当前 Runtime 强制校验 `source`、治理类别和 `evidence_event_sequences`：只接受当前 EventLog 中真实存在且不重复的事件引用，不能用一个模型名称或虚构事实替代审计依据。候选不要求一定是新内容：反思可以返回 `no_change`，让正常 Decision 重新选择已有行为/策略，调整主体 Strategy，或继续评估已有假设；只有现有注册能力无法解决持续问题时，才创建新的版本化创新 proposal。对已批准 Overlay 的修改必须表现为新的、可回滚的声明式 operation，不能由反思直接改写旧版本。模型可以提出新聚落、路线、组织、策略、需求或行为组合；不能修改 Runtime Core、注入 C++、任意加载脚本或绕过权限。
 
-Level 1 是主体行为演化：Runtime 先把一个主体的需求压力、失败、预测误差、已批准行为和 Adoption 结果确定性地汇总给反思；LLM 可以选择已有计划/配方、调整私有 Strategy，或在持续问题确实无法由现有能力解决时提出新的私有配方。它改变以后如何形成目标和选择计划，不等于替主体执行当前行动。Level 2 是世界底座/内容演化：Runtime 先汇总多个主体、共享资源、关系、群体指标、公共失败和 Overlay 效果；世界反思可以保持现状、调整现有共享内容，或在公共问题和可量化收益假设成立时提出新的实体原型/行为能力组合。两级都只改变可声明、可验证的 Simulation Framework/Content Overlay；都经过 `Candidate -> Validate -> Sandbox -> Runtime Governor -> Versioned Activate`。`register_behavior_recipe` 是创建新 BT 的唯一在线入口；它只能组合注册节点、谓词和 operator，且新能力默认只进入提案声明的传播范围，不自动授予所有主体。请求入口是 `EvolutionManager::propose(world, level, trigger)`，产品 CLI 使用 `--evolve level1|level2`；两级使用世界内容文档中的独立短角色提示，Profile 只选择 Provider、模型和预算。提示只是上下文边界说明，不能授予权限；Runtime 仍以同一套 function schema、操作白名单、证据校验、沙箱和 Runtime Governor 为准。校验失败最多把结构化错误反馈给模型修正两次，沙箱阶段只重放捕获的上下文，不重新调用 LLM。Entity、事务、事件、权限、回放和回滚这些 Runtime Core 不属于 LLM 可演化对象；需要新的 C++ 能力时只能形成 capability request，待开发者发布注册 operator。
+Level 1 是主体行为演化：Runtime 先把一个主体的需求压力、失败、预测误差、已批准行为和 Adoption 结果确定性地汇总给反思；LLM 可以选择已有计划/配方、调整私有 Strategy，或在持续问题确实无法由现有能力解决时提出新的私有配方。它改变以后如何形成目标和选择计划，不等于替主体执行当前行动。Level 2 是世界底座/内容演化：Runtime 先汇总多个主体、共享资源、关系、群体指标、公共失败和 Overlay 效果；世界反思可以保持现状、调整现有共享内容，或在公共问题和可量化收益假设成立时提出新的实体原型/行为能力组合。两级都只改变可声明、可验证的 Simulation Framework/Content Overlay；普通自动路径经过 `Candidate -> Validate/Preflight -> Runtime Governor -> Versioned Activate`，完整 Sandbox/Replay 只由显式实验调用。`register_behavior_recipe` 是创建新 BT 的唯一在线入口；它只能组合注册节点、谓词和 operator，且新能力默认只进入提案声明的传播范围，不自动授予所有主体。请求入口是 `EvolutionManager::propose(world, level, trigger)`，产品 CLI 使用 `--evolve level1|level2`；两级使用世界内容文档中的独立短角色提示，Profile 只选择 Provider、模型和预算。提示只是上下文边界说明，不能授予权限；Runtime 仍以同一套 function schema、操作白名单、证据校验、轻量预检和 Runtime Governor 为准。校验失败最多把结构化错误反馈给模型修正两次；预检不重放世界、不重新调用 LLM。Entity、事务、事件、权限、回放和回滚这些 Runtime Core 不属于 LLM 可演化对象；需要新的 C++ 能力时只能形成 capability request，待开发者发布注册 operator。
 
-演化不是每个 Tick 的后台调用。Content Pack 的 `evolution_policy` 只声明是否启用自动反思/候选、两个等级的最小日间隔、是否合并同等级挂起请求和提案上下文的最大年龄；它不能跳过问题证据、自动批准高风险操作或改变激活权限。到达配置边界时，Runtime 在已提交时间事务之后先确定性计算“是否有需要评估的问题”：Level 1 每个 NPC 仍可做低成本每日反思，但没有新证据或未解决问题时可以返回 `no_change`；Level 2 只有跨主体失败、资源/关系指标持续偏离、共享 Adoption 失败或其他公共异常才进入世界候选队列。通过门槛后，Runtime 捕获只读上下文，把请求放入独立的串行 Evolution Queue；Provider 工作线程只读取捕获的 JSON，不持有 WorldState，不阻塞下一次 Tick。结果回到主线程后重新检查内容版本、当前事实中的证据和治理 Schema；无关事实可以在模型思考期间提交，提案会以当前 Revision 重新校验和 Sandbox，最多给真实 Provider 两次结构化修正；有效结果自动运行无 LLM 的 Sandbox 并记录 `evolution.proposal_ready` 审计事件，再由独立 Runtime Governor 按风险、范围、指标和回滚条件决定自动激活或停在待治理状态。失败、过期或模型不可用只记录审计事件，不用规则或 Mock 冒充演化。普通计划由玩家输入、刺激、需求压力和过程边界触发；Level 1 在有界的个人经验窗口、显著预测误差、连续失败或日边界触发并受冷却/预算限制，自动日边界按 NPC 分别排队；Level 2 只在跨主体异常、资源/关系指标持续偏离、共享 Adoption 失败或世界周期边界触发。Runtime 先确定性聚合证据，LLM 在一次结构化反思/候选中完成评估和最小改变，之后仍必须经过治理链。Level 1 上下文带有 `target_npc`，只提供该主体的记忆、知识、经验、刺激和关系私域，其他主体最多以地点和运行模式摘要出现；最近事件证据中的 `memory.*`、`knowledge.*`、`experience.*` 和 `drive.adapted` 认知事件也按主体过滤，公共资源、关系和结构事实仍可作为证据。提案的策略/日程操作必须命中该目标，行为配方也必须把目标列入 `available_to`。Level 2 才接收受权限裁剪的跨主体摘要。窗口上限是内容无关的上下文安全上限，排序、可见性和传播范围由 Runtime 的事实权限和配置决定。NPC 的 DecisionContext 使用按主体可见性、地点、关系、承诺和当前候选计划裁剪的 `worldSnapshot`，并分别提供 `selfState`、`planCatalog`、记忆、知识、经验、刺激和约束；不把全量 WorldState 或内部版本号当作模型语义材料。
+演化不是每个 Tick 的后台调用。Content Pack 的 `evolution_policy` 只声明是否启用自动反思/候选、两个等级的最小日间隔、是否合并同等级挂起请求和提案上下文的最大年龄；它不能跳过问题证据或改变硬权限。到达配置边界时，Runtime 在已提交时间事务之后先确定性计算“是否有需要评估的问题”：Level 1 每个 NPC 仍可做低成本每日反思，但没有新证据或未解决问题时可以返回 `no_change`；Level 2 只有跨主体失败、资源/关系指标持续偏离、共享 Adoption 失败或其他公共异常才进入世界候选队列。通过门槛后，Runtime 捕获只读上下文，把请求放入独立的串行 Evolution Queue；Provider 工作线程只读取捕获的 JSON，不持有 WorldState，不阻塞下一次 Tick。结果回到主线程后重新检查内容版本、当前事实中的证据和治理 Schema；无关事实可以在模型思考期间提交，结构错误最多给真实 Provider 两次有界修正。有效结果经过轻量预检后由 Runtime Governor 自动批准并激活，不等待人工审批或重型沙箱；执行 horizon、Runtime 指标和后续反思负责判断效果。失败、过期或模型不可用只记录审计事件，不用规则或 Mock 冒充演化。普通计划由玩家输入、刺激、需求压力和过程边界触发；Level 1 在有界的个人经验窗口、显著预测误差、连续失败或日边界触发并受冷却/预算限制，自动日边界按 NPC 分别排队；Level 2 只在跨主体异常、资源/关系指标持续偏离、共享 Adoption 失败或世界周期边界触发。Runtime 先确定性聚合证据，LLM 在一次结构化反思/候选中完成评估和最小改变，之后仍必须经过 Runtime 预检。Level 1 上下文带有 `target_npc`，只提供该主体的记忆、知识、经验、刺激和关系私域，其他主体最多以地点和运行模式摘要出现；最近事件证据中的 `memory.*`、`knowledge.*`、`experience.*` 和 `drive.adapted` 认知事件也按主体过滤，公共资源、关系和结构事实仍可作为证据。提案的策略/日程操作必须命中该目标，行为配方也必须把目标列入 `available_to`。Level 2 才接收受权限裁剪的跨主体摘要。窗口上限是内容无关的上下文安全上限，排序、可见性和传播范围由 Runtime 的事实权限和配置决定。NPC 的 DecisionContext 使用按主体可见性、地点、关系、承诺和当前候选计划裁剪的 `worldSnapshot`，并分别提供 `selfState`、`planCatalog`、记忆、知识、经验、刺激和约束；不把全量 WorldState 或内部版本号当作模型语义材料。
 
 ### 每日反思与创新时间尺度
 
@@ -307,17 +307,17 @@ Level 1 是主体行为演化：Runtime 先把一个主体的需求压力、失�
 
 反思的停止条件是“问题已由现有机制解决”或“没有足够新证据”。Runtime 比较反思前后的确定性指标：需求缺口、失败次数、过程完成率、资源消耗、关系/群体指标和 Adoption 结果。指标没有恶化时，Level 1 Reflection 可以返回空的可选更新，Level 2 World Reflection 可以通过 `proposal_kind=no_change` 明确结束本轮；Runtime 只记录 `evolution.no_change`，不会为了产生 `strategy.reflected` 或新 Proposal 而制造版本。已有 Overlay 的效果由 Runtime 延迟到测试 horizon 结束后测量，LLM 只能解释结果和选择保留、细化、放弃或回滚。这样“修改”是问题修复或验证过的调参，“创新”是现有机制不足时的最小候选，而不是日历驱动的创意产出。
 
-每日反思是幂等的日边界事务。`ReflectionCursor.last_event_sequence` 只在结果和审计事件提交后前移，输入窗口按游标增量聚合，并始终附带未解决问题；同一 NPC 同一天重复调度返回 `reflection_already_processed`。Runtime 先校验全部结构化结果，再以同一事务提交认知事件、Goal/Strategy 投影、创新假设事件和新的游标，因此模型重试或进程恢复不会重复消费证据。创新假设、Overlay 激活和 NPC Adoption 仍分别保留自己的生命周期。
+每日反思是幂等的日边界事务。`ReflectionCursor.last_event_sequence` 只在结果和审计事件提交后前移，输入窗口按游标增量聚合，并始终附带未解决问题；同一 NPC 同一天重复调度返回 `reflection_already_processed`。Runtime 先校验全部结构化结果，再以同一事务提交认知事件、Goal/Strategy 投影、创新假设事件和新的游标，因此模型重试或进程恢复不会重复消费证据。创新假设、Overlay 激活和 NPC Adoption 仍分别保留自己的生命周期；Runtime Governor 可以在预检通过后自动把私有假设推进到 `accepted`，但这只授予运行资格，不能代替执行效果。
 
-配置中的 `reflection` 与 `npc_evolution` 是两个不同的 Provider purpose：`reflection` 是自动日边界的 `ReflectionResult` 入口，负责把新证据整理为认知、策略、Goal 和可选的私有创新假设；`npc_evolution` 是显式/治理调度的 Level 1 `EvolutionProposal` 入口，负责把主体证据转换为待验证的私有 Strategy、Schedule 或 Behavior Overlay。自动反思不会隐式调用 `npc_evolution`，也不会因为反思没有创新就补发一次演化请求；只有被治理队列接受的创新假设或明确的 Level 1 请求才进入提案、沙箱和审批链。两者可以使用同一个实际模型和不同预算，但 schema、幂等键、重试反馈和持久化生命周期不能混用。
+配置中的 `reflection` 与 `npc_evolution` 是两个不同的 Provider purpose：`reflection` 是自动日边界的 `ReflectionResult` 入口，负责把新证据整理为认知、策略、Goal 和可选的私有创新假设；`npc_evolution` 是显式/治理调度的 Level 1 `EvolutionProposal` 入口，负责把主体证据转换为待验证的私有 Strategy、Schedule 或 Behavior Overlay。自动反思不会隐式调用 `npc_evolution`，也不会因为反思没有创新就补发一次演化请求；反思产生的合法私有假设由 Runtime Governor 直接进入轻量预检和激活，明确的 Level 1 请求也走同一条路径。两者可以使用同一个实际模型和不同预算，但 schema、幂等键、重试反馈和持久化生命周期不能混用。
 
-创新假设在 NPC 私域中以版本化 JSON 记录保存，后续反思可以通过 `innovation_actions` 继续 `refining/evaluated`，也可以显式 `rejected/abandoned`；游标前移不会删除未解决问题或未完成假设。Overlay 激活后仍不等于采用：`InnovationAdoptionStatus` 单独记录 `pending → resource_blocked → executing → completed/failed/abandoned`。只有假设已 `accepted` 且对应 Overlay 已独立批准并激活，Runtime 才允许 `startInnovationAdoption`。启动时 Runtime 解析激活 Overlay 中唯一的声明式 `BehaviorRecipe`，检查 `available_to`、当前 `NpcActivity`、确定性的资源预留和声明的抢占策略；资源不足写入 `resource_blocked`，不会伪造一个运行中的过程。可执行时它创建真实的 `Goal + ProcessExecution`，复用同一套预留、挂起、恢复、中断和 BT 完成路径。过程结束后 Runtime 计算 `events_added/final_revision/knowledge_count/experience_count/advance_minutes/resource_total` 等注册指标，并按测试计划把计数和进度作为下界、资源总量作为上界进行可审计比较；LLM 只能提供目标和解释，不能自判成功。成功、失败、阻塞和指标结果都通过事件和快照留下历史；下一次 Level 1 反思读取该延迟后的观测结果，Level 2 世界反思读取跨主体汇总，再决定是否保留、细化、放弃或提出新候选。这样可以回放 knowing-doing gap，而不会把 Sandbox 通过误写成 NPC 已经使用。
+创新假设在 NPC 私域中以版本化 JSON 记录保存，后续反思可以通过 `innovation_actions` 继续 `refining/evaluated`，也可以显式 `rejected/abandoned`；游标前移不会删除未解决问题或未完成假设。Overlay 激活后仍不等于采用：`InnovationAdoptionStatus` 单独记录 `pending → resource_blocked → executing → completed/failed/abandoned`。只有假设已 `accepted` 且对应 Overlay 已由 Runtime Governor 激活，Runtime 才允许 `startInnovationAdoption`。启动时 Runtime 解析激活 Overlay 中唯一的声明式 `BehaviorRecipe`，检查 `available_to`、当前 `NpcActivity`、确定性的资源预留和声明的抢占策略；资源不足写入 `resource_blocked`，不会伪造一个运行中的过程。可执行时它创建真实的 `Goal + ProcessExecution`，复用同一套预留、挂起、恢复、中断和 BT 完成路径。过程结束后 Runtime 计算 `events_added/final_revision/knowledge_count/experience_count/advance_minutes/resource_total` 等注册指标，并按测试计划把计数和进度作为下界、资源总量作为上界进行可审计比较；LLM 只能提供目标和解释，不能自判成功。成功、失败、阻塞和指标结果都通过事件和快照留下历史；下一次 Level 1 反思读取该延迟后的观测结果，Level 2 世界反思读取跨主体汇总，再决定是否保留、细化、放弃或提出新候选。这样可以回放 knowing-doing gap，而不会把 Sandbox 通过误写成 NPC 已经使用。
 
 Innovation Hypothesis 有独立的持久化生命周期：`hypothesized -> refining -> evaluated -> accepted/rejected`，在进入终态前可以明确转为 `abandoned`。这条状态只管理想法本身；Overlay 仍有自己的 `proposed -> approved -> active -> rolled_back/retired` 生命周期，NPC 采用/实施则另有 `pending -> resource_blocked -> executing -> completed/failed/abandoned` 状态。批准 Hypothesis、激活 Overlay 和实际完成采用不能互相冒充，激活后的撤销只能记录 `rolled_back`，不能把历史改写为 `abandoned`。提案 JSON 的 `innovation` 信封保存假设、`novelty_basis`、关联 operations、预期收益、风险和有界 `test_plan`；Proposal Store、EventLog 和 Snapshot 的 Overlay 记录共同保存这个审计链。下一次每日反思可以引用上一份提案事件继续完善，或明确放弃，而不是重新生成同一创新。
 
-长时自动验证使用同一个独立 Runtime Governor，而不是让 LLM 或提案对象自批。`tide_marks_headless --governance-auto` 以 `headless_governor` 身份读取已通过确定性 Sandbox 的 proposal-ready 事件，基于当前 Revision 重新沙箱、检查风险/指标门槛、批准并激活 Overlay；Level 1 私有假设还要先由 Governor 独立推进 `transitionInnovationHypothesis(..., "accepted", ...)`，再启动正常 Adoption。生产 Runtime 对 Level 1 私有行为和 Level 2 声明式共享内容可以启用同一 Governor 策略自动批准；涉及 Runtime Core、权限、脚本、制度规则、不可逆副作用或指标约束失败时，Governor 必须停在 proposal-ready，交给开发者/世界设计者的发布流程。`--governance-auto` 是长跑/回归环境的显式开关，不改变审批规则；所有批准、激活、测量和拒绝原因都留下审计事件。
+长时自动验证使用同一个 Runtime Governor，而不是让 LLM 或提案对象自批。`tide_marks_headless --governance-auto` 保留为审计兼容入口；普通自动队列也以 `runtime_governor` 身份在轻量预检通过后批准并激活 bounded Overlay，Level 1 私有假设由 Governor 独立推进 `transitionInnovationHypothesis(..., "accepted", ...)` 后启动 Adoption。批准只记录可运行性，不能替代 Execute Horizon、Runtime 指标和后续反思；所有批准、激活、测量、失败和回滚原因都留下审计事件。
 
-创新的等级按影响范围划分，而不是按“是否有创意”划分。Level 1 可以提出只对目标 NPC 可用的行为配方假设，`available_to` 必须精确等于该 NPC，不能创建共享实体原型；它仍须验证、沙箱和 Governor 门槛，但不会直接改变公共世界。Level 2 才能把已验证的个人经验或公共事件提升为共享配方或实体原型，要求跨主体问题证据、基线比较、跨主体可见性和 Governor 门槛。Level 1 到 Level 2 的提升通过新的 Level 2 反思/候选引用前一阶段的已提交 Adoption 和公共结果事件完成，私有记忆不会被广播。两级都允许“不改变”和“重新采用已有机制”；只有现有机制无法满足持续问题且收益可测时才创建新的创新对象。
+创新的等级按影响范围划分，而不是按“是否有创意”划分。Level 1 可以提出只对目标 NPC 可用的行为配方假设，`available_to` 必须精确等于该 NPC，不能创建共享实体原型；它由 Runtime Governor 预检后自动激活，不直接改变公共世界，后续执行效果交给该 NPC 的反思判断。Level 2 才能把已验证的个人经验或公共事件提升为共享配方或实体原型，要求跨主体问题证据、基线比较、跨主体可见性和 Governor 门槛。Level 1 到 Level 2 的提升通过新的 Level 2 反思/候选引用前一阶段的已提交 Adoption 和公共结果事件完成，私有记忆不会被广播。两级都允许“不改变”和“重新采用已有机制”；只有现有机制无法满足持续问题且收益可测时才创建新的创新对象。
 
 这组机制吸收了 *Maslow Machines* 预印本提出的三个可检验启发：较低层需求满足后仍保留有限的高阶动机压力（避免 contentment trap）、把驱力呈现为描述性的 felt-state 而不是命令、以及把“提出想法”和“有资源实现”分开测量。项目不把 Maslow 五层当作固定闸门，也不把模型的拟人化自述当作意识证据；需求域、阈值、满足配方和创新指标仍由 Content Pack、Runtime 事实与回放校准决定。参考：Mark E. Mala, *Maslow Machines: Emergent Civilisation from Intrinsic Drive Hierarchies in LLM Agent Populations*, Zenodo, 2026, DOI `10.5281/zenodo.19479937`（v1.1 记录 DOI `10.5281/zenodo.19479938`）。
 
@@ -421,9 +421,9 @@ Runtime Core 只保证实体、组件存储、事务、Revision、事件、持�
 
 实体只有稳定身份、通用 kind、元数据和生命周期；不提供 `setRoom()`、`setDoor()` 等游戏特例。空间实体使用 `SpatialComponent`，连接使用 `LinkComponent`，资源、需求、关系、位置、渲染和行为通过可组合组件表示。`WorldState.entities` 是身份和生命周期权威来源，生命周期为 `active -> dormant -> destroyed`；销毁身份保留在存档和历史中但不再进入活动投影。世界创建实体必须引用已登记的 `entity_archetype`，经事务追加 `entity.created` 后提交；LLM 只能提出创建提案。
 
-NPC 的 `schedule` 是 Content Pack 中的基线可用性/位置规则，不是当前目标，也不是 LLM 的隐式控制权。例如 `"06:00-18:00": "ferry_dock"` 表示游戏时间每天 06:00（含）到 18:00（不含）默认位于 `ferry_dock`；跨午夜的 `"18:00-06:00"` 覆盖 18:00 至次日 06:00 前。当前原型在小时边界按该规则确定性更新运行态 `location` 和 `schedule_label`，因此模型不会每个 Tick 重写日程，也不会因为一次对话自动修改源文件。LLM 可以在 Level 1 反思后提出 `overlay_schedule`，但它必须声明 NPC、完整时间槽和已存在地点，经过验证、沙箱、独立批准后才作为版本化 Overlay 激活；临时离开仍是运行态行动，不等于改变基线日程。
+NPC 的 `schedule` 是 Content Pack 中的基线可用性/位置规则，不是当前目标，也不是 LLM 的隐式控制权。例如 `"06:00-18:00": "ferry_dock"` 表示游戏时间每天 06:00（含）到 18:00（不含）默认位于 `ferry_dock`；跨午夜的 `"18:00-06:00"` 覆盖 18:00 至次日 06:00 前。当前原型在小时边界按该规则确定性更新运行态 `location` 和 `schedule_label`，因此模型不会每个 Tick 重写日程，也不会因为一次对话自动修改源文件。LLM 可以在 Level 1 反思后提出 `overlay_schedule`，但它必须声明 NPC、完整时间槽和已存在地点，经过验证、Runtime 预检和自动准入后才作为版本化 Overlay 激活；临时离开仍是运行态行动，不等于改变基线日程。
 
-日程的持久改变属于结构/策略演化：`overlay_schedule` 是当前已实现的最小 `ScheduleProposal`，经过 Schema/权限/回放或沙箱验证后，按治理策略批准并作为版本化 Overlay 激活。当前操作替换指定 NPC 的完整日程，位置必须来自内容拓扑，时间边界必须在一天范围内；未来可增加有效期、冲突承诺和指标约束。任何批准都产生版本、来源和生效时间事件，不能静默改写原始 Content Pack。
+日程的持久改变属于结构/策略演化：`overlay_schedule` 是当前已实现的最小 `ScheduleProposal`，经过 Schema/权限/回放和 Runtime 预检后，由 Governor 自动准入并作为版本化 Overlay 激活。当前操作替换指定 NPC 的完整日程，位置必须来自内容拓扑，时间边界必须在一天范围内；未来可增加有效期、冲突承诺和指标约束。任何批准都产生版本、来源和生效时间事件，不能静默改写原始 Content Pack。
 
 ### 世界不变量
 
@@ -555,7 +555,7 @@ Behavior DSL 只组合注册节点、条件和元动作，例如：
 }
 ```
 
- 当前实现不把这套 DSL 误称为通用编程语言，但它已经支持由 JSON 构造一棵受约束的行为树。内容包声明 `meta_actions`（故事动作 ID 到 Runtime 通用 operator 的绑定）、`conditions`（条件 ID 到只读谓词的绑定）和 `recipes`；加载器校验引用，`BehaviorRecipeRuntime` 在运行时编译 `Sequence`、`Selector`、`Interruptible`、`Timeout`、`Condition` 和 `Action` 节点。游戏代码不会为 Mira、Lorn、Eve 或某个故事动作创建专用 BT。`GoalSelector`/LLM 只选择候选 `recipe_id`，接受后由 Runtime 创建 `ProcessExecution` 并记录该 recipe；长过程等待由 ProcessExecution 管理，过程完成时才在事务中运行已编译配方的原子效果。Recipe 可以声明参数 JSON Schema，节点通过 `{"bind":"parameter_name"}` 引用运行时输入；因此 `goto`、交易对象、协作对象和调查目标都是能力参数，而不是写死在 operator 中的故事 ID。普通决策只能选择已批准计划并填写参数；LLM 要创建全新的 BT，必须通过 Level 1/2 的 `register_behavior_recipe` 提案，经过引用验证、沙箱和独立批准后才会进入候选目录。新增行为只需新增 JSON 配方、参数契约和已登记的通用 operator；只有新增底层事实变换原语才需要扩展 Runtime。
+ 当前实现不把这套 DSL 误称为通用编程语言，但它已经支持由 JSON 构造一棵受约束的行为树。内容包声明 `meta_actions`（故事动作 ID 到 Runtime 通用 operator 的绑定）、`conditions`（条件 ID 到只读谓词的绑定）和 `recipes`；加载器校验引用，`BehaviorRecipeRuntime` 在运行时编译 `Sequence`、`Selector`、`Interruptible`、`Timeout`、`Condition` 和 `Action` 节点。游戏代码不会为 Mira、Lorn、Eve 或某个故事动作创建专用 BT。`GoalSelector`/LLM 只选择候选 `recipe_id`，接受后由 Runtime 创建 `ProcessExecution` 并记录该 recipe；长过程等待由 ProcessExecution 管理，过程完成时才在事务中运行已编译配方的原子效果。Recipe 可以声明参数 JSON Schema，节点通过 `{"bind":"parameter_name"}` 引用运行时输入；因此 `goto`、交易对象、协作对象和调查目标都是能力参数，而不是写死在 operator 中的故事 ID。普通决策只能选择已批准计划并填写参数；LLM 要创建全新的 BT，必须通过 Level 1/2 的 `register_behavior_recipe` 提案，经过引用验证和 Runtime 预检后才会进入候选目录。新增行为只需新增 JSON 配方、参数契约和已登记的通用 operator；只有新增底层事实变换原语才需要扩展 Runtime。
 
 演化操作是类型化的，例如 `create_entity_archetype`、`overlay_strategy`、`overlay_schedule`、`register_behavior_recipe`、`add_relationship` 和 `schedule_event`；不是任意 JSON Patch。新增 C++ Component、System、权限、调度、事件格式、存档迁移或可执行代码必须由开发者发布。
 
@@ -638,7 +638,7 @@ Snapshot 包含 `save_schema_version`、`simulation_version`、`content_version/
 - 默认产品路径使用 Intelligence Profile 指定的真实 LLM，Mock 只用于测试、离线回归和沙箱；
 - Goal、ProcessExecution、FSM 和 BT 由唯一 `NpcActivity` 生命周期统一，BT Tick 不重复调用 LLM；
 - 需求、外驱、关系、资源、生产、承诺、交易、冲突/安全、知识/经验和可替换实例都经过统一的校验、事务和事件路径；
-- Level 1 个体策略演化和 Level 2 世界底座演化都必须经过证据校验、沙箱、独立批准和版本化 Overlay；
+- Level 1 个体策略演化和 Level 2 世界底座演化都必须经过证据校验、Runtime 预检、自动准入和版本化 Overlay；
 - Snapshot 用于读档，Replay Package 用于显式提交效果验证和审计，不冒充完整 Event Sourcing；
 - SQLite 是产品实例的默认持久化边界，JSON 适配器只用于开发、测试和显式检查点。
 

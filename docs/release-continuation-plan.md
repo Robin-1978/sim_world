@@ -28,10 +28,10 @@
 | 通用资源与实例活动 | 通用资源数量、可选输入预留、声明式抢占、实体库存、资源转移、生产、原子交易、承诺和定时 Activity 已实现；Activity 可组合已注册 operator 并在嵌套事务中失败补偿 | `ResourceContent`, `ResourceState(amount,reserved)`, `WorldState.inventories`, `GameInstanceContent.inventoryInitial`, `reservation_mode`, `priority`, `preemption_policy`, `tradeResources`, `ActivityContent`；承诺关系增量与重谈时长已由 `promise_policy` 驱动 |
 | 社会关系与组织 | 已实现 NPC/玩家/组织四轴关系、声明式社会组成员与指标、交易和快照恢复；港区与 Glass Orchard 分别使用自己的组织、阵营和制度事实，没有 Runtime 特例 | `NpcState.relationships`, `WorldState.socialGroups`, `SocialGroupContent`, `relationship.adjust`, `trade.execute`, `tests/fixtures/port-pack`, `tests/fixtures/glass-orchard-pack` |
 | 元动作语义目录 | 已冻结；故事动作 ID 由内容包绑定到通用 operator，行为配方在运行时编译为 BT；Recipe 可声明参数 Schema，`IntentProposal.parameters` 经校验后绑定到通用能力（含动态移动目标）并随过程保存 | `src/world/meta_actions.*`, `src/npc/behavior_recipe.*`, `src/npc/action_validator.*`, `data/behaviors/village.json` |
-| NPC 基线日程与策略演化 | 已实现确定性小时边界投影；Level 1 的 `overlay_schedule` 经过验证、沙箱、Runtime Governor 和版本化 Overlay 后才生效，临时偏离仍通过行动表达 | `NpcContent.schedule`, `NpcState.location/scheduleLabel`, `WorldService::processHourBoundary`, `EvolutionManager::applyOperations` |
+| NPC 基线日程与策略演化 | 已实现确定性小时边界投影；Level 1 的 `overlay_schedule` 经过验证、Runtime 预检、Runtime Governor 和版本化 Overlay 后才生效，临时偏离仍通过行动表达 | `NpcContent.schedule`, `NpcState.location/scheduleLabel`, `WorldService::processHourBoundary`, `EvolutionManager::applyOperations` |
 | World Intelligence 演化提案 | 提案持久化、来源事件证据、验证、沙箱、版本化 overlay 激活/恢复/栈式回滚、内容声明异常检测和反事实场景实验已完成；Level 1 按目标 NPC 隔离认知私域和最近事件证据，配方节点引用、整批 overlay 原子性、行为参数 JSON Schema 子集和 `available_to` 唯一传播范围均由 Runtime 校验；创新假设现在有独立的 hypothesis 生命周期和 Level 1 私有/Level 2 共享权限边界，反思可选择已有内容或返回 no-change，不以创新数量作为成功指标 | `src/evolution/evolution.*`, `src/evolution/anomaly.*`, `src/evolution/scenario.*`, `src/world/world_service.*`, `src/npc/action_validator.*`, `data/schemas/evolution-proposal.schema.json`, `data/schemas/scenario-proposal.schema.json`; 校验白名单、数组 `uniqueItems`/边界、EventLog 来源、目标主体与传播范围、治理类别、禁止 Core mutation、Runtime Governor、快照重放和结果 JSON 审计已覆盖 |
 | 每日反思增量边界 | 已完成 `ReflectionCursor`、独立 `ReflectionResult` provider/schema、游标后增量事件、持久化未解决问题、认知/策略/Goal 分流、同日幂等和审计；创新假设才进入 EvolutionManager。创新是可选分支：证据不足或配方无效时记录 `innovation.hypothesis_rejected` 并继续提交合法认知结果，避免游标被模型的创新错误卡住；反思投影额外提供 Runtime 计算的 `failure_candidates`，要求同一过程两次失败才进入候选创新 | `ReflectionCursor`、`reflection_cursor` Snapshot 字段、`WorldEvolutionSystem::reflectionContext/commitReflection`、`reflection-result.schema.json` |
-| 外部治理与长跑闭环 | 已完成独立 Runtime Governor：显式 `--governance-auto` headless harness 以 `headless_governor` 身份重新运行 Sandbox、检查证据/风险/指标门槛、批准并激活 bounded Level 1/Level 2 Overlay，并对可接受的 Level 1 假设调用 Adoption；LLM 仍不能批准自己的提案，高风险或约束失败候选停在 proposal-ready 交给发布审批 | `src/headless_main.cpp`, `WorldService::transitionInnovationHypothesis`, `evolution.overlay_activated`, `innovation.adoption_*` |
+| 外部治理与长跑闭环 | 已完成独立 Runtime Governor：自动队列先做轻量 Schema/权限/范围/Revision/资源/BT 硬不变量预检，再以 `runtime_governor` 身份批准并激活 bounded Level 1/Level 2 Overlay；执行 horizon 和后续反思负责效果判断，`--governance-auto` headless harness 保留为审计兼容入口；LLM 仍不能批准自己的提案 | `src/world/world_evolution_system.cpp`, `src/headless_main.cpp`, `WorldService::transitionInnovationHypothesis`, `evolution.overlay_activated`, `innovation.adoption_*` |
 | 3D 表现和 Blender 场景 | 已完成内容化投影 | `src/client_main.cpp` 从当前内容包读取空间实体、连接、NPC、资源、场景资产与相机模式，无村庄 `world_id` 或角色分支；Xvfb 烟雾测试覆盖村庄和 Glass Orchard |
 
 ## Runtime 契约收敛队列
@@ -187,7 +187,7 @@ Evolution Proposal Schema、提案库、EventLog 来源事实、回放沙箱、�
 | 已完成-1 | Evolution Sandbox | 已完成：从快照运行候选变化，输出指标、事件差异和来源，不污染原始 Pack |
 | 已完成-2 | Overlay 激活与回滚 | 已完成：内容/策略/日程版本可审计、可观察，沙箱与提案必须锁定当前 Revision，快照恢复后仍可按栈回退 |
 | 已完成-3 | 场景实验 | 已完成当前通用边界：资源、组织指标、NPC 需求的声明式反事实实验；小店、利率、政策等具体机制待其事实模型落地后再接入 |
-| 已完成-4 | 自动 LLM 演化边界 | 已完成：`evolution_policy` 配置 Level 1/2 日间隔；`WorldEvolutionSystem` 在已提交边界先检查问题证据，异步排队，结果按当前事实重新验证、Sandbox 并审计；独立 Runtime Governor 可按风险和指标门槛自动批准 bounded Overlay，高风险候选停在 proposal-ready；Mock Provider 不冒充演化 |
+| 已完成-4 | 自动 LLM 演化边界 | 已完成：`evolution_policy` 配置 Level 1/2 日间隔；`WorldEvolutionSystem` 在已提交边界先检查问题证据，异步排队，结果按当前事实做轻量预检并审计；独立 Runtime Governor 自动批准 bounded Overlay，执行 horizon 后由 Runtime 指标和 LLM 反思判断效果；Mock Provider 不冒充演化 |
 | | 新世界实例 | 已完成 Glass Orchard 纵向切片：第三个实例、跨区域、阵营、制度、自定义需求域和长期承诺余波均由内容驱动 |
 
 ## 自动化验证命令

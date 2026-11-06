@@ -626,8 +626,8 @@ EvolutionProposalRequestResult EvolutionManager::propose(const WorldService& wor
             result.accepted = true;
             result.code = "ok";
             result.message = attempt == 0
-                                 ? "The LLM produced a validated proposal; sandbox and independent approval are still required."
-                                 : "The LLM repaired its proposal after Runtime validation feedback; sandbox and independent approval are still required.";
+                                 ? "The LLM produced a validated proposal; Runtime preflight and autonomous admissibility remain."
+                                 : "The LLM repaired its proposal after Runtime validation feedback; Runtime preflight and autonomous admissibility remain.";
             result.proposal = proposal;
             return result;
         } catch (const std::exception& error) {
@@ -890,7 +890,7 @@ EvolutionValidation EvolutionManager::validate(const EvolutionProposal& proposal
     }
     const auto innovationValidation = validateInnovationSpec(proposal);
     if (!innovationValidation.valid) return innovationValidation;
-    return {true, "ok", "Proposal is structurally valid and ready for sandbox approval."};
+    return {true, "ok", "Proposal is structurally valid and ready for Runtime preflight."};
 }
 
 EvolutionValidation EvolutionManager::approve(EvolutionProposal& proposal,
@@ -899,18 +899,18 @@ EvolutionValidation EvolutionManager::approve(EvolutionProposal& proposal,
     if (proposal.status != EvolutionProposalStatus::Validated) {
         return {false, "validation_required", "A proposal must pass validation before approval."};
     }
-    // `headless_governor` is an explicit external actor used only by the
-    // opt-in long-run evidence harness. It is independent from the provider
-    // and therefore follows the same approval gate as a world designer; the
-    // LLM/provider identities remain forbidden.
-    if (approver != "developer" && approver != "world_designer" && approver != "headless_governor") {
+    // `runtime_governor` is the normal autonomous actor. It only reaches this
+    // method after Runtime validation/preflight; the legacy headless actor is
+    // retained for audit/replay tooling. Provider identities remain forbidden.
+    if (approver != "runtime_governor" && approver != "developer" &&
+        approver != "world_designer" && approver != "headless_governor") {
         proposal.status = EvolutionProposalStatus::Rejected;
         return {false, "approval_forbidden",
-                "Only an independent developer, world designer, or explicit headless governor may approve evolution."};
+                "Only the Runtime Governor, developer, world designer, or explicit headless governor may approve evolution."};
     }
     if (!sandboxPassed) {
         proposal.status = EvolutionProposalStatus::Rejected;
-        return {false, "sandbox_failed", "A proposal cannot activate without a passing sandbox result."};
+        return {false, "preflight_failed", "A proposal cannot activate without a passing Runtime preflight."};
     }
     if (proposal.kind == "innovation" && proposal.innovationStatus != "accepted") {
         return {false, "innovation_acceptance_required",
@@ -932,7 +932,8 @@ EvolutionValidation EvolutionManager::transitionInnovation(EvolutionProposal& pr
     }
     const auto current = proposal.innovationStatus;
     const bool allowed =
-        (current == "hypothesized" && (nextStatus == "refining" || nextStatus == "evaluated" || nextStatus == "abandoned")) ||
+        (current == "hypothesized" && (nextStatus == "refining" || nextStatus == "evaluated" ||
+                                       nextStatus == "accepted" || nextStatus == "abandoned")) ||
         (current == "refining" && (nextStatus == "refining" || nextStatus == "evaluated" || nextStatus == "abandoned")) ||
         (current == "evaluated" && (nextStatus == "accepted" || nextStatus == "rejected" || nextStatus == "abandoned")) ||
         (current == "accepted" && nextStatus == "abandoned");

@@ -15,7 +15,8 @@ enum class EvolutionProposalStatus { Proposed, Validated, Approved, Rejected };
 
 // Innovation has a longer-lived lifecycle than a one-shot evolution request:
 // a daily reflection may refine or abandon a hypothesis before it reaches the
-// normal validate -> sandbox -> approve -> overlay path.
+// normal validate -> Runtime preflight -> approve -> overlay path. The full
+// sandbox remains an explicit counterfactual experiment, not an activation gate.
 enum class InnovationLifecycle { Hypothesized, Refining, Evaluated, Accepted, Rejected, Abandoned };
 
 struct EvolutionProposal {
@@ -102,7 +103,8 @@ public:
                                                                        const std::string& evolutionLevel,
                                                                        const std::string& provider);
     // Calls the configured LLM explicitly. The returned proposal is still
-    // Proposed and must pass validate -> sandbox -> independent approval.
+    // Proposed and must pass validate -> Runtime preflight -> independent
+    // Runtime Governor approval for ordinary activation.
     [[nodiscard]] static EvolutionProposalRequestResult propose(const WorldService& world,
                                                                  const std::string& evolutionLevel,
                                                                  const std::string& trigger,
