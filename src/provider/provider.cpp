@@ -907,7 +907,7 @@ ProviderResponse LlamaCppProvider::proposeReflection(const Json& context,
             // can reuse its KV prefix across NPCs and days; the Runtime still
             // enforces the exact target and committed event sequences.
             {"npc_id", Json{{"type", "string"}, {"minLength", 1}, {"maxLength", 64}}},
-            {"evidence_event_sequences", Json{{"type", "array"}, {"maxItems", 32},
+            {"evidence_event_sequences", Json{{"type", "array"}, {"maxItems", 12},
                                                 {"uniqueItems", true},
                                                 {"items", Json{{"type", "integer"}, {"minimum", 1}}}}},
             {"cognition_updates", Json{{"type", "object"}, {"additionalProperties", false},
@@ -921,10 +921,14 @@ ProviderResponse LlamaCppProvider::proposeReflection(const Json& context,
             {"goal_adjustment", Json{{"type", "object"}, {"additionalProperties", false},
                                       {"properties", Json{{"priority_delta", Json{{"type", "number"}, {"minimum", -1.0}, {"maximum", 1.0}}},
                                                            {"status", Json{{"enum", Json::array({"cancelled"})}}}}}}},
-            {"unresolved_issues", Json{{"type", "array"}, {"maxItems", 16}, {"items", Json{{"type", "string"}, {"maxLength", 256}}}}},
-            {"resolved_issues", Json{{"type", "array"}, {"maxItems", 16}, {"items", Json{{"type", "string"}, {"maxLength", 256}}}}},
+            {"unresolved_issues", Json{{"type", "array"}, {"maxItems", 4}, {"items", Json{{"type", "string"}, {"maxLength", 256}}}}},
+            {"resolved_issues", Json{{"type", "array"}, {"maxItems", 4}, {"items", Json{{"type", "string"}, {"maxLength", 256}}}}},
             {"innovation_hypotheses", Json{{"type", "array"}, {"maxItems", 2}, {"items", Json{{"type", "object"}}}}},
-            {"innovation_actions", Json{{"type", "array"}, {"maxItems", 8}, {"items", Json{{"type", "object"}}}}}}}};
+            {"innovation_actions", Json{{"type", "array"}, {"maxItems", 2},
+                                           {"items", Json{{"type", "object"}, {"additionalProperties", false},
+                                                           {"required", Json::array({"proposal_id", "status"})},
+                                                           {"properties", Json{{"proposal_id", Json{{"type", "string"}, {"minLength", 1}, {"maxLength", 128}}},
+                                                                                 {"status", Json{{"enum", Json::array({"refining", "evaluated", "accepted", "rejected", "abandoned"})}}}}}}}}}}}};
     // Keep the optional innovation branch typed as well.  Leaving it as an
     // unconstrained object makes Qwen emit a proposal_kind without the
     // required innovation envelope, which then fails Runtime validation after

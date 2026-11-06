@@ -347,6 +347,17 @@ Json WorldEvolutionSystem::reflectionContext(const WorldService& world,
         (void)definition;
         contentSummary["registered_conditions"].push_back(id);
     }
+    Json pendingHypotheses = Json::array();
+    for (const auto& hypothesis : npc.innovationHypotheses) {
+        Json summary{{"id", hypothesis.value("id", "")},
+                     {"status", hypothesis.value("innovation_status", "hypothesized")}};
+        if (hypothesis.contains("innovation") && hypothesis.at("innovation").is_object()) {
+            const auto& innovation = hypothesis.at("innovation");
+            summary["hypothesis"] = innovation.value("hypothesis", "");
+            summary["operation_ids"] = innovation.value("operation_ids", Json::array());
+        }
+        pendingHypotheses.push_back(std::move(summary));
+    }
     Json failureCandidates = Json::array();
     for (const auto& event : world.state_.events) {
         if (event.sequence <= npc.reflectionCursor.lastEventSequence ||
@@ -374,14 +385,7 @@ Json WorldEvolutionSystem::reflectionContext(const WorldService& world,
                                         {"memories", memoryEvidence(npc)},
                                         {"relationships", relationshipEvidence(npc)},
                                         {"stimuli", stimulusEvidence(npc)},
-                                        {"pending_innovation_ids", [&npc] {
-                                             Json value = Json::array();
-                                             for (const auto& hypothesis : npc.innovationHypotheses) {
-                                                 value.push_back(Json{{"id", hypothesis.value("id", "")},
-                                                                      {"status", hypothesis.value("innovation_status", "hypothesized")}});
-                                             }
-                                             return value;
-                                         }()},
+                                        {"pending_innovation_hypotheses", pendingHypotheses},
                                         {"innovation_adoptions", [&npc] { Json value = Json::array(); for (const auto& adoption : npc.innovationAdoptions) value.push_back(Json{{"proposal_id", adoption.proposalId}, {"recipe_id", adoption.recipeId}, {"status", toString(adoption.status)}, {"reason", adoption.reason}}); return value; }()}}},
                 {"reflection_cursor", Json{{"last_event_sequence", npc.reflectionCursor.lastEventSequence},
                                              {"last_reflection_day", npc.reflectionCursor.lastReflectionDay},
@@ -393,7 +397,7 @@ Json WorldEvolutionSystem::reflectionContext(const WorldService& world,
                 // the hint is advisory context, never authority.
                 {"failure_candidates", failureCandidates},
                 {"unresolved_issues", npc.unresolvedIssues},
-                {"pending_innovation_hypotheses", npc.innovationHypotheses}, {"content", contentSummary}};
+                {"pending_innovation_hypotheses", pendingHypotheses}, {"content", contentSummary}};
 }
 
 ProviderResponse WorldEvolutionSystem::requestReflection(const WorldService& world,
