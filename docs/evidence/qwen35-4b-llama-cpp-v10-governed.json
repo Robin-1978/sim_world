@@ -1,0 +1,120 @@
+{
+  "date": "2026-11-06",
+  "command": "TIDE_MARKS_DEBUG_PROVIDER=1 ./build/tide_marks_headless --days 7 --provider profile --wait-llm-ms 60000 --governance-auto --replay /tmp/tide_marks-7d-real-v10-governed.jsonl --dump-events",
+  "provider": "llama.cpp",
+  "model": "Huihui-Qwen3.5-4B-abliterated.Q4_K_M",
+  "profile": "/home/robin/.sim_world/config/intelligence-profile.json",
+  "days_requested": 7,
+  "final": "day 8 6:00; boat_integrity=94; cooperation=6; grain=0; records_integrity=94; reputation=0; revision=10187; eve@archive_room:stage=0:need=cognition=0.946667; lorn@ferry_dock:stage=0:need=crossing_safety=1; mira@granary:stage=0:need=food_security=0.95",
+  "drain": "consumed=156 pending=0",
+  "replay_equal": true,
+  "governance_lines": [
+    "governance: proposal=village_ferry activation=active"
+  ],
+  "stages": {
+    "decision": {
+      "calls": 133,
+      "finish_reason": {
+        "stop": 133
+      },
+      "prompt_tokens_total": 741091,
+      "completion_tokens_total": 43732,
+      "cached_tokens_total": 341617,
+      "cache_ratio": 0.461,
+      "completion_max": 1024,
+      "completion_mean": 328.8,
+      "completion_p95": 426
+    },
+    "evolution_level2": {
+      "calls": 4,
+      "finish_reason": {
+        "tool_calls": 3,
+        "length": 1
+      },
+      "prompt_tokens_total": 30873,
+      "completion_tokens_total": 4219,
+      "cached_tokens_total": 10162,
+      "cache_ratio": 0.3292,
+      "completion_max": 2048,
+      "completion_mean": 1054.8,
+      "completion_p95": 796,
+      "debug_argument_bytes_max": 5810,
+      "debug_argument_bytes_samples": 4
+    },
+    "reflection": {
+      "calls": 21,
+      "finish_reason": {
+        "tool_calls": 21
+      },
+      "prompt_tokens_total": 119100,
+      "completion_tokens_total": 25370,
+      "cached_tokens_total": 59472,
+      "cache_ratio": 0.4993,
+      "completion_max": 1536,
+      "completion_mean": 1208.1,
+      "completion_p95": 1327,
+      "debug_argument_bytes_max": 4350,
+      "debug_argument_bytes_samples": 21
+    },
+    "understanding": {
+      "calls": 1,
+      "finish_reason": {
+        "stop": 1
+      },
+      "prompt_tokens_total": 893,
+      "completion_tokens_total": 191,
+      "cached_tokens_total": 0,
+      "cache_ratio": 0.0,
+      "completion_max": 512,
+      "completion_mean": 191.0,
+      "completion_p95": 191
+    }
+  },
+  "events": {
+    "action.resource": 9,
+    "dialogue.turn": 1,
+    "drive.adapted": 48,
+    "evolution.overlay_activated": 1,
+    "evolution.proposal_ready": 1,
+    "evolution.proposal_rejected": 1,
+    "experience.observed": 50,
+    "experience.recorded": 85,
+    "innovation.hypothesis_rejected": 19,
+    "knowledge.asserted": 32,
+    "life.archive": 7,
+    "life.clue": 7,
+    "life.crossing": 7,
+    "life.day": 7,
+    "life.debt": 7,
+    "life.explain_ration": 7,
+    "life.ferry_decay": 7,
+    "life.protect_secret": 7,
+    "life.ration": 7,
+    "life.repair": 6,
+    "life.rest": 21,
+    "life.withhold": 7,
+    "memory.reflected": 28,
+    "need.critical": 14,
+    "need.deprived": 504,
+    "need.relieved": 230,
+    "npc.intent": 54,
+    "npc.intent_expired": 9,
+    "npc.intent_rejected": 18,
+    "npc.process_completed": 50,
+    "npc.process_failed": 4,
+    "npc.schedule_applied": 50,
+    "reflection.committed": 21,
+    "reflection.update_rejected": 14,
+    "stimulus.habituated": 30,
+    "strategy.reflected": 21,
+    "structure.ferry_closed": 7,
+    "structure.ferry_opened": 7,
+    "world.initialized": 1
+  },
+  "notes": [
+    "This run used the minimum autonomous decision schema and compact provider debug formatter.",
+    "The explicit headless_governor approval actor was accepted by the independent governance gate; the LLM/provider identity remains forbidden.",
+    "The run includes the first real Level 2 overlay activation after deterministic re-sandbox and approval. Adoption counts are reported from the committed event stream.",
+    "One Level 2 response hit max_tokens and completed through the bounded same-call continuation; the truncated candidate was not executed."
+  ]
+}
