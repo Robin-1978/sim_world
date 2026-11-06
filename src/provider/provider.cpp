@@ -117,6 +117,10 @@ ProviderJsonResult requestProviderJson(const LlamaCppConfig& config, const Json&
     std::filesystem::path authHeader;
     const char* configuredKey = config.apiKeyEnv.empty() ? nullptr : std::getenv(config.apiKeyEnv.c_str());
     const bool hasApiKey = configuredKey != nullptr && *configuredKey != '\0';
+    if (config.providerType == "openai_compatible" && !config.apiKeyEnv.empty() && !hasApiKey) {
+        std::filesystem::remove(temp);
+        return {false, {}, "provider_auth_missing"};
+    }
     if (hasApiKey || !config.headers.empty()) {
         if (hasApiKey) {
             authHeader = temp.parent_path() /
