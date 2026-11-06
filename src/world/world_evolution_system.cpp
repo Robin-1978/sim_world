@@ -1298,6 +1298,25 @@ CommandResult WorldEvolutionSystem::commitReflection(const EvolutionRequest& req
         }
         transitions.push_back(InnovationTransition{index, next});
     }
+    // A structurally valid Reflection can still contain a malformed optional
+    // innovation branch.  Give the same session a bounded ReAct-style repair
+    // opportunity before committing the cognition remainder: the transaction
+    // is rolled back, the previous tool result is preserved by the queue, and
+    // `repair_daily_reflection` can replace only innovation_hypotheses or
+    // innovation_actions.  Evidence insufficiency and an already-pending
+    // hypothesis are intentional soft outcomes, so they do not trigger a
+    // needless model call.  After the bounded attempts the original valid
+    // cognition fields are committed and only the optional branch is skipped.
+    const auto innovationCode = innovationRejection.value("code", "");
+    const bool innovationRepairable = !innovationRejection.empty() &&
+                                      innovationCode != "innovation_evidence_insufficient" &&
+                                      innovationCode != "innovation_already_pending";
+    if (innovationRepairable && request.attempt < 2) {
+        const auto message = innovationRejection.value("message", "innovation branch rejected");
+        transaction.rollback();
+        return world_.reject("invalid_reflection_innovation",
+                             "repairable innovation branch error [" + innovationCode + "]: " + message);
+    }
     for (std::size_t index = 0; index < validBeliefs.size(); ++index) {
         const auto& item = validBeliefs.at(index);
         const auto applied = CognitionSystem(world_).assertKnownFact(

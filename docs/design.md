@@ -319,6 +319,8 @@ Innovation Hypothesis 有独立的持久化生命周期：`hypothesized -> refin
 
 创新的等级按影响范围划分，而不是按“是否有创意”划分。Level 1 可以提出只对目标 NPC 可用的行为配方假设，`available_to` 必须精确等于该 NPC，不能创建共享实体原型；它由 Runtime Governor 预检后自动激活，不直接改变公共世界，后续执行效果交给该 NPC 的反思判断。Level 2 才能把已验证的个人经验或公共事件提升为共享配方或实体原型，要求跨主体问题证据、基线比较、跨主体可见性和 Governor 门槛。Level 1 到 Level 2 的提升通过新的 Level 2 反思/候选引用前一阶段的已提交 Adoption 和公共结果事件完成，私有记忆不会被广播。两级都允许“不改变”和“重新采用已有机制”；只有现有机制无法满足持续问题且收益可测时才创建新的创新对象。
 
+每日 `daily_reflection` 面向本地小模型时，Level 1 私有创新的初始 `register_behavior_recipe` 线协议先限制为一个已登记的 `meta_action` 叶子（`children=[]`、参数是 JSON Schema）。这是降低结构化输出失败面的种子步骤，不是 Runtime BT 的表达上限；显式 `npc_evolution` 仍可提出经过完整节点校验的复合树。若反思工具调用通过 JSON Schema 但创新分支在业务校验中失败，Runtime 会保留原候选，在同一 continuation 追加 `tool` observation 并有界调用 `repair_daily_reflection`；达到上限后只跳过创新分支，提交其余认知结果。这样 ReAct 的迭代作用于真实验证错误，而不是让模型控制 Tick 或自行写入事实。
+
 这组机制吸收了 *Maslow Machines* 预印本提出的三个可检验启发：较低层需求满足后仍保留有限的高阶动机压力（避免 contentment trap）、把驱力呈现为描述性的 felt-state 而不是命令、以及把“提出想法”和“有资源实现”分开测量。项目不把 Maslow 五层当作固定闸门，也不把模型的拟人化自述当作意识证据；需求域、阈值、满足配方和创新指标仍由 Content Pack、Runtime 事实与回放校准决定。参考：Mark E. Mala, *Maslow Machines: Emergent Civilisation from Intrinsic Drive Hierarchies in LLM Agent Populations*, Zenodo, 2026, DOI `10.5281/zenodo.19479937`（v1.1 记录 DOI `10.5281/zenodo.19479938`）。
 
 同一机制可以承载场景实验：例如“在周边小区开一个小店”“提高利率”“发布一个政策”。LLM 把自然语言转成 `ScenarioProposal`，Validator 检查实体、参数和已注册机制，Sandbox 从同一快照克隆并运行 baseline/scenario，Runtime 输出资源、库存、组织指标、需求、位置、关系、承诺、异常和两侧事件序列；LLM 只把这些已计算结果整理为假设、因果链、敏感参数和不确定性说明。缺少经济或社会机制时必须报告“无法评估”，不能用语言补造数值。当前已实现资源、组织指标和 NPC 需求三类有界 intervention，以及面向不必填用的 CLI；小店、利率和政策只有在对应事实模型落地后才能增加专用 intervention。

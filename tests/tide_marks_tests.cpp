@@ -461,6 +461,13 @@ public:
                                          {"resource_budget", Json{{"minutes", 5.0}}},
                                          {"success_criteria", "recipe completes"},
                                          {"failure_criteria", "recipe fails"}}}}}}});
+            if (emitInvalidInnovation) {
+                // Exercise the semantic Runtime validator rather than the
+                // provider JSON parser: the first candidate carries a
+                // runtime value where the recipe input schema is required.
+                result["innovation_hypotheses"].at(0).at("operations").at(0)["parameters"] =
+                    Json{{"destination", "ferry_dock"}};
+            }
         }
         if (emitInvalidUpdate && source != 0) {
             result["cognition_updates"]["memory_updates"] = Json::array({Json{
@@ -477,7 +484,11 @@ public:
     ProviderResponse proposeReflection(const Json& context, const std::string& targetNpcId,
                                        const Json& validationFeedback) override {
         reflectionFeedbacks.push_back(validationFeedback);
-        return proposeReflection(context, targetNpcId);
+        const bool invalid = emitInvalidInnovation;
+        if (repairInnovation && !validationFeedback.empty()) emitInvalidInnovation = false;
+        auto response = proposeReflection(context, targetNpcId);
+        emitInvalidInnovation = invalid;
+        return response;
     }
 
     [[nodiscard]] std::string name() const override { return "reflection-test-llm"; }
@@ -486,6 +497,8 @@ public:
     }
     std::vector<Json> reflectionContexts;
     bool emitInnovation{false};
+    bool emitInvalidInnovation{false};
+    bool repairInnovation{false};
     bool emitInvalidUpdate{false};
     bool emitMalformedIdentity{false};
     bool keepStrategy{false};
@@ -3524,6 +3537,59 @@ void sync_daily_reflection_uses_patch_continuation() {
            "only the repaired structured reflection advances the Runtime cursor");
 }
 
+void semantic_reflection_innovation_uses_patch_continuation() {
+    auto content = ContentPackLoader::load(ContentPackLoader::defaultRoot());
+    content.evolutionPolicy.enabled = true;
+    content.evolutionPolicy.level1IntervalDays = 1;
+    content.evolutionPolicy.level2IntervalDays = 0;
+    content.evolutionPolicy.maxProposalAgeMinutes = 180;
+    content.npcDeliberation.enabled = false;
+
+    // Seed the durable repeated-failure gate for Mira. The first reflection
+    // candidate is semantically malformed, then the same provider session
+    // returns a corrected leaf recipe after Runtime feedback.
+    auto seed = WorldService::fromContent(content, std::make_unique<MockProvider>());
+    auto snapshot = seed.snapshotJson();
+    const auto baseEvent = snapshot.at("events").back();
+    const auto revision = snapshot.at("world_revision").get<std::uint64_t>();
+    for (std::uint64_t sequence = 2; sequence <= 3; ++sequence) {
+        auto failure = baseEvent;
+        failure["schema_version"] = 4;
+        failure["sequence"] = sequence;
+        failure["event_id"] = "event:" + std::to_string(sequence);
+        failure["correlation_id"] = "correlation:2";
+        failure["causation_sequence"] = sequence == 2 ? 0 : 2;
+        failure["world_revision"] = revision;
+        failure["type"] = "npc.process_failed";
+        failure["actor"] = "mira";
+        failure["target"] = "repair_ferry";
+        failure["detail"] = "A deterministic repeated process failure for semantic repair.";
+        failure["data"] = Json{{"action_id", "repair_ferry"}, {"process_id", "failed:" + std::to_string(sequence)}};
+        snapshot["events"].push_back(std::move(failure));
+    }
+    snapshot["event_sequence"] = snapshot.at("events").size();
+
+    auto provider = std::make_unique<ReflectionProvider>();
+    auto* providerRaw = provider.get();
+    providerRaw->emitInnovation = true;
+    providerRaw->emitInvalidInnovation = true;
+    providerRaw->repairInnovation = true;
+    auto service = WorldService::fromContentSnapshot(content, snapshot, std::move(provider));
+    service.advanceMinutes(kMinutesPerDay);
+    service.waitForAsyncTurns(1000);
+
+    expect(std::any_of(providerRaw->reflectionFeedbacks.begin(), providerRaw->reflectionFeedbacks.end(),
+                       [](const Json& feedback) {
+                           return feedback.value("repair_mode", "") == "patch" &&
+                                  feedback.value("repair_tool_name", "") == "repair_daily_reflection" &&
+                                  feedback.value("code", "") == "invalid_reflection_innovation";
+                       }),
+           "semantic innovation validation appends a bounded repair observation in the same reflection continuation");
+    expect(std::any_of(service.state().events.begin(), service.state().events.end(),
+                       [](const auto& event) { return event.type == "innovation.hypothesis_created"; }),
+           "the repaired private innovation reaches Runtime admission instead of being lost after a semantic rejection");
+}
+
 void daily_reflection_requires_failure_evidence_for_innovation() {
     auto provider = std::make_unique<ReflectionProvider>();
     auto* providerRaw = provider.get();
@@ -3905,6 +3971,8 @@ int main() {
         daily_reflection_routes_updates_and_keeps_incremental_cursor);
     run("sync_daily_reflection_uses_patch_continuation",
         sync_daily_reflection_uses_patch_continuation);
+    run("semantic_reflection_innovation_uses_patch_continuation",
+        semantic_reflection_innovation_uses_patch_continuation);
     run("daily_reflection_requires_failure_evidence_for_innovation",
         daily_reflection_requires_failure_evidence_for_innovation);
     run("daily_reflection_skips_invalid_optional_fields",
