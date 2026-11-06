@@ -409,6 +409,13 @@ public:
 
     ProviderResponse proposeReflection(const Json& context, const std::string& targetNpcId) override {
         reflectionContexts.push_back(context);
+        ++reflectionCalls;
+        if (failFirstReflection && reflectionCalls == 1) {
+            ProviderResponse response;
+            response.ok = true;
+            response.reflectionResult = Json{{"schema_version", 1}, {"npc_id", "wrong-target"}};
+            return response;
+        }
         const auto evidence = context.value("new_evidence", Json::array());
         const auto source = evidence.empty() ? 0ULL : evidence.at(0).at("sequence").get<std::uint64_t>();
         Json result{{"schema_version", 1}, {"npc_id", targetNpcId},
@@ -467,6 +474,12 @@ public:
         return response;
     }
 
+    ProviderResponse proposeReflection(const Json& context, const std::string& targetNpcId,
+                                       const Json& validationFeedback) override {
+        reflectionFeedbacks.push_back(validationFeedback);
+        return proposeReflection(context, targetNpcId);
+    }
+
     [[nodiscard]] std::string name() const override { return "reflection-test-llm"; }
     [[nodiscard]] ProviderCapabilities capabilities() const override {
         return ProviderCapabilities{true, true, true};
@@ -476,6 +489,9 @@ public:
     bool emitInvalidUpdate{false};
     bool emitMalformedIdentity{false};
     bool keepStrategy{false};
+    bool failFirstReflection{false};
+    int reflectionCalls{0};
+    std::vector<Json> reflectionFeedbacks;
 };
 
 void village_has_three_independent_npcs() {
@@ -3467,6 +3483,32 @@ void daily_reflection_routes_updates_and_keeps_incremental_cursor() {
            "Level 2 receives committed hypothesis evidence without a private Level 1 proposal payload");
 }
 
+void sync_daily_reflection_uses_patch_continuation() {
+    auto provider = std::make_unique<ReflectionProvider>();
+    auto* providerRaw = provider.get();
+    providerRaw->failFirstReflection = true;
+    auto content = ContentPackLoader::load(ContentPackLoader::defaultRoot());
+    content.evolutionPolicy.enabled = false;
+    content.npcDeliberation.enabled = false;
+    auto service = WorldService::fromContent(content, std::move(provider));
+
+    const auto first = service.requestDailyReflection("mira");
+    expect(first.ok && first.reflectionResult.value("npc_id", "") == "wrong-target",
+           "the synchronous reflection fixture returns one malformed first candidate");
+    const auto committed = service.commitDailyReflection("mira", first);
+    expect(committed.accepted,
+           "the synchronous reflection entry point repairs a Runtime-rejected candidate");
+    expect(providerRaw->reflectionFeedbacks.size() == 2 &&
+               providerRaw->reflectionFeedbacks.at(1).value("repair_mode", "") == "patch" &&
+               providerRaw->reflectionFeedbacks.at(1).value("repair_tool_name", "") ==
+                   "repair_daily_reflection" &&
+               providerRaw->reflectionFeedbacks.at(1).at("previous_result").value("npc_id", "") ==
+                   "wrong-target",
+           "the repair call stays in one bounded continuation and carries the previous result as observation");
+    expect(service.state().npcs.at("mira").reflectionCursor.lastReflectionDay == service.state().now.day(),
+           "only the repaired structured reflection advances the Runtime cursor");
+}
+
 void daily_reflection_requires_failure_evidence_for_innovation() {
     auto provider = std::make_unique<ReflectionProvider>();
     auto* providerRaw = provider.get();
@@ -3846,6 +3888,8 @@ int main() {
     run("level_two_reflection_can_commit_no_change", level_two_reflection_can_commit_no_change);
     run("daily_reflection_routes_updates_and_keeps_incremental_cursor",
         daily_reflection_routes_updates_and_keeps_incremental_cursor);
+    run("sync_daily_reflection_uses_patch_continuation",
+        sync_daily_reflection_uses_patch_continuation);
     run("daily_reflection_requires_failure_evidence_for_innovation",
         daily_reflection_requires_failure_evidence_for_innovation);
     run("daily_reflection_skips_invalid_optional_fields",

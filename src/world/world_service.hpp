@@ -134,7 +134,8 @@ public:
                                                              const std::string& targetNpcId = {}) const;
     // Explicit daily reflection entry point. It returns a structured
     // cognition result; callers must commit it through the Runtime boundary.
-    [[nodiscard]] ProviderResponse requestDailyReflection(const std::string& targetNpcId) const;
+    [[nodiscard]] ProviderResponse requestDailyReflection(const std::string& targetNpcId,
+                                                           const Json& validationFeedback = Json::object()) const;
     CommandResult commitDailyReflection(const std::string& targetNpcId,
                                         const ProviderResponse& response);
     // Main-thread boundary for decisions produced by the worker. Returns the

@@ -33,7 +33,8 @@ public:
     [[nodiscard]] static Json reflectionContext(const WorldService& world,
                                                  const std::string& targetNpcId);
     [[nodiscard]] static ProviderResponse requestReflection(const WorldService& world,
-                                                             const std::string& targetNpcId);
+                                                             const std::string& targetNpcId,
+                                                             const Json& validationFeedback = Json::object());
     std::size_t pumpAsyncProposals();
     void scheduleAutomatic();
     CommandResult activateOverlay(const EvolutionProposal& proposal,

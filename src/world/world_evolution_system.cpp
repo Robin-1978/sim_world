@@ -563,10 +563,11 @@ Json WorldEvolutionSystem::reflectionContext(const WorldService& world,
 }
 
 ProviderResponse WorldEvolutionSystem::requestReflection(const WorldService& world,
-                                                         const std::string& targetNpcId) {
+                                                         const std::string& targetNpcId,
+                                                         const Json& validationFeedback) {
     const auto context = reflectionContext(world, targetNpcId);
     if (context.empty()) return ProviderResponse{false, {}, {}, "unknown_npc", Json::object(), Json::object()};
-    return world.provider_->proposeReflection(context, targetNpcId);
+    return world.provider_->proposeReflection(context, targetNpcId, validationFeedback);
 }
 
 ProviderResponse WorldEvolutionSystem::requestProposal(const WorldService& world,
@@ -694,7 +695,8 @@ std::size_t WorldEvolutionSystem::pumpAsyncProposals() {
                 const auto reflectionEventStart = world_.state_.events.size();
                 const auto result = commitReflection(queued.request, queued.response, queued.provider);
                 if (!result.accepted) {
-                    if (queued.request.attempt < 2 && world_.provider_->capabilities().structuredRepair) {
+                    if (queued.request.attempt < 2 && world_.provider_->capabilities().structuredRepair &&
+                        result.code.starts_with("invalid_reflection")) {
                         const Json feedback{{"attempt", queued.request.attempt + 1},
                                             {"code", result.code}, {"message", result.message},
                                             {"previous_result", queued.response.reflectionResult},

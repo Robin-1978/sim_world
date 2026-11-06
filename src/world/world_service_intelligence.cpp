@@ -26,8 +26,9 @@ ProviderResponse WorldService::requestEvolutionProposal(const std::string& evolu
     return WorldEvolutionSystem::requestProposal(*this, evolutionLevel, trigger, validationFeedback, targetNpcId);
 }
 
-ProviderResponse WorldService::requestDailyReflection(const std::string& targetNpcId) const {
-    return WorldEvolutionSystem::requestReflection(*this, targetNpcId);
+ProviderResponse WorldService::requestDailyReflection(const std::string& targetNpcId,
+                                                      const Json& validationFeedback) const {
+    return WorldEvolutionSystem::requestReflection(*this, targetNpcId, validationFeedback);
 }
 
 CommandResult WorldService::commitDailyReflection(const std::string& targetNpcId,
@@ -41,7 +42,45 @@ CommandResult WorldService::commitDailyReflection(const std::string& targetNpcId
     request.baseWorldRevision = state_.revision;
     request.createdAt = state_.now;
     request.context = WorldEvolutionSystem::reflectionContext(*this, targetNpcId);
-    return WorldEvolutionSystem(*this).commitReflection(request, response, provider_->name());
+    auto current = response;
+    const auto retryableProviderFailure = [](const std::string& error) {
+        return error.starts_with("provider_truncated:") ||
+               error.starts_with("invalid_provider_json:") ||
+               error.starts_with("provider_multiple_tool_calls:") ||
+               error.starts_with("provider_invalid_tool_arguments:") ||
+               error.starts_with("provider_unexpected_tool:");
+    };
+    const auto retryableReflectionCode = [](const std::string& code) {
+        return code.starts_with("invalid_reflection");
+    };
+    for (int attempt = 0; attempt < 3; ++attempt) {
+        const auto committed = WorldEvolutionSystem(*this).commitReflection(
+            request, current, provider_->name());
+        if (committed.accepted || !retryableReflectionCode(committed.code)) {
+            return committed;
+        }
+        const bool repairable = current.ok
+                                    ? true
+                                    : retryableProviderFailure(current.error);
+        if (attempt >= 2 || !provider_->capabilities().structuredRepair || !repairable) {
+            if (!current.ok) {
+                return reject(current.error.empty() ? "reflection_provider_unavailable" : current.error,
+                              "The configured LLM did not return a repairable daily reflection.");
+            }
+            return committed;
+        }
+
+        const Json feedback{{"attempt", attempt + 1},
+                            {"code", current.ok ? "invalid_reflection" : current.error},
+                            {"message", current.ok
+                                             ? "Runtime rejected the reflection structure. Return only a complete bounded patch."
+                                             : "The previous structured function call was truncated or invalid. Return one complete bounded reflection."},
+                            {"previous_result", current.reflectionResult},
+                            {"repair_mode", "patch"},
+                            {"repair_tool_name", "repair_daily_reflection"}};
+        current = WorldEvolutionSystem::requestReflection(*this, targetNpcId, feedback);
+    }
+    return reject("reflection_retry_exhausted", "The daily reflection repair budget was exhausted.");
 }
 
 TurnRequest WorldService::makeTurnRequest(const std::string& npcId, const std::string& input,
