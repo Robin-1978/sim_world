@@ -1026,13 +1026,13 @@ ProviderResponse LlamaCppProvider::proposeEvolution(const Json& context,
                                                                  {"description", "Return only the changed root fields in set; Runtime merges and validates the complete proposal."},
                                                                  {"parameters", rootPatchSchema()},
                                                                  {"strict", false}}}}});
-    // llama.cpp accepts the OpenAI-compatible string form here.  There is
-    // exactly one tool in this request, so `required` is equivalent to naming
-    // that function and avoids a provider-specific object warning.
+    // Explicitly select the proposal function on the first pass.  The repair
+    // function is advertised in the same stable tool prefix for caching, but
+    // must never be chosen before a previous candidate exists.
     const bool patchMode = validationFeedback.value("repair_mode", "") == "patch";
     request["tool_choice"] = patchMode
                                   ? Json{{"type", "function"}, {"function", Json{{"name", repairToolName}}}}
-                                  : Json("required");
+                                  : Json{{"type", "function"}, {"function", Json{{"name", toolName}}}};
     auto configureDecoding = [&endpointConfig](Json& target, const DecisionPolicy& selectedPolicy) {
         if (endpointConfig.providerType == "openai_compatible") {
             target["reasoning_effort"] = selectedPolicy.reasoningEffort.empty()
@@ -1299,7 +1299,7 @@ ProviderResponse LlamaCppProvider::proposeReflection(const Json& context,
                                                             {"strict", false}}}}})},
         {"tool_choice", patchMode
                              ? Json{{"type", "function"}, {"function", Json{{"name", repairToolName}}}}
-                             : Json("required")}};
+                             : Json{{"type", "function"}, {"function", Json{{"name", "daily_reflection"}}}}}};
     appendValidationContinuation(request["messages"], validationFeedback,
                                  "daily_reflection", "previous_result");
     if (endpointConfig.providerType == "openai_compatible") {
