@@ -3367,7 +3367,11 @@ void automatic_level_one_innovation_is_admitted_and_adopted() {
     auto* providerRaw = provider.get();
     providerRaw->emitInnovation = true;
     auto service = WorldService::fromContentSnapshot(content, snapshot, std::move(provider));
-    service.advanceMinutes(kMinutesPerDay);
+    // Keep the admission fixture running across a full week. The first day
+    // proves creation/activation; later boundaries prove that the same
+    // hypothesis is not regenerated and that its adoption result is visible
+    // to subsequent ReflectionResult projections.
+    service.advanceMinutes(kMinutesPerDay * 7);
     service.waitForAsyncTurns(1000);
 
     const auto& events = service.state().events;
@@ -3376,18 +3380,29 @@ void automatic_level_one_innovation_is_admitted_and_adopted() {
             return event.type == type && (actor.empty() || event.actor == actor);
         });
     };
-    expect(providerRaw->reflectionContexts.size() == 3,
-           "Level 1 innovation admission still performs one bounded reflection per NPC");
+    expect(providerRaw->reflectionContexts.size() == 21,
+           "Level 1 innovation admission still performs one bounded reflection per NPC across seven days");
     expect(hasEvent("innovation.hypothesis_created") && hasEvent("evolution.approved", "world") &&
                hasEvent("evolution.overlay_activated", "runtime_governor"),
            "Runtime automatically admits and activates a valid private Level 1 innovation");
+    expect(std::count_if(events.begin(), events.end(), [](const auto& event) {
+               return event.type == "innovation.hypothesis_created";
+           }) == 1,
+           "a persisted Level 1 hypothesis is not recreated on every daily reflection");
     const auto& mira = service.state().npcs.at("mira");
     expect(mira.innovationAdoptions.size() == 1 &&
-               (mira.innovationAdoptions.front().status == InnovationAdoptionStatus::Executing ||
-                mira.innovationAdoptions.front().status == InnovationAdoptionStatus::Completed),
-           "an activated private innovation enters the NPC adoption lifecycle");
+               mira.innovationAdoptions.front().status == InnovationAdoptionStatus::Completed &&
+               !mira.innovationAdoptions.front().observedMetrics.empty(),
+           "an activated private innovation completes and records Runtime metrics during the long horizon");
     expect(mira.innovationAdoptions.front().status != InnovationAdoptionStatus::ResourceBlocked,
            "a valid private innovation is not stranded behind an artificial approval gate");
+    expect(std::any_of(providerRaw->reflectionContexts.begin(), providerRaw->reflectionContexts.end(),
+                       [](const Json& context) {
+                           const auto current = context.value("current_state", Json::object());
+                           return current.value("innovation_adoptions", Json::array()).is_array() &&
+                                  !current.value("innovation_adoptions", Json::array()).empty();
+                       }),
+           "a later daily reflection receives the completed adoption metrics as Runtime evidence");
 }
 
 void level_two_evolution_waits_for_new_public_problem_evidence() {
