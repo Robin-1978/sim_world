@@ -245,6 +245,10 @@ v11 在修复 Level 1 私有创新激活的 Revision 重绑定缺口、并收紧
 当前提交还补齐了同步 `requestDailyReflection`/`commitDailyReflection` 的 bounded patch continuation，并用回归测试证明 `invalid_reflection_*` 会保留上一轮结果、追加 `repair_daily_reflection` observation 后再校验；同日幂等、未知主体、过期和认证错误不会触发模型重试。由于当前 Codex 进程没有 `MY_MY_API`，再次执行 beam-free 7 日安全基线只能得到 Runtime 证据：推进到第 8 天 06:00、`llm-drain: consumed=104 pending=0`、revision 10188、7 个 `life.day`；84 个自主意图和 21 个 Reflection 均以 `provider_auth_missing` fail-closed，`reflection.committed=0`、Overlay/Adoption 均为 0。完整无凭据统计见 [`beam-free-auth-preflight-7d.json`](evidence/beam-free-auth-preflight-7d.json)，不能据此宣称模型质量、缓存命中率或自主演化成功。
 历史 beam-free v14 有完整 usage 可供比较：decision cache ratio 约 20.21%、Reflection 约 23.29%、合计约 20.54%，因此“稳定前缀”只证明了请求组织方式，不能宣称达到 95% 命中。当前实现继续把 `cached_tokens`/`prompt_progress.cache` 作为唯一证据；恢复凭据后必须重新跑同一 7 日命令，按 stage 记录命中率、动态上下文 token 和 provider 是否真正复用前缀，再决定是否进一步压缩投影。
 
+7 日运行的逐事件摘要已经写入 [`7d-village-evolution-summary.md`](evidence/7d-village-evolution-summary.md)。结论必须拆开表述：Qwen v11 的 `repair_ferry_v2` 是一个由 Runtime Governor 自动批准并激活的 Level 2 `create_entity_archetype` Overlay；它没有在该 7 日窗口形成 NPC Adoption，因此只证明了“提案→验证→批准→激活”，没有证明“共享新行为被采用且效果改善”。beam-free v14 没有 Overlay 激活，但确实提交了 20 次 Reflection，并把 Lorn 的策略从 `routine` 调整为 `repair_ferry_focus` 再到 `offer_crossing_focus`；其四个 Level 1 假设均被 Runtime 以 operation scope、测试 horizon 或未知元动作拒绝。三 NPC 的真实世界发生、认知更新和创新治理不能合并成一个“成功率”。
+
+本次上下文边界修正也已落地：决策 stable prefix 现在只包含 `protocol`、speech-act catalog 和去除当前 utility 的 authored plan catalog；每 Tick 变化的 constraints、NPC 身份/策略、需求、关系、世界快照、活动和玩家输入都在 dynamic tail。这样不会为了缓存删除必要事实，也避免把动态 `character` 和 `constraints` 误放在可复用前缀中。下一次 beam-free 有凭据的长跑必须重新测量 `cached_tokens`，并另外记录 dynamic tail 大小；20.54% 的历史结果仍是事实基线，不能因为消息被拆成两段就宣称命中提升。
+
 ## 恢复工作入口
 
 会话恢复时依次阅读本文件的“当前检查点”和“已完成能力记录”，再阅读 [design.md](design.md) 的“事实、意图与演化边界”“世界与社会的内在驱力模型”“NPC Runtime 与 World Intelligence”“Runtime 核心契约”。然后查看 `git status --short`，运行自动化验证命令，先修复当前工作包失败项，再继续下一项；不要为了通过测试删除功能或放宽断言。

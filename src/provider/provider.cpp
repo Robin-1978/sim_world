@@ -634,20 +634,18 @@ ProviderResponse LlamaCppProvider::decide(const DecisionContext& context, const 
                            {"stimuli", stimuli},
                            {"current_activity", context.currentActivity},
                            {"player_input", playerInput}};
+    // Only authored, revision-stable vocabulary belongs before the dynamic
+    // tail.  The previous version also put constraints, npc_id, character,
+    // private_character and the current need keys here.  Those values change
+    // with almost every tick or differ per subject, so they invalidated the
+    // very prefix that was meant to be reusable.  Keep the stable prefix
+    // limited to the protocol and authored plan/speech descriptions; all
+    // observed state remains visible in the dynamic projection below.
     const Json stableContent{{"protocol", "decision-v3"},
                              {"speech_act_catalog", speechActs},
-                             {"static_plan_catalog", staticPlanCatalog},
-                             {"constraints", constraints},
-                             {"npc_id", context.npcId},
-                             {"decision_channel", context.channel},
-                             {"character", context.character},
-                             {"private_character", context.privateCharacter},
-                             {"private_traits", context.privateTraits},
-                             {"valid_expected_relief_keys", needIds}};
+                             {"static_plan_catalog", staticPlanCatalog}};
     Json dynamicContent = userContent;
-    for (const auto& key : {"protocol", "speech_act_catalog", "static_plan_catalog", "constraints",
-                            "npc_id", "decision_channel", "character", "private_character",
-                            "private_traits", "valid_expected_relief_keys"}) {
+    for (const auto& key : {"protocol", "speech_act_catalog", "static_plan_catalog"}) {
         dynamicContent.erase(key);
     }
     const std::string systemPrompt =
