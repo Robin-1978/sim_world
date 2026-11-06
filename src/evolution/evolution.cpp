@@ -899,9 +899,14 @@ EvolutionValidation EvolutionManager::approve(EvolutionProposal& proposal,
     if (proposal.status != EvolutionProposalStatus::Validated) {
         return {false, "validation_required", "A proposal must pass validation before approval."};
     }
-    if (approver != "developer" && approver != "world_designer") {
+    // `headless_governor` is an explicit external actor used only by the
+    // opt-in long-run evidence harness. It is independent from the provider
+    // and therefore follows the same approval gate as a world designer; the
+    // LLM/provider identities remain forbidden.
+    if (approver != "developer" && approver != "world_designer" && approver != "headless_governor") {
         proposal.status = EvolutionProposalStatus::Rejected;
-        return {false, "approval_forbidden", "Only an independent developer or world designer may approve evolution."};
+        return {false, "approval_forbidden",
+                "Only an independent developer, world designer, or explicit headless governor may approve evolution."};
     }
     if (!sandboxPassed) {
         proposal.status = EvolutionProposalStatus::Rejected;

@@ -2780,6 +2780,10 @@ void evolution_proposals_are_governed() {
     const auto approved = EvolutionManager::approve(proposal, "developer", true);
     expect(approved.valid && proposal.status == EvolutionProposalStatus::Approved,
            "only an approved sandbox result activates a proposal");
+    auto harnessApproved = proposal;
+    harnessApproved.status = EvolutionProposalStatus::Validated;
+    expect(EvolutionManager::approve(harnessApproved, "headless_governor", true).valid,
+           "the explicit headless governance harness can independently approve a sandboxed proposal");
     EvolutionProposal forbidden = proposal;
     forbidden.status = EvolutionProposalStatus::Proposed;
     forbidden.operations = Json::array({Json{{"operation", "inject_code"}, {"id", "bad"}}});
