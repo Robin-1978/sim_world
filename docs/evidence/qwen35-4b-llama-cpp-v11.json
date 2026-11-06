@@ -1,0 +1,80 @@
+{
+  "run_id": "qwen35-4b-llama-cpp-v11",
+  "date": "2026-11-06",
+  "provider": "llama.cpp",
+  "model": "Huihui-Qwen3.5-4B-abliterated.Q4_K_M",
+  "command": "TIDE_MARKS_DEBUG_PROVIDER=1 ./build/tide_marks_headless --days 7 --profile data/intelligence-profile.json --provider profile --wait-llm-ms 60000 --replay /tmp/tide_marks-qwen-7d-v11.jsonl --dump-events",
+  "world_boundary": {
+    "before": "day 1 06:00",
+    "after": "day 8 06:00",
+    "revision": 10186,
+    "boat_integrity": 94,
+    "records_integrity": 94,
+    "replay_matches_source": true,
+    "pending_async_results": 0
+  },
+  "queue": {
+    "consumed": 157,
+    "provider_debug_records": 154,
+    "pending": 0
+  },
+  "provider_records": {
+    "understanding": {
+      "count": 1,
+      "finish_reason": {"stop": 1},
+      "prompt_tokens": 893,
+      "cached_tokens": 889,
+      "completion_tokens_average": 237.0
+    },
+    "decision": {
+      "count": 128,
+      "finish_reason": {"stop": 128},
+      "prompt_tokens": 704426,
+      "cached_tokens": 344792,
+      "cache_ratio": 0.4895,
+      "completion_tokens_average": 324.5
+    },
+    "reflection": {
+      "count": 21,
+      "finish_reason": {"tool_calls": 20, "length": 1},
+      "prompt_tokens": 123241,
+      "cached_tokens": 67280,
+      "cache_ratio": 0.5459,
+      "completion_tokens_average": 843.0
+    },
+    "evolution_level2": {
+      "count": 4,
+      "finish_reason": {"tool_calls": 3, "length": 1},
+      "prompt_tokens": 31159,
+      "cached_tokens": 10062,
+      "cache_ratio": 0.3229,
+      "completion_tokens_average": 1033.5
+    }
+  },
+  "events": {
+    "reflection.committed": 18,
+    "reflection.update_rejected": 13,
+    "reflection.failed": 2,
+    "reflection.rejected": 1,
+    "evolution.proposal_ready": 1,
+    "evolution.proposal_rejected": 1,
+    "evolution.approved": 1,
+    "evolution.overlay_activated": 1,
+    "innovation.hypothesis_rejected": 2,
+    "npc.intent": 60,
+    "npc.intent_expired": 7,
+    "npc.intent_rejected": 12,
+    "npc.process_completed": 57,
+    "npc.process_failed": 3,
+    "experience.recorded": 82,
+    "experience.observed": 57,
+    "memory.reflected": 17
+  },
+  "observations": [
+    "The Runtime Governor automatically admitted and activated one valid Level 2 overlay (repair_ferry_v2).",
+    "One Level 2 candidate hit the output limit and was rejected after bounded repair because its innovation envelope remained incomplete; it did not mutate the world.",
+    "One Reflection hit the output limit and two later Reflection requests failed at the provider boundary; committed reflections and valid local fields still advanced independently.",
+    "The remaining Reflection tool calls were complete. Runtime rejected two optional Level 1 hypotheses with invalid behavior structure while preserving the cognition transaction.",
+    "The next one-day smoke after tightening the Reflection recipe schema produced 21 decision stops and 4 complete Reflection tool calls with no innovation structure rejection."
+  ]
+}

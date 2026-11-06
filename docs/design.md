@@ -337,6 +337,8 @@ Provider 请求按“稳定前缀、动态尾部”组织：静态系统规则�
 
 模型可见的函数名使用语义范围，而不是 Runtime 的等级编号：`propose_npc_change` 只允许目标 NPC 的私有策略、日程和行为配方，`propose_world_change` 只允许共享实体原型和声明式行为配方，`daily_reflection` 只返回一次主体反思结果。每次请求只暴露一个强制函数，参数名保持短而明确（`id`、`kind`、`evidence_event_sequences`、`operations`、`tree`/`root`、`actors`/`available_to`）；模型不得把长解释塞进参数，提案理由不属于世界事实。运行时仍使用严格 JSON Schema、`additionalProperties=false`、枚举和数量上限校验；函数参数只是候选数据，提交前必须经过 Runtime 权限、Revision、引用、参数 Schema 和 Sandbox 校验。反思结果同样不包含自由文本事实，Runtime 只消费有来源的 Cognition、Goal、Strategy 和 Innovation 字段。
 
+Reflection 中的私有行为配方 schema 还对小模型做了结构性约束：`parameters` 必须是声明 `type=object`、`properties`、`required` 和 `additionalProperties` 的 JSON Schema，而不是运行时参数值；叶子 `meta_action/condition` 节点不能带 children，`sequence/selector/interruptible/timeout` 等复合节点至少包含一个 child。Runtime 仍会再次检查注册的 meta action、条件、参数和 BT 不变量；function schema 只是减少空复合树和错误参数候选，不能替代事实、权限或事务校验。
+
 Reflection 的 `source_sequence` 和 `evidence_event_sequences` 在稳定 tool schema 中只声明正整数；本次上下文的 `new_evidence.sequence`、目标 NPC、待处理假设和未解决问题仍由 Runtime 做确定性成员校验。这样 tool schema 可以跨主体和日期复用 KV 前缀，同时模型不能凭空提交未经提交的事件来源；没有待处理创新时，Runtime 会拒绝任何 `innovation_actions`，而不是为动态数据重写 schema。缺失 `reflection` purpose 的旧用户 profile 只在装配时继承显式 `world_evolution` policy，正式 profile 仍应声明独立 Reflection 预算。
 
 当前实现的结构化 `IntentProposal` 是短输出任务；玩家对白拆成独立的 `utterance_understanding` 和 `player_dialogue` 两次结构化调用。前者需要理解自然语言和歧义，默认使用约 128 token 的 thinking；后者只根据已解析的通信意图和当前事实生成简短回答，默认关闭 thinking。自驱审议没有玩家给出的明确目标，需要依据内驱、外驱和结构约束进行短权衡，因此默认开启约 128 token 的 thinking。Provider 通过顶层 `reasoning_budget_tokens` 限制思考段预算；该预算不等于最终 JSON 的总输出预算。无论是否开启 thinking，Runtime 只解析最终 JSON，`reasoning_content` 永远不进入对白、记忆或世界事实。
