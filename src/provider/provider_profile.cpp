@@ -159,6 +159,18 @@ ProviderDefinition readProviderDefinition(const Json& value, const std::string& 
             throw std::runtime_error("providers." + id + ".api_key_env must not be empty: " + path);
         }
     }
+    if (value.contains("headers")) {
+        if (!value.at("headers").is_object()) {
+            throw std::runtime_error("providers." + id + ".headers must be an object: " + path);
+        }
+        for (auto item = value.at("headers").begin(); item != value.at("headers").end(); ++item) {
+            if (item.key().empty() || !item.value().is_string() || item.value().get<std::string>().empty() ||
+                item.key() == "Authorization" || item.key() == "authorization") {
+                throw std::runtime_error("providers." + id + ".headers contains an invalid or credential header: " + path);
+            }
+            result.headers.emplace(item.key(), item.value().get<std::string>());
+        }
+    }
     result.timeoutMs = value.value("timeout_ms", 120000);
     result.temperature = value.value("temperature", 0.2);
     if (result.timeoutMs <= 0) {
@@ -266,6 +278,7 @@ std::unique_ptr<IProvider> makeProviderFromProfile(const IntelligenceProfile& pr
         config.baseUrl = decisionProvider->second.baseUrl;
         config.model = decisionProvider->second.model;
         config.apiKeyEnv = decisionProvider->second.apiKeyEnv;
+        config.headers = decisionProvider->second.headers;
         config.timeoutMs = decisionProvider->second.timeoutMs;
         config.temperature = decisionProvider->second.temperature;
         config.providers = profile.providers;

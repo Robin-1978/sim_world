@@ -3504,6 +3504,7 @@ void intelligence_profile_decouples_models_from_api_keys() {
                                              {"base_url", "https://shared.example/v1"},
                                              {"model", "shared-model"},
                                              {"api_key_env", "SIM_WORLD_SHARED_KEY"},
+                                             {"headers", Json{{"x-opencode-session", "test-session"}}},
                                              {"timeout_ms", 120000}, {"temperature", 0.2}}},
                             {"evolution", Json{{"type", "openai_compatible"},
                                                 {"base_url", "https://evolution.example/v1"},
@@ -3538,6 +3539,8 @@ void intelligence_profile_decouples_models_from_api_keys() {
     expect(loaded.purposes.at("world_evolution").providerId == "shared" &&
                loaded.purposes.at("world_evolution").baseUrl == "https://other.example/v1",
            "a purpose can reuse a provider while overriding only its endpoint");
+    expect(loaded.providers.at("shared").headers.at("x-opencode-session") == "test-session",
+           "a provider can carry non-secret transport headers without placing credentials in the profile");
     std::error_code ignored;
     std::filesystem::remove(path, ignored);
 }

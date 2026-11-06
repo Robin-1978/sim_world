@@ -246,6 +246,9 @@ struct ProviderDefinition {
     std::string baseUrl;
     std::string model;
     std::string apiKeyEnv;
+    // Non-secret transport headers such as a provider session or tenant. API
+    // credentials remain environment-backed and are never accepted here.
+    std::map<std::string, std::string> headers;
     int timeoutMs{120000};
     double temperature{0.2};
 };
@@ -269,6 +272,7 @@ struct LlamaCppConfig {
     std::string baseUrl{"http://127.0.0.1:8192/v1"};
     std::string model{"local"};
     std::string apiKeyEnv;
+    std::map<std::string, std::string> headers;
     int timeoutMs{120000};
     double temperature{0.2};
     DecisionPolicy fallbackPolicy;
