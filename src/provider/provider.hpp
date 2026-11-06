@@ -269,6 +269,9 @@ struct PurposeProvider {
 
 struct LlamaCppConfig {
     std::string profileId;
+    // The adapter supports both local llama.cpp and generic OpenAI-compatible
+    // endpoints.  Keep provider-specific decoding hints out of the latter.
+    std::string providerType{"llama_cpp"};
     std::string baseUrl{"http://127.0.0.1:8192/v1"};
     std::string model{"local"};
     std::string apiKeyEnv;

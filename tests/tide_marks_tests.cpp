@@ -3605,6 +3605,9 @@ void intelligence_profile_decouples_models_from_api_keys() {
            "a purpose can reuse a provider while overriding only its endpoint");
     expect(loaded.providers.at("shared").headers.at("x-opencode-session") == "test-session",
            "a provider can carry non-secret transport headers without placing credentials in the profile");
+    const auto routed = makeProviderFromProfile(loaded);
+    expect(routed->runtimeMetadata("decision").at("provider_type") == "openai_compatible",
+           "the runtime retains the selected transport type so provider-specific request fields stay gated");
     std::error_code ignored;
     std::filesystem::remove(path, ignored);
 }

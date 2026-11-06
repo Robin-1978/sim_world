@@ -275,6 +275,7 @@ std::unique_ptr<IProvider> makeProviderFromProfile(const IntelligenceProfile& pr
         }
         LlamaCppConfig config;
         config.profileId = profile.id;
+        config.providerType = decisionProvider->second.type;
         config.baseUrl = decisionProvider->second.baseUrl;
         config.model = decisionProvider->second.model;
         config.apiKeyEnv = decisionProvider->second.apiKeyEnv;

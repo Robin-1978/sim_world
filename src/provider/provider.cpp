@@ -57,6 +57,7 @@ LlamaCppConfig configForPurpose(const LlamaCppConfig& base, const std::string& p
     auto selected = base;
     const auto& provider = providerFound->second;
     const auto& purposeConfig = purposeFound->second;
+    selected.providerType = provider.type;
     selected.baseUrl = provider.baseUrl;
     selected.model = provider.model;
     selected.apiKeyEnv = provider.apiKeyEnv;
@@ -77,7 +78,9 @@ ProviderJsonResult requestProviderJson(const LlamaCppConfig& config, const Json&
     // The callers place the immutable system prompt and projected context
     // before any repair feedback, so a repair can reuse that prefix.
     Json requestWithCache = request;
-    requestWithCache["cache_prompt"] = true;
+    // cache_prompt is a llama.cpp extension. OpenAI-compatible gateways may
+    // reject unknown top-level request fields, so only send it to llama.cpp.
+    if (config.providerType == "llama_cpp") requestWithCache["cache_prompt"] = true;
     const auto temp = std::filesystem::temp_directory_path() /
                       ("tide_marks_llm_" + stage + "_" +
                        std::to_string(static_cast<long long>(std::rand())) + ".json");
@@ -179,6 +182,24 @@ ProviderJsonResult requestProviderJson(const LlamaCppConfig& config, const Json&
     if (result != 0 || response.empty()) return {false, {}, "provider_request_failed"};
     try {
         const Json outer = Json::parse(response);
+        if (!outer.contains("choices") || !outer.at("choices").is_array() || outer.at("choices").empty()) {
+            // OpenAI-compatible gateways return an error object (rather than
+            // choices) for unsupported request fields or transient upstream
+            // failures. Preserve only a bounded, non-secret diagnostic so the
+            // Runtime can feed a useful observation into its repair policy.
+            std::string detail = "missing_choices";
+            if (outer.contains("error")) {
+                const auto& error = outer.at("error");
+                if (error.is_object()) {
+                    detail = error.value("type", "error");
+                    const auto message = error.value("message", "");
+                    if (!message.empty()) detail += ":" + clipDebug(message, 256);
+                } else if (error.is_string()) {
+                    detail = clipDebug(error.get<std::string>(), 256);
+                }
+            }
+            return {false, {}, "provider_response_missing_choices:" + stage + ":" + detail};
+        }
         const auto& choice = outer.at("choices").at(0);
         if (const char* debug = std::getenv("TIDE_MARKS_DEBUG_PROVIDER");
             debug != nullptr && *debug != '\0' && std::string(debug) != "0") {
@@ -425,7 +446,8 @@ ProviderResponse LlamaCppProvider::decide(const DecisionContext& context, const 
     }
     const DecisionPolicy& policy = configuredPolicy->second;
 
-    auto configureDecoding = [](Json& request, const DecisionPolicy& selectedPolicy) {
+    auto configureDecoding = [&endpointConfig](Json& request, const DecisionPolicy& selectedPolicy) {
+        if (endpointConfig.providerType != "llama_cpp") return;
         request["chat_template_kwargs"] = Json{{"enable_thinking", selectedPolicy.enableThinking}};
         if (selectedPolicy.enableThinking) {
             // llama.cpp applies this sampler budget only through the top-level
@@ -588,10 +610,8 @@ ProviderResponse LlamaCppProvider::decide(const DecisionContext& context, const 
                              {"confidence", Json{{"type", "number"}, {"minimum", 0.0}, {"maximum", 1.0}}},
                              {"dialogue", Json{{"type", "string"}, {"minLength", 1}, {"maxLength", 512}}},
                              {"cited_stimulus_ids", Json{{"type", "array"}, {"maxItems", 8},
-                                                            {"uniqueItems", true},
                                                             {"items", Json{{"type", "string"}, {"maxLength", 128}}}}},
                              {"tradeoffs", Json{{"type", "array"}, {"maxItems", 4},
-                                                   {"uniqueItems", true},
                                                    {"items", Json{{"type", "string"}, {"maxLength", 256}}}}},
                              {"expected_relief", Json{{"type", "object"},
                                                        {"additionalProperties", Json{{"type", "number"},
@@ -599,10 +619,18 @@ ProviderResponse LlamaCppProvider::decide(const DecisionContext& context, const 
                                                                                        {"maximum", 1.0}}}}},
                              {"parameters", std::move(parametersSchema)}}}};
     Json request{{"model", endpointConfig.model}, {"temperature", endpointConfig.temperature}, {"max_tokens", policy.maxTokens},
-                 {"messages", messages},
-                 {"response_format", Json{{"type", "json_schema"},
-                                           {"json_schema", Json{{"name", "tide_marks_intent_proposal"},
-                                                                  {"strict", true}, {"schema", responseSchema}}}}}};
+                 {"messages", messages}};
+    // Some OpenAI-compatible gateways implement JSON mode but reject the
+    // provider's full Structured Outputs subset (for example dynamic object
+    // properties or uniqueItems). Keep dynamic action parameters available in
+    // that mode and let Runtime perform the authoritative schema validation.
+    if (endpointConfig.providerType == "openai_compatible") {
+        request["response_format"] = Json{{"type", "json_object"}};
+    } else {
+        request["response_format"] = Json{{"type", "json_schema"},
+                                            {"json_schema", Json{{"name", "tide_marks_intent_proposal"},
+                                                                   {"strict", true}, {"schema", responseSchema}}}};
+    }
     configureDecoding(request, policy);
     auto completed = requestProviderJson(endpointConfig, request, "decision");
     if (!completed.ok) return ProviderResponse{false, {}, {}, completed.error};
@@ -731,7 +759,7 @@ ProviderResponse LlamaCppProvider::proposeEvolution(const Json& context,
                                                  "success_criteria", "failure_criteria"});
     innovationPlan["properties"] = Json{
         {"horizon_minutes", Json{{"type", "integer"}, {"minimum", 1}, {"maximum", 10080}}},
-        {"metrics", Json{{"type", "array"}, {"minItems", 1}, {"maxItems", 6}, {"uniqueItems", true},
+        {"metrics", Json{{"type", "array"}, {"minItems", 1}, {"maxItems", 6},
                            {"items", Json{{"type", "string"},
                                              {"enum", Json::array({"events_added", "final_revision", "npc_count",
                                                                       "knowledge_count", "experience_count",
@@ -751,7 +779,7 @@ ProviderResponse LlamaCppProvider::proposeEvolution(const Json& context,
     innovationSpec["properties"] = Json{
         {"hypothesis", Json{{"type", "string"}, {"minLength", 1}, {"maxLength", 1024}}},
         {"novelty_basis", Json{{"enum", Json::array({"new_combination", "new_capability", "new_archetype"})}}},
-        {"operation_ids", Json{{"type", "array"}, {"minItems", 1}, {"uniqueItems", true},
+        {"operation_ids", Json{{"type", "array"}, {"minItems", 1},
                                  {"items", Json{{"type", "string"}, {"minLength", 1}}}}},
         {"expected_benefits", Json{{"type", "array"}, {"minItems", 1}, {"maxItems", 4},
                                       {"items", Json{{"type", "string"}, {"minLength", 1}, {"maxLength", 512}}}}},
@@ -847,7 +875,7 @@ ProviderResponse LlamaCppProvider::proposeEvolution(const Json& context,
                                                    {"additionalProperties", Json{{"type", "boolean"}}}}},
                              {"additionalProperties", false},
                              {"description", "A small JSON Schema for this recipe's input values."}}},
-        {"available_to", Json{{"type", "array"}, {"minItems", 1}, {"uniqueItems", true},
+        {"available_to", Json{{"type", "array"}, {"minItems", 1},
                                 {"items", Json{{"type", "string"}, {"minLength", 1}}}}},
         {"root", node}};
 
@@ -885,7 +913,8 @@ ProviderResponse LlamaCppProvider::proposeEvolution(const Json& context,
     // exactly one tool in this request, so `required` is equivalent to naming
     // that function and avoids a provider-specific object warning.
     request["tool_choice"] = "required";
-    auto configureDecoding = [](Json& target, const DecisionPolicy& selectedPolicy) {
+    auto configureDecoding = [&endpointConfig](Json& target, const DecisionPolicy& selectedPolicy) {
+        if (endpointConfig.providerType != "llama_cpp") return;
         target["chat_template_kwargs"] = Json{{"enable_thinking", selectedPolicy.enableThinking}};
         if (selectedPolicy.enableThinking) {
             target["reasoning_budget_tokens"] = selectedPolicy.reasoningBudgetTokens;
@@ -971,7 +1000,6 @@ ProviderResponse LlamaCppProvider::proposeReflection(const Json& context,
             // enforces the exact target and committed event sequences.
             {"npc_id", Json{{"type", "string"}, {"minLength", 1}, {"maxLength", 64}}},
             {"evidence_event_sequences", Json{{"type", "array"}, {"maxItems", 12},
-                                                {"uniqueItems", true},
                                                 {"items", Json{{"type", "integer"}, {"minimum", 1}}}}},
             {"cognition_updates", Json{{"type", "object"}, {"additionalProperties", false},
                                         {"required", Json::array({"belief_updates", "experience_updates", "memory_updates"})},
@@ -1041,7 +1069,6 @@ ProviderResponse LlamaCppProvider::proposeReflection(const Json& context,
         {"additionalProperties", false},
         {"description", "A bounded JSON Schema for recipe input bindings; use an empty properties object when no bindings are needed."}};
     recipeOperation["properties"]["available_to"] = Json{{"type", "array"}, {"minItems", 1}, {"maxItems", 1},
-                                                            {"uniqueItems", true},
                                                             {"items", Json{{"type", "string"}, {"minLength", 1}, {"maxLength", 64}}}};
     recipeOperation["properties"]["root"] = std::move(recipeRoot);
 
@@ -1051,7 +1078,7 @@ ProviderResponse LlamaCppProvider::proposeReflection(const Json& context,
     testPlan["required"] = Json::array({"horizon_minutes", "metrics", "baseline", "scenario", "expected_metrics", "constraints", "resource_budget", "success_criteria", "failure_criteria"});
     testPlan["properties"] = Json::object();
     testPlan["properties"]["horizon_minutes"] = Json{{"type", "integer"}, {"minimum", 1}, {"maximum", 10080}};
-    testPlan["properties"]["metrics"] = Json{{"type", "array"}, {"minItems", 1}, {"maxItems", 6}, {"uniqueItems", true}, {"items", Json{{"type", "string"}, {"enum", Json::array({"events_added", "final_revision", "npc_count", "knowledge_count", "experience_count", "advance_minutes", "resource_total"})}}}};
+    testPlan["properties"]["metrics"] = Json{{"type", "array"}, {"minItems", 1}, {"maxItems", 6}, {"items", Json{{"type", "string"}, {"enum", Json::array({"events_added", "final_revision", "npc_count", "knowledge_count", "experience_count", "advance_minutes", "resource_total"})}}}};
     testPlan["properties"]["baseline"] = Json{{"type", "string"}, {"minLength", 1}, {"maxLength", 512}};
     testPlan["properties"]["scenario"] = Json{{"type", "string"}, {"minLength", 1}, {"maxLength", 512}};
     testPlan["properties"]["expected_metrics"] = Json{{"type", "object"}, {"minProperties", 1}, {"maxProperties", 6}};
@@ -1067,7 +1094,7 @@ ProviderResponse LlamaCppProvider::proposeReflection(const Json& context,
     innovation["properties"] = Json::object();
     innovation["properties"]["hypothesis"] = Json{{"type", "string"}, {"minLength", 1}, {"maxLength", 1024}};
     innovation["properties"]["novelty_basis"] = Json{{"enum", Json::array({"new_combination", "new_capability", "new_archetype"})}};
-    innovation["properties"]["operation_ids"] = Json{{"type", "array"}, {"minItems", 1}, {"uniqueItems", true}, {"items", Json{{"type", "string"}, {"minLength", 1}}}};
+    innovation["properties"]["operation_ids"] = Json{{"type", "array"}, {"minItems", 1}, {"items", Json{{"type", "string"}, {"minLength", 1}}}};
     innovation["properties"]["expected_benefits"] = Json{{"type", "array"}, {"minItems", 1}, {"maxItems", 4}, {"items", Json{{"type", "string"}, {"minLength", 1}, {"maxLength", 512}}}};
     innovation["properties"]["risks"] = Json{{"type", "array"}, {"minItems", 1}, {"maxItems", 4}, {"items", Json{{"type", "string"}, {"minLength", 1}, {"maxLength", 512}}}};
     innovation["properties"]["test_plan"] = std::move(testPlan);
@@ -1079,7 +1106,7 @@ ProviderResponse LlamaCppProvider::proposeReflection(const Json& context,
     innovationHypothesis["properties"] = Json::object();
     innovationHypothesis["properties"]["id"] = Json{{"type", "string"}, {"minLength", 1}};
     innovationHypothesis["properties"]["proposal_kind"] = Json{{"const", "innovation"}};
-    innovationHypothesis["properties"]["evidence_event_sequences"] = Json{{"type", "array"}, {"minItems", 1}, {"uniqueItems", true}};
+    innovationHypothesis["properties"]["evidence_event_sequences"] = Json{{"type", "array"}, {"minItems", 1}};
     innovationHypothesis["properties"]["operations"] = Json{{"type", "array"}, {"minItems", 1}, {"maxItems", 1}, {"items", std::move(recipeOperation)}};
     innovationHypothesis["properties"]["innovation"] = std::move(innovation);
     innovationHypothesis["properties"]["evidence_event_sequences"]["items"] =
@@ -1109,9 +1136,11 @@ ProviderResponse LlamaCppProvider::proposeReflection(const Json& context,
         {"tool_choice", "required"}};
     appendValidationContinuation(request["messages"], validationFeedback,
                                  "daily_reflection", "previous_result");
-    request["chat_template_kwargs"] = Json{{"enable_thinking", policy.enableThinking}};
-    if (policy.enableThinking) request["reasoning_budget_tokens"] = policy.reasoningBudgetTokens;
-    else request["reasoning_effort"] = "none";
+    if (endpointConfig.providerType == "llama_cpp") {
+        request["chat_template_kwargs"] = Json{{"enable_thinking", policy.enableThinking}};
+        if (policy.enableThinking) request["reasoning_budget_tokens"] = policy.reasoningBudgetTokens;
+        else request["reasoning_effort"] = "none";
+    }
     auto completed = requestProviderJson(endpointConfig, request, "reflection");
     if (!completed.ok) return ProviderResponse{false, {}, {}, completed.error, Json::object(), Json::object()};
     ProviderResponse response;
