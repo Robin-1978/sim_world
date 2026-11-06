@@ -3,6 +3,7 @@
 #include <fstream>
 #include <filesystem>
 #include <cstdlib>
+#include <set>
 #include <stdexcept>
 
 namespace tide_marks {
@@ -38,6 +39,16 @@ DecisionPolicy readPolicyValue(const Json& value, const std::string& key, const 
                                      ".reasoning_budget_tokens must be non-negative: " + path);
         }
         result.reasoningBudgetTokens = value.at("reasoning_budget_tokens").get<int>();
+    }
+    if (value.contains("reasoning_effort")) {
+        if (!value.at("reasoning_effort").is_string()) {
+            throw std::runtime_error("policy." + key + ".reasoning_effort must be a string: " + path);
+        }
+        result.reasoningEffort = value.at("reasoning_effort").get<std::string>();
+        static const std::set<std::string> allowed{"low", "medium", "high", "xhigh", "max"};
+        if (!allowed.contains(result.reasoningEffort)) {
+            throw std::runtime_error("policy." + key + ".reasoning_effort must be low, medium, high, xhigh or max: " + path);
+        }
     }
     if (result.enableThinking && result.reasoningBudgetTokens <= 0) {
         throw std::runtime_error("policy." + key +

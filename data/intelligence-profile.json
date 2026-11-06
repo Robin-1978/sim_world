@@ -19,16 +19,19 @@
         "player_dialogue": {
           "thinking": false,
           "reasoning_budget_tokens": 0,
+          "reasoning_effort": "low",
           "max_tokens": 512
         },
         "utterance_understanding": {
           "thinking": true,
           "reasoning_budget_tokens": 128,
+          "reasoning_effort": "low",
           "max_tokens": 512
         },
         "autonomous_reappraisal": {
           "thinking": true,
           "reasoning_budget_tokens": 128,
+          "reasoning_effort": "low",
           "max_tokens": 1536
         }
       }
@@ -38,6 +41,7 @@
       "policy": {
         "thinking": true,
         "reasoning_budget_tokens": 256,
+        "reasoning_effort": "medium",
         "max_tokens": 1024
       }
     },
@@ -46,6 +50,7 @@
       "policy": {
         "thinking": true,
         "reasoning_budget_tokens": 256,
+        "reasoning_effort": "medium",
         "max_tokens": 1536
       }
     },
@@ -54,6 +59,7 @@
       "policy": {
         "thinking": true,
         "reasoning_budget_tokens": 512,
+        "reasoning_effort": "high",
         "max_tokens": 2048
       }
     }

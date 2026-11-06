@@ -3529,10 +3529,12 @@ void intelligence_profile_configures_decision_budgets() {
            "player dialogue uses the fast answer policy after utterance understanding");
     expect(policies.at("utterance_understanding").enableThinking &&
                policies.at("utterance_understanding").reasoningBudgetTokens == 128 &&
+               policies.at("utterance_understanding").reasoningEffort == "low" &&
                policies.at("utterance_understanding").maxTokens == 512,
            "utterance understanding has its own bounded reasoning policy");
     expect(policies.at("autonomous_reappraisal").enableThinking &&
                policies.at("autonomous_reappraisal").reasoningBudgetTokens == 128 &&
+               policies.at("autonomous_reappraisal").reasoningEffort == "low" &&
                policies.at("autonomous_reappraisal").maxTokens == 1536,
            "autonomous reappraisal uses its bounded thinking policy");
     expect(policies.size() == 3 && policies.contains("player_dialogue") &&
@@ -3547,6 +3549,7 @@ void intelligence_profile_configures_decision_budgets() {
     expect(profile.providers.at("local_qwen").apiKeyEnv.empty() &&
                profile.purposes.at("decision").providerId == profile.purposes.at("world_evolution").providerId &&
                profile.purposes.at("npc_evolution").policies.at("proposal").reasoningBudgetTokens == 256 &&
+               profile.purposes.at("npc_evolution").policies.at("proposal").reasoningEffort == "medium" &&
                profile.purposes.at("world_evolution").policies.at("proposal").reasoningBudgetTokens == 512,
            "provider credentials are stored on the reusable provider and evolution has bounded purpose policies");
     if (profile.purposes.contains("reflection")) {

@@ -370,6 +370,9 @@ Json LlamaCppProvider::runtimeMetadata(const std::string& purpose) const {
         if (selectedPolicy != config_.decisionPolicies.end()) {
             result["thinking"] = selectedPolicy->second.enableThinking;
             result["reasoning_budget_tokens"] = selectedPolicy->second.reasoningBudgetTokens;
+            if (!selectedPolicy->second.reasoningEffort.empty()) {
+                result["reasoning_effort"] = selectedPolicy->second.reasoningEffort;
+            }
             result["max_tokens"] = selectedPolicy->second.maxTokens;
         }
     } else {
@@ -380,6 +383,9 @@ Json LlamaCppProvider::runtimeMetadata(const std::string& purpose) const {
         if (selectedPurposePolicy != config_.purposePolicies.end()) {
             result["thinking"] = selectedPurposePolicy->second.enableThinking;
             result["reasoning_budget_tokens"] = selectedPurposePolicy->second.reasoningBudgetTokens;
+            if (!selectedPurposePolicy->second.reasoningEffort.empty()) {
+                result["reasoning_effort"] = selectedPurposePolicy->second.reasoningEffort;
+            }
             result["max_tokens"] = selectedPurposePolicy->second.maxTokens;
         }
     }
@@ -447,6 +453,12 @@ ProviderResponse LlamaCppProvider::decide(const DecisionContext& context, const 
     const DecisionPolicy& policy = configuredPolicy->second;
 
     auto configureDecoding = [&endpointConfig](Json& request, const DecisionPolicy& selectedPolicy) {
+        if (endpointConfig.providerType == "openai_compatible") {
+            request["reasoning_effort"] = selectedPolicy.reasoningEffort.empty()
+                                               ? "low"
+                                               : selectedPolicy.reasoningEffort;
+            return;
+        }
         if (endpointConfig.providerType != "llama_cpp") return;
         request["chat_template_kwargs"] = Json{{"enable_thinking", selectedPolicy.enableThinking}};
         if (selectedPolicy.enableThinking) {
@@ -914,6 +926,12 @@ ProviderResponse LlamaCppProvider::proposeEvolution(const Json& context,
     // that function and avoids a provider-specific object warning.
     request["tool_choice"] = "required";
     auto configureDecoding = [&endpointConfig](Json& target, const DecisionPolicy& selectedPolicy) {
+        if (endpointConfig.providerType == "openai_compatible") {
+            target["reasoning_effort"] = selectedPolicy.reasoningEffort.empty()
+                                              ? "low"
+                                              : selectedPolicy.reasoningEffort;
+            return;
+        }
         if (endpointConfig.providerType != "llama_cpp") return;
         target["chat_template_kwargs"] = Json{{"enable_thinking", selectedPolicy.enableThinking}};
         if (selectedPolicy.enableThinking) {
@@ -1136,7 +1154,9 @@ ProviderResponse LlamaCppProvider::proposeReflection(const Json& context,
         {"tool_choice", "required"}};
     appendValidationContinuation(request["messages"], validationFeedback,
                                  "daily_reflection", "previous_result");
-    if (endpointConfig.providerType == "llama_cpp") {
+    if (endpointConfig.providerType == "openai_compatible") {
+        request["reasoning_effort"] = policy.reasoningEffort.empty() ? "low" : policy.reasoningEffort;
+    } else if (endpointConfig.providerType == "llama_cpp") {
         request["chat_template_kwargs"] = Json{{"enable_thinking", policy.enableThinking}};
         if (policy.enableThinking) request["reasoning_budget_tokens"] = policy.reasoningBudgetTokens;
         else request["reasoning_effort"] = "none";

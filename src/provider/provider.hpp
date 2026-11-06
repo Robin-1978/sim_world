@@ -171,6 +171,10 @@ struct ProviderCapabilities {
 struct DecisionPolicy {
     bool enableThinking{false};
     int reasoningBudgetTokens{0};
+    // OpenAI-compatible reasoning models use a named effort level rather
+    // than llama.cpp's token budget. Keep this optional so local profiles can
+    // remain token-budget driven.
+    std::string reasoningEffort;
     int maxTokens{512};
 };
 
