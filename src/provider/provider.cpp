@@ -812,6 +812,11 @@ ProviderResponse LlamaCppProvider::proposeEvolution(const Json& context,
     modelContext.erase("evolution_system_prompt");
     modelContext.erase("evolution_prompt_version");
     modelContext.erase("runtime_metadata");
+    Json stableContext{{"evolution_level", evolutionLevel},
+                       {"content", modelContext.value("content", Json::object())},
+                       {"allowed_operations", modelContext.value("allowed_operations", Json::array())}};
+    modelContext.erase("content");
+    modelContext.erase("allowed_operations");
     modelContext.erase("validation_feedback");
     Json responseSchema = Json::object();
     responseSchema["type"] = "object";
@@ -976,8 +981,8 @@ ProviderResponse LlamaCppProvider::proposeEvolution(const Json& context,
     request["max_tokens"] = policy.maxTokens;
     request["messages"] = Json::array({
         Json{{"role", "system"}, {"content", systemPrompt}},
-        Json{{"role", "user"}, {"content", Json{{"evolution_level", evolutionLevel},
-                                                     {"world", modelContext}}.dump()}}});
+        Json{{"role", "user"}, {"content", Json{{"stable", stableContext}}.dump()}},
+        Json{{"role", "user"}, {"content", Json{{"dynamic", modelContext}}.dump()}}});
     const std::string toolName = evolutionLevel == "level1" ? "propose_npc_change" : "propose_world_change";
     appendValidationContinuation(request["messages"], validationFeedback, toolName, "previous_proposal");
     // Use a single forced tool call for proposals.  This follows the same
@@ -1251,12 +1256,15 @@ ProviderResponse LlamaCppProvider::proposeReflection(const Json& context,
     // such as reflection-v1 and smaller models tend to copy it into the
     // integer schema_version field unless it is removed from their view.
     modelContext.erase("runtime_metadata");
+    const Json stableContext{{"content", modelContext.value("content", Json::object())}};
+    modelContext.erase("content");
     const bool patchMode = validationFeedback.value("repair_mode", "") == "patch";
     const std::string repairToolName = "repair_daily_reflection";
     Json request{
         {"model", endpointConfig.model}, {"temperature", endpointConfig.temperature}, {"max_tokens", policy.maxTokens},
         {"messages", Json::array({Json{{"role", "system"}, {"content", systemPrompt}},
-                                   Json{{"role", "user"}, {"content", Json{{"context", modelContext}}.dump()}}})},
+                                   Json{{"role", "user"}, {"content", Json{{"stable", stableContext}}.dump()}},
+                                   Json{{"role", "user"}, {"content", Json{{"dynamic", modelContext}}.dump()}}})},
         {"tools", Json::array({Json{{"type", "function"},
                                      {"function", Json{{"name", "daily_reflection"},
                                                         {"description", "Return one bounded daily reflection result."},
