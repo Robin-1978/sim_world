@@ -1,0 +1,114 @@
+{
+  "date": "2026-11-06",
+  "command": "TIDE_MARKS_DEBUG_PROVIDER=1 ./build/tide_marks_headless --days 7 --provider profile --wait-llm-ms 60000 --governance-auto --replay /tmp/tide_marks-7d-real-v09-governed.jsonl --dump-events",
+  "provider": "llama.cpp",
+  "model": "Huihui-Qwen3.5-4B-abliterated.Q4_K_M",
+  "profile": "/home/robin/.sim_world/config/intelligence-profile.json",
+  "days_requested": 7,
+  "final": "day 8 6:00; boat_integrity=94; cooperation=6; grain=0; records_integrity=94; reputation=0; revision=10183; eve@archive_room:stage=0:need=cognition=0.74; lorn@ferry_dock:stage=0:need=crossing_safety=1; mira@granary:stage=0:need=food_security=0.74",
+  "drain": "consumed=158 pending=0",
+  "replay_equal": true,
+  "stages": {
+    "decision": {
+      "calls": 137,
+      "finish_reason": {
+        "stop": 137
+      },
+      "prompt_tokens_total": 769038,
+      "completion_tokens_total": 45818,
+      "cached_tokens_total": 384159,
+      "cache_ratio": 0.4995,
+      "completion_max": 1024,
+      "completion_mean": 334.4,
+      "completion_p95": 437
+    },
+    "evolution_level2": {
+      "calls": 2,
+      "finish_reason": {
+        "tool_calls": 2
+      },
+      "prompt_tokens_total": 15302,
+      "completion_tokens_total": 1266,
+      "cached_tokens_total": 0,
+      "cache_ratio": 0.0,
+      "completion_max": 2048,
+      "completion_mean": 633.0,
+      "completion_p95": 499,
+      "debug_argument_bytes_max": 655,
+      "debug_argument_bytes_samples": 2
+    },
+    "reflection": {
+      "calls": 21,
+      "finish_reason": {
+        "tool_calls": 21
+      },
+      "prompt_tokens_total": 120195,
+      "completion_tokens_total": 23324,
+      "cached_tokens_total": 59472,
+      "cache_ratio": 0.4948,
+      "completion_max": 1536,
+      "completion_mean": 1110.7,
+      "completion_p95": 1359,
+      "debug_argument_bytes_max": 3813,
+      "debug_argument_bytes_samples": 21
+    },
+    "understanding": {
+      "calls": 1,
+      "finish_reason": {
+        "stop": 1
+      },
+      "prompt_tokens_total": 893,
+      "completion_tokens_total": 200,
+      "cached_tokens_total": 0,
+      "cache_ratio": 0.0,
+      "completion_max": 512,
+      "completion_mean": 200.0,
+      "completion_p95": 200
+    }
+  },
+  "events": {
+    "action.resource": 8,
+    "dialogue.turn": 1,
+    "drive.adapted": 43,
+    "evolution.proposal_ready": 2,
+    "experience.observed": 52,
+    "experience.recorded": 86,
+    "innovation.hypothesis_rejected": 15,
+    "knowledge.asserted": 30,
+    "life.archive": 7,
+    "life.clue": 7,
+    "life.crossing": 7,
+    "life.day": 7,
+    "life.debt": 7,
+    "life.explain_ration": 7,
+    "life.ferry_decay": 7,
+    "life.protect_secret": 7,
+    "life.ration": 7,
+    "life.repair": 6,
+    "life.rest": 21,
+    "life.withhold": 7,
+    "memory.reflected": 28,
+    "need.critical": 12,
+    "need.deprived": 504,
+    "need.relieved": 235,
+    "npc.intent": 60,
+    "npc.intent_expired": 2,
+    "npc.intent_rejected": 16,
+    "npc.process_completed": 52,
+    "npc.process_failed": 8,
+    "npc.schedule_applied": 50,
+    "reflection.committed": 21,
+    "reflection.update_rejected": 14,
+    "stimulus.habituated": 30,
+    "strategy.reflected": 21,
+    "structure.ferry_closed": 7,
+    "structure.ferry_opened": 7,
+    "world.initialized": 1
+  },
+  "notes": [
+    "This run used the minimum autonomous decision schema: action_id, intent, confidence, cited_stimulus_ids, expected_relief, and parameters; dialogue and explanation fields were optional outside conversation.",
+    "Default provider debug output is compact; full payload requires TIDE_MARKS_DEBUG_PROVIDER_FULL=1. Function arguments remain Runtime-validated candidates, not direct world writes.",
+    "The local profile loaded world_evolution max_tokens=2048. Replay and source summaries matched at the seven-day boundary with no pending queue.",
+    "Governance and adoption event counts are included exactly as emitted; absence of activation/adoption is a result, not an inferred success."
+  ]
+}

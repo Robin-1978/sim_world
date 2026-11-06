@@ -236,6 +236,8 @@ Provider、模型和分档预算现在由 `data/intelligence-profile.json` 配�
 
 v08 治理长跑使用 `--governance-auto` 推进到第 8 天 06:00，`llm-drain: consumed=116 pending=0`，源状态与 Replay 一致，最终 boat integrity 91、records integrity 94、revision 10175。21 次 Reflection 全部提交，13 个局部字段被 `reflection.update_rejected` 拒绝但没有阻塞同一窗口的合法更新；Level 2 发生 2 次截断、1 次 innovation-kind mismatch，仍没有 Overlay 激活或 Adoption，说明治理 harness 的独立批准边界生效但复杂 Level 2 提案还需要更强的 schema/模型档位。该运行使用旧的自主决策 schema，原始 debug 行仍包含完整解释文本，统计与审计记录见 [`qwen35-4b-llama-cpp-v08-governed.json`](evidence/qwen35-4b-llama-cpp-v08-governed.json)。后续 v09 必须使用最小自主输出 schema、compact debug formatter 和更新后的本地 profile 重跑至少 7 日，再比较 decision completion、缓存比例、`npc.intent_rejected` 和 Level 2 截断率。
 
+v09 使用最小自主输出 schema、compact debug formatter 和 `/home/robin/.sim_world/config/intelligence-profile.json` 的 Level 2 `max_tokens=2048` 完成 7 日真实治理长跑：推进到第 8 天 06:00，`llm-drain: consumed=158 pending=0`，源状态与 Replay 都是 revision 10183，boat integrity 94、records integrity 94。137 次 decision 全部 `stop`，2 次 Level 2 都是完整 `tool_calls`，21 次 Reflection 全部完整 `tool_calls`，没有 provider `finish_reason=length`。自主决策平均 completion 334 tokens，输入缓存比例约 49.95%；Reflection 局部更新仍可提交，`reflection.committed=21`、`reflection.update_rejected=14`。两次 Level 2 均通过确定性沙箱并产生 `evolution.proposal_ready=2`，但当时治理 harness 的 `headless_governor` 身份仍被批准器旧 allowlist 拒绝，故本轮没有 Overlay 激活；该权限错误已在后续提交修复，下一轮必须验证 `evolution.overlay_activated` 与真实 Adoption。完整统计见 [`qwen35-4b-llama-cpp-v09-governed.json`](evidence/qwen35-4b-llama-cpp-v09-governed.json)。
+
 ## 恢复工作入口
 
 会话恢复时依次阅读本文件的“当前检查点”和“已完成能力记录”，再阅读 [design.md](design.md) 的“事实、意图与演化边界”“世界与社会的内在驱力模型”“NPC Runtime 与 World Intelligence”“Runtime 核心契约”。然后查看 `git status --short`，运行自动化验证命令，先修复当前工作包失败项，再继续下一项；不要为了通过测试删除功能或放宽断言。
