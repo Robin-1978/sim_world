@@ -80,6 +80,8 @@ JSON 是内容和提案的机器边界，C++ 类型是编译期契约，WorldSta
 
 内驱是主体内部的连续状态；外驱是世界对主体施加的已记录刺激；结构约束不是驱动力，而是定义哪些意图可以落地的边界。LLM 可以把“粮食减少、邻居求助和承诺截止”理解为一组社会情境，但不能把不存在的粮食、权限或道路写进上下文。
 
+Runtime 状态的事实投影与 LLM 的解释字段严格分开。`current_activity`、位置、需求缺口、Goal、`ProcessExecution`、BT 进度、资源预留和关系都由 C++ 维护；LLM 只根据授权投影组织语言或选择候选计划。`utterance_understanding.ambiguity` 是输入分类的不确定性，`IntentProposal.motivation` 是对已选计划的短解释；二者以及 `dialogue`、`rationale`、`tradeoffs`、`expected_outcome` 都不具备事实写入权，不能创建或修改 Goal、hidden goal、Memory、需求权重或世界事件。只有经过 ActionValidator、Revision/权限校验并由 Runtime 执行 BT 后，实际效果才进入 WorldState、EventLog 和认知投影。
+
 ### 内驱：需求域、驱动状态与自动适应
 
 当前实现使用四个可同时激活的需求域。它们用于建模和内容校验，不是严格互斥的心理实体，也不形成一个固定先后顺序：
