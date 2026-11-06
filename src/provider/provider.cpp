@@ -937,7 +937,14 @@ ProviderResponse LlamaCppProvider::proposeEvolution(const Json& context,
                                                              {"description", evolutionLevel == "level1"
                                                                                  ? "Suggest one private change for the target NPC: strategy, schedule, or a private behavior recipe."
                                                                                  : "Suggest one shared change for the world: a declarative behavior recipe or entity archetype."},
-                                                             {"parameters", responseSchema}, {"strict", true}}}}});
+                                                             {"parameters", responseSchema},
+                                                             // Innovation is optional.  OpenCode Go's strict
+                                                             // dialect requires every property to be required,
+                                                             // which would force no-change proposals to emit a
+                                                             // large unused envelope.  Keep the wire envelope
+                                                             // permissive and let Runtime perform the complete
+                                                             // schema, scope and lifecycle validation.
+                                                             {"strict", false}}}}});
     // llama.cpp accepts the OpenAI-compatible string form here.  There is
     // exactly one tool in this request, so `required` is equivalent to naming
     // that function and avoids a provider-specific object warning.
