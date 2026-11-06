@@ -85,7 +85,8 @@ LlamaCppConfig configForPurpose(const LlamaCppConfig& base, const std::string& p
 }
 
 ProviderJsonResult requestProviderJson(const LlamaCppConfig& config, const Json& request,
-                                       const std::string& stage) {
+                                       const std::string& stage,
+                                       const std::string& expectedToolName = {}) {
     // llama.cpp keeps a reusable KV prefix per slot when this hint is enabled.
     // The callers place the immutable system prompt and projected context
     // before any repair feedback, so a repair can reuse that prefix.
@@ -241,7 +242,19 @@ ProviderJsonResult requestProviderJson(const LlamaCppConfig& config, const Json&
         // structured payload; no natural-language repair is attempted.
         if (message.contains("tool_calls") && message.at("tool_calls").is_array() &&
             !message.at("tool_calls").empty()) {
+            if (message.at("tool_calls").size() != 1) {
+                return {false, {}, "provider_multiple_tool_calls:" + stage};
+            }
             const auto& function = message.at("tool_calls").at(0).at("function");
+            if (!function.is_object() || !function.contains("arguments") ||
+                !function.at("arguments").is_string()) {
+                return {false, {}, "provider_invalid_tool_arguments:" + stage};
+            }
+            if (!expectedToolName.empty() &&
+                (!function.contains("name") || !function.at("name").is_string() ||
+                 function.at("name").get<std::string>() != expectedToolName)) {
+                return {false, {}, "provider_unexpected_tool:" + stage};
+            }
             return {true, Json::parse(function.at("arguments").get<std::string>()), {}};
         }
         return {true, Json::parse(message.at("content").get<std::string>()), {}};
@@ -1014,7 +1027,8 @@ ProviderResponse LlamaCppProvider::proposeEvolution(const Json& context,
         }
     };
     configureDecoding(request, policy);
-    auto completed = requestProviderJson(endpointConfig, request, "evolution_" + evolutionLevel);
+    auto completed = requestProviderJson(endpointConfig, request, "evolution_" + evolutionLevel,
+                                         patchMode ? repairToolName : toolName);
     if (!completed.ok) return ProviderResponse{false, {}, {}, completed.error, Json::object()};
     if (!completed.value.is_object()) {
         return ProviderResponse{false, {}, {}, "invalid_evolution_proposal", Json::object()};
@@ -1270,7 +1284,8 @@ ProviderResponse LlamaCppProvider::proposeReflection(const Json& context,
         if (policy.enableThinking) request["reasoning_budget_tokens"] = policy.reasoningBudgetTokens;
         else request["reasoning_effort"] = "none";
     }
-    auto completed = requestProviderJson(endpointConfig, request, "reflection");
+    auto completed = requestProviderJson(endpointConfig, request, "reflection",
+                                         patchMode ? repairToolName : "daily_reflection");
     if (!completed.ok) return ProviderResponse{false, {}, {}, completed.error, Json::object(), Json::object()};
     ProviderResponse response;
     response.ok = completed.value.is_object();

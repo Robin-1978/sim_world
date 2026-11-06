@@ -646,7 +646,10 @@ std::size_t WorldEvolutionSystem::pumpAsyncProposals() {
     std::size_t consumed = 0;
     const auto retryableProviderFailure = [](const std::string& error) {
         return error.starts_with("provider_truncated:") ||
-               error.starts_with("invalid_provider_json:");
+               error.starts_with("invalid_provider_json:") ||
+               error.starts_with("provider_multiple_tool_calls:") ||
+               error.starts_with("provider_invalid_tool_arguments:") ||
+               error.starts_with("provider_unexpected_tool:");
     };
     for (auto& queued : results) {
         ++consumed;

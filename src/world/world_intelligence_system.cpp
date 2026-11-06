@@ -477,7 +477,10 @@ std::size_t WorldIntelligenceSystem::pumpAsyncTurns() {
         };
         const auto retryableProviderFailure = [](const std::string& code) {
             return code.starts_with("provider_truncated:") ||
-                   code.starts_with("invalid_provider_json:");
+                   code.starts_with("invalid_provider_json:") ||
+                   code.starts_with("provider_multiple_tool_calls:") ||
+                   code.starts_with("provider_invalid_tool_arguments:") ||
+                   code.starts_with("provider_unexpected_tool:");
         };
         const auto queuedChannel = world_.content_.decisionChannels.find(queued.request.channelId);
         const bool allowInterveningWorldChanges =
