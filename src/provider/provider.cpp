@@ -1,4 +1,5 @@
 #include "provider/provider.hpp"
+#include "core/json_utils.hpp"
 #include <algorithm>
 #include <array>
 #include <cstdio>
@@ -81,7 +82,9 @@ ProviderJsonResult requestProviderJson(const LlamaCppConfig& config, const Json&
     // llama.cpp keeps a reusable KV prefix per slot when this hint is enabled.
     // The callers place the immutable system prompt and projected context
     // before any repair feedback, so a repair can reuse that prefix.
-    Json requestWithCache = request;
+    // Keep equivalent numeric projections byte-stable for provider caching;
+    // in-memory simulation arithmetic remains full precision.
+    Json requestWithCache = compactJsonNumbers(request);
     // cache_prompt is a llama.cpp extension. OpenAI-compatible gateways may
     // reject unknown top-level request fields, so only send it to llama.cpp.
     if (config.providerType == "llama_cpp") requestWithCache["cache_prompt"] = true;

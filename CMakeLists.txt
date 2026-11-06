@@ -75,6 +75,7 @@ endif()
 add_library(tide_marks_core
     src/core/event_bus.cpp
     src/core/entity_registry.cpp
+    src/core/json_utils.cpp
     src/core/types.cpp
     src/content/content_pack.cpp
     src/evolution/anomaly.cpp

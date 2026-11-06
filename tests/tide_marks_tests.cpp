@@ -1,4 +1,5 @@
 #include "tide_marks.hpp"
+#include "core/json_utils.hpp"
 #include "npc/drive_system.hpp"
 #include "world/meta_actions.hpp"
 #include "evolution/evolution.hpp"
@@ -3706,6 +3707,23 @@ void missing_reflection_policy_inherits_world_budget() {
     std::filesystem::remove(path, ignored);
 }
 
+void json_number_projection_is_compact_and_keeps_integers() {
+    const Json source{{"before", 0.15999999999999995},
+                      {"nested", Json::array({0.33333333333333331, -0.00000001})},
+                      {"sequence", 168},
+                      {"text", "0.15999999999999995"}};
+    const auto compact = compactJsonNumbers(source);
+    expect(compact.at("before").dump() == "0.16",
+           "serialized floating-point residue is rounded at the JSON boundary");
+    expect(compact.at("nested").at(0).dump() == "0.333333" &&
+               compact.at("nested").at(1).dump() == "0.0",
+           "nested numeric projections use the bounded decimal precision");
+    expect(compact.at("sequence").is_number_integer() && compact.at("sequence").get<int>() == 168,
+           "integer event sequences remain integers after numeric compaction");
+    expect(compact.at("text").get<std::string>() == "0.15999999999999995",
+           "numeric-looking strings are never rewritten");
+}
+
 int main() {
     const auto run = [](const char* name, auto&& test) {
         const auto started = std::chrono::steady_clock::now();
@@ -3837,6 +3855,8 @@ int main() {
         intelligence_profile_decouples_models_from_api_keys);
     run("missing_reflection_policy_inherits_world_budget",
         missing_reflection_policy_inherits_world_budget);
+    run("json_number_projection_is_compact_and_keeps_integers",
+        json_number_projection_is_compact_and_keeps_integers);
     run("intelligence_profile_rejects_legacy_layout", intelligence_profile_rejects_legacy_layout);
     if (failures != 0) {
         std::cerr << failures << " test assertion(s) failed\n";

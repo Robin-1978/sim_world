@@ -1,5 +1,7 @@
 #include "world/world_state_json.hpp"
 
+#include "core/json_utils.hpp"
+
 #include <stdexcept>
 
 namespace tide_marks {
@@ -226,14 +228,14 @@ WorldEvent worldEventFromJson(const Json& json) {
 }  // namespace
 
 Json worldEventToJson(const WorldEvent& event) {
-    return Json{{"schema_version", event.schemaVersion}, {"sequence", event.sequence},
-                {"minute", event.at.minute}, {"type", event.type}, {"actor", event.actor},
-                {"target", event.target}, {"detail", event.detail},
-                {"world_revision", event.worldRevision}, {"data", event.data},
-                {"event_id", event.eventId}, {"correlation_id", event.correlationId},
-                {"causation_sequence", event.causationSequence},
-                {"content_version", event.contentVersion},
-                {"simulation_version", event.simulationVersion}};
+    return compactJsonNumbers(Json{{"schema_version", event.schemaVersion}, {"sequence", event.sequence},
+                                   {"minute", event.at.minute}, {"type", event.type}, {"actor", event.actor},
+                                   {"target", event.target}, {"detail", event.detail},
+                                   {"world_revision", event.worldRevision}, {"data", event.data},
+                                   {"event_id", event.eventId}, {"correlation_id", event.correlationId},
+                                   {"causation_sequence", event.causationSequence},
+                                   {"content_version", event.contentVersion},
+                                   {"simulation_version", event.simulationVersion}});
 }
 
 Json worldStateToJson(const WorldState& state) {

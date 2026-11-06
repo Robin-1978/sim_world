@@ -1,4 +1,5 @@
 #include "tide_marks.hpp"
+#include "core/json_utils.hpp"
 #include "evolution/evolution.hpp"
 
 #include <algorithm>
@@ -273,7 +274,7 @@ int main(int argc, char** argv) {
                       << " | " << event.detail << " | id=" << event.eventId
                       << " correlation=" << event.correlationId
                       << " causation=" << event.causationSequence
-                      << " data=" << event.data.dump() << '\n';
+                      << " data=" << compactJsonNumbers(event.data).dump() << '\n';
         }
     }
     return 0;
