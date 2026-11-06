@@ -630,7 +630,11 @@ EvolutionProposalRequestResult EvolutionManager::propose(const WorldService& wor
             if (!validation.valid) {
                 if (attempt == 0) {
                     feedback = Json{{"attempt", attempt + 1}, {"code", validation.code},
-                                    {"message", validation.message}, {"previous_proposal", EvolutionManager::toJson(proposal)}};
+                                    {"message", validation.message}, {"previous_proposal", EvolutionManager::toJson(proposal)},
+                                    {"repair_mode", "patch"},
+                                    {"repair_tool_name", evolutionLevel == "level1"
+                                                             ? "repair_npc_change"
+                                                             : "repair_world_change"}};
                     continue;
                 }
                 result.code = validation.code;
@@ -647,7 +651,11 @@ EvolutionProposalRequestResult EvolutionManager::propose(const WorldService& wor
         } catch (const std::exception& error) {
             if (attempt == 0) {
                 feedback = Json{{"attempt", attempt + 1}, {"code", "invalid_evolution_proposal"},
-                                {"message", error.what()}, {"previous_proposal", response.evolutionProposal}};
+                                {"message", error.what()}, {"previous_proposal", response.evolutionProposal},
+                                {"repair_mode", "patch"},
+                                {"repair_tool_name", evolutionLevel == "level1"
+                                                         ? "repair_npc_change"
+                                                         : "repair_world_change"}};
                 continue;
             }
             result.code = "invalid_evolution_proposal";
