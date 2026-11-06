@@ -28,10 +28,10 @@
 | 通用资源与实例活动 | 通用资源数量、可选输入预留、声明式抢占、实体库存、资源转移、生产、原子交易、承诺和定时 Activity 已实现；Activity 可组合已注册 operator 并在嵌套事务中失败补偿 | `ResourceContent`, `ResourceState(amount,reserved)`, `WorldState.inventories`, `GameInstanceContent.inventoryInitial`, `reservation_mode`, `priority`, `preemption_policy`, `tradeResources`, `ActivityContent`；承诺关系增量与重谈时长已由 `promise_policy` 驱动 |
 | 社会关系与组织 | 已实现 NPC/玩家/组织四轴关系、声明式社会组成员与指标、交易和快照恢复；港区与 Glass Orchard 分别使用自己的组织、阵营和制度事实，没有 Runtime 特例 | `NpcState.relationships`, `WorldState.socialGroups`, `SocialGroupContent`, `relationship.adjust`, `trade.execute`, `tests/fixtures/port-pack`, `tests/fixtures/glass-orchard-pack` |
 | 元动作语义目录 | 已冻结；故事动作 ID 由内容包绑定到通用 operator，行为配方在运行时编译为 BT；Recipe 可声明参数 Schema，`IntentProposal.parameters` 经校验后绑定到通用能力（含动态移动目标）并随过程保存 | `src/world/meta_actions.*`, `src/npc/behavior_recipe.*`, `src/npc/action_validator.*`, `data/behaviors/village.json` |
-| NPC 基线日程与策略演化 | 已实现确定性小时边界投影；Level 1 的 `overlay_schedule` 经过验证、沙箱、独立审批和版本化 Overlay 后才生效，临时偏离仍通过行动表达 | `NpcContent.schedule`, `NpcState.location/scheduleLabel`, `WorldService::processHourBoundary`, `EvolutionManager::applyOperations` |
-| World Intelligence 演化提案 | 提案持久化、来源事件证据、验证、沙箱、版本化 overlay 激活/恢复/栈式回滚、内容声明异常检测和反事实场景实验已完成；Level 1 按目标 NPC 隔离认知私域和最近事件证据，配方节点引用、整批 overlay 原子性、行为参数 JSON Schema 子集和 `available_to` 唯一传播范围均由 Runtime 校验；创新假设现在有独立的 hypothesis 生命周期和 Level 1 私有/Level 2 共享权限边界 | `src/evolution/evolution.*`, `src/evolution/anomaly.*`, `src/evolution/scenario.*`, `src/world/world_service.*`, `src/npc/action_validator.*`, `data/schemas/evolution-proposal.schema.json`, `data/schemas/scenario-proposal.schema.json`; 校验白名单、数组 `uniqueItems`/边界、EventLog 来源、目标主体与传播范围、治理类别、禁止 Core mutation、独立审批、快照重放和结果 JSON 审计已覆盖 |
+| NPC 基线日程与策略演化 | 已实现确定性小时边界投影；Level 1 的 `overlay_schedule` 经过验证、沙箱、Runtime Governor 和版本化 Overlay 后才生效，临时偏离仍通过行动表达 | `NpcContent.schedule`, `NpcState.location/scheduleLabel`, `WorldService::processHourBoundary`, `EvolutionManager::applyOperations` |
+| World Intelligence 演化提案 | 提案持久化、来源事件证据、验证、沙箱、版本化 overlay 激活/恢复/栈式回滚、内容声明异常检测和反事实场景实验已完成；Level 1 按目标 NPC 隔离认知私域和最近事件证据，配方节点引用、整批 overlay 原子性、行为参数 JSON Schema 子集和 `available_to` 唯一传播范围均由 Runtime 校验；创新假设现在有独立的 hypothesis 生命周期和 Level 1 私有/Level 2 共享权限边界，反思可选择已有内容或返回 no-change，不以创新数量作为成功指标 | `src/evolution/evolution.*`, `src/evolution/anomaly.*`, `src/evolution/scenario.*`, `src/world/world_service.*`, `src/npc/action_validator.*`, `data/schemas/evolution-proposal.schema.json`, `data/schemas/scenario-proposal.schema.json`; 校验白名单、数组 `uniqueItems`/边界、EventLog 来源、目标主体与传播范围、治理类别、禁止 Core mutation、Runtime Governor、快照重放和结果 JSON 审计已覆盖 |
 | 每日反思增量边界 | 已完成 `ReflectionCursor`、独立 `ReflectionResult` provider/schema、游标后增量事件、持久化未解决问题、认知/策略/Goal 分流、同日幂等和审计；创新假设才进入 EvolutionManager。创新是可选分支：证据不足或配方无效时记录 `innovation.hypothesis_rejected` 并继续提交合法认知结果，避免游标被模型的创新错误卡住；反思投影额外提供 Runtime 计算的 `failure_candidates`，要求同一过程两次失败才进入候选创新 | `ReflectionCursor`、`reflection_cursor` Snapshot 字段、`WorldEvolutionSystem::reflectionContext/commitReflection`、`reflection-result.schema.json` |
-| 外部治理与长跑闭环 | 已完成显式 `--governance-auto` headless harness：它以独立 `headless_governor` 身份重新运行 Sandbox、调用批准入口、激活 Overlay，并对可接受的 Level 1 假设调用 Adoption；默认运行不自动批准，LLM 仍不能批准自己的提案 | `src/headless_main.cpp`, `WorldService::transitionInnovationHypothesis`, `evolution.overlay_activated`, `innovation.adoption_*` |
+| 外部治理与长跑闭环 | 已完成独立 Runtime Governor：显式 `--governance-auto` headless harness 以 `headless_governor` 身份重新运行 Sandbox、检查证据/风险/指标门槛、批准并激活 bounded Level 1/Level 2 Overlay，并对可接受的 Level 1 假设调用 Adoption；LLM 仍不能批准自己的提案，高风险或约束失败候选停在 proposal-ready 交给发布审批 | `src/headless_main.cpp`, `WorldService::transitionInnovationHypothesis`, `evolution.overlay_activated`, `innovation.adoption_*` |
 | 3D 表现和 Blender 场景 | 已完成内容化投影 | `src/client_main.cpp` 从当前内容包读取空间实体、连接、NPC、资源、场景资产与相机模式，无村庄 `world_id` 或角色分支；Xvfb 烟雾测试覆盖村庄和 Glass Orchard |
 
 ## Runtime 契约收敛队列
@@ -98,7 +98,7 @@
 1. ~~将 `StructuralConstraint` 从字符串改为可引用的事实投影，覆盖访问、权限、所有权、容量、配方、合同和信息范围。~~ 已完成当前 的资源、拓扑、能力白名单投影；组织、合同和安全事实的结构化字段已在 增补。
 2. 已声明的常规结构变化走现有事务；新的规则/能力/配方/类型走 `EvolutionProposal`。
 3. ~~声明式结构提案必须由独立的开发/设计审批策略批准；LLM 可以提出，不得批准自己的提案。~~ 已完成 `EvolutionManager::approve`。
-4. Schema/不变量校验和审批记录、密封回放沙箱、指标与版本化 overlay 激活均已完成；LLM 仍只能产生提案，独立审批后才可激活。
+4. Schema/不变量校验和审批记录、密封回放沙箱、指标与版本化 overlay 激活均已完成；LLM 仍只能产生提案，bounded Level 1/Level 2 由独立 Runtime Governor 按规则批准后才可激活，高风险候选转开发者发布审批。
 
 ### 意图和行动契约
 
@@ -187,7 +187,7 @@ Evolution Proposal Schema、提案库、EventLog 来源事实、回放沙箱、�
 | 已完成-1 | Evolution Sandbox | 已完成：从快照运行候选变化，输出指标、事件差异和来源，不污染原始 Pack |
 | 已完成-2 | Overlay 激活与回滚 | 已完成：内容/策略/日程版本可审计、可观察，沙箱与提案必须锁定当前 Revision，快照恢复后仍可按栈回退 |
 | 已完成-3 | 场景实验 | 已完成当前通用边界：资源、组织指标、NPC 需求的声明式反事实实验；小店、利率、政策等具体机制待其事实模型落地后再接入 |
-| 已完成-4 | 自动 LLM 演化边界 | 已完成：`evolution_policy` 配置 Level 1/2 日间隔；`WorldEvolutionSystem` 在已提交边界异步排队，结果按当前事实重新验证、Sandbox 并审计，不能自动批准或激活 Overlay；Mock Provider 不冒充演化 |
+| 已完成-4 | 自动 LLM 演化边界 | 已完成：`evolution_policy` 配置 Level 1/2 日间隔；`WorldEvolutionSystem` 在已提交边界先检查问题证据，异步排队，结果按当前事实重新验证、Sandbox 并审计；独立 Runtime Governor 可按风险和指标门槛自动批准 bounded Overlay，高风险候选停在 proposal-ready；Mock Provider 不冒充演化 |
 | | 新世界实例 | 已完成 Glass Orchard 纵向切片：第三个实例、跨区域、阵营、制度、自定义需求域和长期承诺余波均由内容驱动 |
 
 ## 自动化验证命令
@@ -228,7 +228,7 @@ Provider、模型和分档预算现在由 `data/intelligence-profile.json` 配�
 
 2026-11-06 的真实长时基线使用 `village-p0.5`、本地 Qwen 和 `./build/tide_marks_headless --days 3 --provider profile --wait-llm-ms 60000 --replay /tmp/tide_marks-3d-real-v05.jsonl --dump-events`。运行 21m24s，推进到第 4 天 06:00，`llm-drain ... pending=0`，Replay 摘要与源状态一致；EventLog 统计为 `reflection.committed=9/9`、`evolution.proposal_ready=1`、`npc.intent=27`、`experience.recorded=42`、`memory.reflected=18`、`strategy.reflected=9`，只有 2 次结构化决策拒绝（一次截断、一次 NPC 已忙），没有过期请求。Level 2 提案在一次 bounded repair 后通过确定性沙箱；Overlay 仍保持待独立批准状态。该结果证明三 NPC 可以跨多个日边界持续推进认知、过程和受治理提案，但不把自动提案冒充为已批准内容；14 日真实跑正在继续，用于检查更长周期的创新假设与队列稳定性。
 
-本阶段新增的运行契约保持两个入口分离：`reflection` 是自动日边界的认知整合，`npc_evolution` 是显式或治理队列的 Level 1 私有提案；反思没有创新时不会补发 `npc_evolution` 请求。`--governance-auto` 只用于审计型长跑，它把 proposal-ready 重新绑定到当前 Revision 后再沙箱和批准，避免审批事件与沙箱基线产生分叉；生产交互仍要求外部批准者。`TurnQueue`/`EvolutionQueue` 的 bounded drain 增加 ready hand-off settle 窗口，避免完成结果恰好在超时边界发布时报告伪 pending。决策 tool schema 将 tradeoffs、刺激引用和文本长度显式设上限，Level 1/Level 2 的 proposal_kind 枚举按治理范围收紧；Level 2 低频输出预算提升到 2048，以处理真实 Qwen 的思考段和工具参数，不改变每 Tick 的调用频率。
+本阶段新增的运行契约保持三个入口分离：`reflection` 是自动日边界的认知/效果整合，`npc_evolution` 是显式或治理队列的 Level 1 私有候选，`world_evolution` 是有公共问题证据时的 Level 2 世界反思/候选；反思没有创新时不会补发 `npc_evolution` 请求，也不会为了“有输出”修改既有策略。`--governance-auto` 使用独立 Runtime Governor，把 proposal-ready 重新绑定到当前 Revision 后再沙箱、检查指标和风险、批准/激活 bounded Overlay；高风险候选仍停在待发布状态。`TurnQueue`/`EvolutionQueue` 的 bounded drain 增加 ready hand-off settle 窗口，避免完成结果恰好在超时边界发布时报告伪 pending。决策 tool schema 将 tradeoffs、刺激引用和文本长度显式设上限，Level 1/Level 2 的 proposal_kind 枚举按治理范围收紧；Level 2 低频输出预算提升到 2048，以处理真实 Qwen 的思考段和工具参数，不改变每 Tick 的调用频率。
 
 最新 7 日真实 Qwen 对照命令为 `TIDE_MARKS_DEBUG_PROVIDER=1 ./build/tide_marks_headless --days 7 --provider profile --wait-llm-ms 60000 --replay /tmp/tide_marks-7d-real-v07.jsonl --dump-events`；结果推进到第 8 天 06:00，`llm-drain: consumed=139 pending=0`，源状态与 Replay 都是 `revision=10179`、boat integrity 94、records integrity 94。日志共 142 provider records：decision 100（98 stop、2 length）、reflection 37（35 tool_calls、2 length）、Level 2 4（3 tool_calls、1 length）；EventLog 有 `reflection.committed=14`、`reflection.rejected=7`、`npc.intent=64`、`npc.process_completed=56`、`npc.process_failed=8`、`experience.recorded=82`、`memory.reflected=26`，没有队列残留。完整分阶段 token/cache 统计写入 [`qwen35-4b-llama-cpp-v07.json`](evidence/qwen35-4b-llama-cpp-v07.json)。该 v07 binary 早于局部 Reflection 接纳、决策数组上限和治理 harness，因而仍把 7 次坏 Reflection 作为整次 rejection；下一轮 v08 专门验证这些修复和独立批准/激活。
 

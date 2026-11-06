@@ -15,7 +15,7 @@
 3. `Goal`、`ProcessExecution`、`FSM`、`BT` 是同一个 `NpcActivity` 的不同视角。LLM 选择下一项活动或计划；活动接受后，BT 在多个 Tick 中推进，Tick 不重复调用 LLM。
 4. 元动作、BT 节点和行为参数由注册表与内容配置声明。代码只提供通用执行器，不能为具体 NPC、地点、剧情动作或 trigger 增加特例。
 5. Content Pack、Game Instance 和运行存档分开。`data/` 保存可复用的静态模板、Schema 和 Intelligence Profile；创建新游戏时模板文档导入该实例唯一的 SQLite，之后内容快照、世界事实、事件、Replay、提案和 Overlay 都由实例数据库保存，原始 JSON 不再是该实例的运行依赖。
-6. Level 1 是个体经验与策略演化，Level 2 是世界底座与内容能力演化。两者都由真实 LLM 提案，经过证据校验、沙箱、独立审批、版本化 Overlay 和审计；Runtime Core 不在线热改。
+6. Level 1 是个体经验与策略演化，Level 2 是世界底座与内容能力演化。两者都由真实 LLM 参与反思和候选化，但候选也可以只是重新选择/调参已有内容；经过证据校验、沙箱、独立 Runtime Governor、版本化 Overlay 和审计。高风险 Runtime Core 不在线热改。
 7. Snapshot 是普通读档；Replay 是显式的提交效果验证工件，不在每个 Tick 写盘，也不冒充完整 Event Sourcing。SQLite 由 CMake 固定下载并静态编译，始终提供同一持久化接口。
 
 ## 当前闭环
