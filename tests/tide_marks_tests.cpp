@@ -3419,11 +3419,11 @@ void automatic_level_one_innovation_is_admitted_and_adopted() {
     auto* providerRaw = provider.get();
     providerRaw->emitInnovation = true;
     auto service = WorldService::fromContentSnapshot(content, snapshot, std::move(provider));
-    // Keep the admission fixture running across a full week. The first day
-    // proves creation/activation; later boundaries prove that the same
-    // hypothesis is not regenerated and that its adoption result is visible
-    // to subsequent ReflectionResult projections.
-    service.advanceMinutes(kMinutesPerDay * 7);
+    // Keep the admission fixture running across a sustained fourteen-day
+    // horizon. The first day proves creation/activation; later boundaries
+    // prove that the same hypothesis is not regenerated and that its adoption
+    // result remains visible to subsequent ReflectionResult projections.
+    service.advanceMinutes(kMinutesPerDay * 14);
     service.waitForAsyncTurns(1000);
 
     const auto& events = service.state().events;
@@ -3432,8 +3432,8 @@ void automatic_level_one_innovation_is_admitted_and_adopted() {
             return event.type == type && (actor.empty() || event.actor == actor);
         });
     };
-    expect(providerRaw->reflectionContexts.size() == 21,
-           "Level 1 innovation admission still performs one bounded reflection per NPC across seven days");
+    expect(providerRaw->reflectionContexts.size() == 42,
+           "Level 1 innovation admission still performs one bounded reflection per NPC across fourteen days");
     expect(hasEvent("innovation.hypothesis_created") && hasEvent("evolution.approved", "world") &&
                hasEvent("evolution.overlay_activated", "runtime_governor"),
            "Runtime automatically admits and activates a valid private Level 1 innovation");
