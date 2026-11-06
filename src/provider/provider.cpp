@@ -267,14 +267,46 @@ void appendValidationContinuation(Json& messages, const Json& feedback,
         Json observation{{"accepted", false}, {"validation_feedback", std::move(observationFeedback)}};
         messages.push_back(Json{{"role", "tool"}, {"tool_call_id", callId},
                                 {"content", observation.dump()}});
-        messages.push_back(Json{{"role", "user"},
-                                {"content", "Runtime rejected the previous tool call. Return exactly one complete replacement tool call now; do not repeat the previous payload or any JSON key. Keep every string short."}});
+        const bool patchMode = feedback.value("repair_mode", "") == "patch";
+        const auto repairTool = feedback.value("repair_tool_name", "");
+        const std::string instruction = patchMode && !repairTool.empty()
+                                            ? "Runtime rejected the previous tool call. Return exactly one " +
+                                                  repairTool + " function call now. Put only changed root fields in set; do not repeat unchanged fields, prose, or the previous payload."
+                                            : "Runtime rejected the previous tool call. Return exactly one complete replacement tool call now; do not repeat the previous payload or any JSON key. Keep every string short.";
+        messages.push_back(Json{{"role", "user"}, {"content", instruction}});
         return;
     }
     // Keep adapters that cannot represent a prior tool call interoperable;
     // they still receive a bounded observation as a final user message.
     messages.push_back(Json{{"role", "user"},
                             {"content", Json{{"validation_feedback", feedback}}.dump()}});
+}
+
+// A repair function returns a small root-level patch.  The Runtime merges it
+// with the immutable previous candidate and validates the resulting complete
+// object.  Restricting the operation to root fields keeps the continuation
+// compact without giving the provider a way to patch facts or bypass the
+// normal schema/permission checks.
+Json mergeRootPatch(const Json& previous, const Json& candidate,
+                    const std::initializer_list<const char*> allowedFields) {
+    if (!candidate.is_object() || !candidate.contains("set") || !candidate.at("set").is_object()) {
+        return candidate;
+    }
+    Json merged = previous.is_object() ? previous : Json::object();
+    const auto& set = candidate.at("set");
+    for (const auto& [key, value] : set.items()) {
+        if (std::find(allowedFields.begin(), allowedFields.end(), key) != allowedFields.end()) {
+            merged[key] = value;
+        }
+    }
+    return merged;
+}
+
+Json rootPatchSchema() {
+    return Json{{"type", "object"}, {"additionalProperties", false},
+                {"required", Json::array({"set"})},
+                {"properties", Json{{"set", Json{{"type", "object"},
+                                                   {"additionalProperties", true}}}}}};
 }
 
 void appendDecisionContinuation(Json& messages, const Json& feedback) {
@@ -936,6 +968,7 @@ ProviderResponse LlamaCppProvider::proposeEvolution(const Json& context,
     // Runtime validates those arguments before treating them as data.  The
     // JSON-content parser remains as an interoperability path for older
     // llama.cpp builds that ignore tools but honor structured output.
+    const std::string repairToolName = evolutionLevel == "level1" ? "repair_npc_change" : "repair_world_change";
     request["tools"] = Json::array({Json{{"type", "function"},
                                           {"function", Json{{"name", toolName},
                                                              {"description", evolutionLevel == "level1"
@@ -948,11 +981,19 @@ ProviderResponse LlamaCppProvider::proposeEvolution(const Json& context,
                                                              // large unused envelope.  Keep the wire envelope
                                                              // permissive and let Runtime perform the complete
                                                              // schema, scope and lifecycle validation.
-                                                             {"strict", false}}}}});
+                                                             {"strict", false}}}},
+                                         Json{{"type", "function"},
+                                              {"function", Json{{"name", repairToolName},
+                                                                 {"description", "Return only the changed root fields in set; Runtime merges and validates the complete proposal."},
+                                                                 {"parameters", rootPatchSchema()},
+                                                                 {"strict", false}}}}});
     // llama.cpp accepts the OpenAI-compatible string form here.  There is
     // exactly one tool in this request, so `required` is equivalent to naming
     // that function and avoids a provider-specific object warning.
-    request["tool_choice"] = "required";
+    const bool patchMode = validationFeedback.value("repair_mode", "") == "patch";
+    request["tool_choice"] = patchMode
+                                  ? Json{{"type", "function"}, {"function", Json{{"name", repairToolName}}}}
+                                  : Json("required");
     auto configureDecoding = [&endpointConfig](Json& target, const DecisionPolicy& selectedPolicy) {
         if (endpointConfig.providerType == "openai_compatible") {
             target["reasoning_effort"] = selectedPolicy.reasoningEffort.empty()
@@ -974,7 +1015,12 @@ ProviderResponse LlamaCppProvider::proposeEvolution(const Json& context,
     if (!completed.value.is_object()) {
         return ProviderResponse{false, {}, {}, "invalid_evolution_proposal", Json::object()};
     }
-    return ProviderResponse{true, {}, jsonStringOr(completed.value, "rationale"), {}, completed.value};
+    const Json proposal = patchMode
+                              ? mergeRootPatch(validationFeedback.value("previous_proposal", Json::object()),
+                                               completed.value,
+                                               {"id", "proposal_kind", "evidence_event_sequences", "operations", "innovation"})
+                              : completed.value;
+    return ProviderResponse{true, {}, jsonStringOr(proposal, "rationale"), {}, proposal};
 }
 
 ProviderResponse LlamaCppProvider::proposeReflection(const Json& context,
@@ -1187,6 +1233,8 @@ ProviderResponse LlamaCppProvider::proposeReflection(const Json& context,
     // such as reflection-v1 and smaller models tend to copy it into the
     // integer schema_version field unless it is removed from their view.
     modelContext.erase("runtime_metadata");
+    const bool patchMode = validationFeedback.value("repair_mode", "") == "patch";
+    const std::string repairToolName = "repair_daily_reflection";
     Json request{
         {"model", endpointConfig.model}, {"temperature", endpointConfig.temperature}, {"max_tokens", policy.maxTokens},
         {"messages", Json::array({Json{{"role", "system"}, {"content", systemPrompt}},
@@ -1200,8 +1248,15 @@ ProviderResponse LlamaCppProvider::proposeReflection(const Json& context,
                                                         // accepted by every OpenAI-compatible strict-schema dialect;
                                                         // keep the tool envelope permissive and validate every returned
                                                         // field at the Runtime boundary.
-                                                        {"strict", false}}}}})},
-        {"tool_choice", "required"}};
+                                                        {"strict", false}}}},
+                                    Json{{"type", "function"},
+                                         {"function", Json{{"name", repairToolName},
+                                                            {"description", "Return only changed reflection root fields in set; Runtime merges and validates the complete result."},
+                                                            {"parameters", rootPatchSchema()},
+                                                            {"strict", false}}}}})},
+        {"tool_choice", patchMode
+                             ? Json{{"type", "function"}, {"function", Json{{"name", repairToolName}}}}
+                             : Json("required")}};
     appendValidationContinuation(request["messages"], validationFeedback,
                                  "daily_reflection", "previous_result");
     if (endpointConfig.providerType == "openai_compatible") {
@@ -1217,7 +1272,15 @@ ProviderResponse LlamaCppProvider::proposeReflection(const Json& context,
     response.ok = completed.value.is_object();
     response.error = response.ok ? "" : "invalid_reflection_result";
     response.dialogue = response.ok ? jsonStringOr(completed.value, "rationale") : "";
-    response.reflectionResult = response.ok ? std::move(completed.value) : Json::object();
+    if (response.ok && patchMode) {
+        response.reflectionResult = mergeRootPatch(
+            validationFeedback.value("previous_result", Json::object()), completed.value,
+            {"schema_version", "npc_id", "evidence_event_sequences", "cognition_updates",
+             "strategy_adjustment", "goal_adjustment", "unresolved_issues", "resolved_issues",
+             "innovation_hypotheses", "innovation_actions"});
+    } else {
+        response.reflectionResult = response.ok ? std::move(completed.value) : Json::object();
+    }
     return response;
 }
 

@@ -693,7 +693,9 @@ std::size_t WorldEvolutionSystem::pumpAsyncProposals() {
                     if (queued.request.attempt < 2 && world_.provider_->capabilities().structuredRepair) {
                         const Json feedback{{"attempt", queued.request.attempt + 1},
                                             {"code", result.code}, {"message", result.message},
-                                            {"previous_result", queued.response.reflectionResult}};
+                                            {"previous_result", queued.response.reflectionResult},
+                                            {"repair_mode", "patch"},
+                                            {"repair_tool_name", "repair_daily_reflection"}};
                         auto repair = queued.request;
                         ++repair.attempt;
                         repair.requestId += ":repair:" + std::to_string(repair.attempt);
@@ -855,7 +857,11 @@ std::size_t WorldEvolutionSystem::pumpAsyncProposals() {
                 if (queued.request.attempt < 2 && world_.provider_->capabilities().structuredRepair) {
                     const Json feedback{{"attempt", queued.request.attempt + 1}, {"code", validation.code},
                                         {"message", validation.message},
-                                        {"previous_proposal", EvolutionManager::toJson(proposal)}};
+                                        {"previous_proposal", EvolutionManager::toJson(proposal)},
+                                        {"repair_mode", "patch"},
+                                        {"repair_tool_name", queued.request.evolutionLevel == "level1"
+                                                                 ? "repair_npc_change"
+                                                                 : "repair_world_change"}};
                     auto repair = queued.request;
                     ++repair.attempt;
                     repair.requestId += ":repair:" + std::to_string(repair.attempt);
@@ -919,7 +925,11 @@ std::size_t WorldEvolutionSystem::pumpAsyncProposals() {
                 const Json feedback{{"attempt", queued.request.attempt + 1},
                                     {"code", "invalid_evolution_proposal"},
                                     {"message", error.what()},
-                                    {"previous_proposal", queued.response.evolutionProposal}};
+                                    {"previous_proposal", queued.response.evolutionProposal},
+                                    {"repair_mode", "patch"},
+                                    {"repair_tool_name", queued.request.evolutionLevel == "level1"
+                                                             ? "repair_npc_change"
+                                                             : "repair_world_change"}};
                 auto repair = queued.request;
                 ++repair.attempt;
                 repair.requestId += ":repair:" + std::to_string(repair.attempt);
