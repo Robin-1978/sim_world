@@ -309,6 +309,8 @@ Level 1 是主体行为演化：LLM 在现有 Runtime 能力内泛化一个主�
 
 Innovation Hypothesis 有独立的持久化生命周期：`hypothesized -> refining -> evaluated -> accepted/rejected`，在进入终态前可以明确转为 `abandoned`。这条状态只管理想法本身；Overlay 仍有自己的 `proposed -> approved -> active -> rolled_back/retired` 生命周期，NPC 采用/实施则另有 `pending -> resource_blocked -> executing -> completed/failed/abandoned` 状态。批准 Hypothesis、激活 Overlay 和实际完成采用不能互相冒充，激活后的撤销只能记录 `rolled_back`，不能把历史改写为 `abandoned`。提案 JSON 的 `innovation` 信封保存假设、`novelty_basis`、关联 operations、预期收益、风险和有界 `test_plan`；Proposal Store、EventLog 和 Snapshot 的 Overlay 记录共同保存这个审计链。下一次每日反思可以引用上一份提案事件继续完善，或明确放弃，而不是重新生成同一创新。
 
+长时自动验证使用一个显式的外部治理 harness，而不是让 LLM 或 Runtime 自动批准自己的提案。`tide_marks_headless --governance-auto` 以 `headless_governor` 身份读取已通过确定性 Sandbox 的 proposal-ready 事件，基于当前 Revision 重新沙箱、调用 `approve`、激活 Overlay；Level 1 私有假设还要先通过独立的 `transitionInnovationHypothesis(..., "accepted", ...)`，再启动正常 Adoption。该开关只属于审计/回归工具，默认关闭；交互式和产品 Runtime 仍在 proposal-ready 后等待外部批准。这样可以在真实 Qwen 长跑中分别度量提案、批准、激活和采用，不把其中任一步骤混成一个状态。
+
 创新的等级按影响范围划分，而不是按“是否有创意”划分。Level 1 可以提出只对目标 NPC 可用的行为配方假设，`available_to` 必须精确等于该 NPC，不能创建共享实体原型；它仍须验证和沙箱，但不会直接改变公共世界。Level 2 才能把已有假设提升为共享配方或实体原型，要求公共事件证据、跨主体可见性和独立批准。Level 1 到 Level 2 的提升通过新的 Level 2 提案引用前一阶段的已提交事件完成，私有记忆不会被广播。
 
 这组机制吸收了 *Maslow Machines* 预印本提出的三个可检验启发：较低层需求满足后仍保留有限的高阶动机压力（避免 contentment trap）、把驱力呈现为描述性的 felt-state 而不是命令、以及把“提出想法”和“有资源实现”分开测量。项目不把 Maslow 五层当作固定闸门，也不把模型的拟人化自述当作意识证据；需求域、阈值、满足配方和创新指标仍由 Content Pack、Runtime 事实与回放校准决定。参考：Mark E. Mala, *Maslow Machines: Emergent Civilisation from Intrinsic Drive Hierarchies in LLM Agent Populations*, Zenodo, 2026, DOI `10.5281/zenodo.19479937`（v1.1 记录 DOI `10.5281/zenodo.19479938`）。
