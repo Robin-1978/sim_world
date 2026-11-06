@@ -1368,6 +1368,15 @@ ProviderResponse LlamaCppProvider::decide(const DecisionContext& context, const 
                           {"self", modelSelf}, {"activity", activityForModel(context.currentActivity)},
                           {"private_preferences", context.privateCharacter},
                           {"private_traits", context.privateTraits}, {"needs", std::move(modelDrives)}};
+    const auto cognitiveMemories = context.cognitiveEvidence.contains("memories")
+                                       ? context.cognitiveEvidence.at("memories")
+                                       : Json(context.memories);
+    const auto cognitiveKnowledge = context.cognitiveEvidence.contains("knowledge")
+                                        ? context.cognitiveEvidence.at("knowledge")
+                                        : Json(context.knowledge);
+    const auto cognitiveExperiences = context.cognitiveEvidence.contains("experiences")
+                                          ? context.cognitiveEvidence.at("experiences")
+                                          : Json(context.experiences);
     const Json stableContent{{"catalog", Json{{"speech_acts", speechActs},
                                                {"plans", staticPlanCatalog}}}};
     const Json dynamicContent{{"task", Json{{"name", "decision"},
@@ -1382,12 +1391,9 @@ ProviderResponse LlamaCppProvider::decide(const DecisionContext& context, const 
                                {"state", modelState},
                                {"evidence", Json{{"perception", context.perception},
                                                   {"stimuli", stimuli},
-                                                  {"memories", context.cognitiveEvidence.value(
-                                                       "memories", context.memories)},
-                                                  {"knowledge", context.cognitiveEvidence.value(
-                                                       "knowledge", context.knowledge)},
-                                                  {"experiences", context.cognitiveEvidence.value(
-                                                       "experiences", context.experiences)}}},
+                                                  {"memories", cognitiveMemories},
+                                                  {"knowledge", cognitiveKnowledge},
+                                                  {"experiences", cognitiveExperiences}}},
                                {"constraints", constraints},
                                {"availability", Json{{"eligible_plan_keys", availableActionIds},
                                                       {"unavailable_plans", unavailablePlans},
