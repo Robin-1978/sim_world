@@ -562,8 +562,11 @@ Json WorldEvolutionSystem::reflectionContext(const WorldService& world,
     } else {
         innovationGate["reason"] = "repeated_failure_supports_one_private_hypothesis";
     }
+    const auto* authoredTarget = world.authoredNpc(targetNpcId);
     return Json{{"schema_version", 1}, {"trigger", "daily_reflection"},
-                {"target_npc", targetNpcId}, {"base_world_revision", world.state_.revision},
+                {"target_npc", targetNpcId},
+                {"target_name", authoredTarget == nullptr ? targetNpcId : authoredTarget->definition.name},
+                {"base_world_revision", world.state_.revision},
                 {"world_time", world.state_.now.minute},
                 {"runtime_metadata", world.provider_->runtimeMetadata("reflection:proposal")},
                 {"reflection_prompt", world.content_.npcReflectionPrompt.empty()

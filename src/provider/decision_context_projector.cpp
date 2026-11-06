@@ -250,7 +250,8 @@ DecisionContext DecisionContextProjector::build(const WorldState& state,
         if (!resourceVisible(resourceDefinition)) continue;
         resources << id << '=' << resourceValue(id) << ' ' << resourceDefinition.unit << ';';
     }
-    context.perception = "At " + npc.location + ", it is " + state.now.toString() +
+    context.perception = "At " + locationView(content, npc.location).value("name", npc.location) +
+                         " (" + locationView(content, npc.location).value("type", "place") + "), it is " + state.now.toString() +
                          ". Public resources: " + resources.str();
     for (const auto& stimulus : npc.stimuli) {
         if (!stimulus.active || state.now.minute >= stimulus.expiresAt.minute) continue;
@@ -443,7 +444,9 @@ DecisionContext DecisionContextProjector::build(const WorldState& state,
         const auto& authoredResource = definition->second;
         context.worldSnapshot["public_resources"][resourceId] =
             Json{{"amount", resource.amount}, {"reserved", resource.reserved},
-                 {"location", authoredResource.location}, {"unit", authoredResource.unit},
+                 {"location", authoredResource.location},
+                 {"location_view", locationView(content, authoredResource.location)},
+                 {"unit", authoredResource.unit},
                  {"kind", authoredResource.kind}};
     }
     std::size_t visibleEntityCount = 0;
