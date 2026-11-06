@@ -445,6 +445,11 @@ public:
                                          {"success_criteria", "recipe completes"},
                                          {"failure_criteria", "recipe fails"}}}}}}});
         }
+        if (emitInvalidUpdate && source != 0) {
+            result["cognition_updates"]["memory_updates"] = Json::array({Json{
+                {"source_sequence", source + 99999},
+                {"text", "This memory cites an event outside the captured evidence window."}}});
+        }
         ProviderResponse response;
         response.ok = true;
         response.reflectionResult = std::move(result);
@@ -457,6 +462,7 @@ public:
     }
     std::vector<Json> reflectionContexts;
     bool emitInnovation{false};
+    bool emitInvalidUpdate{false};
 };
 
 void village_has_three_independent_npcs() {
@@ -3346,6 +3352,29 @@ void daily_reflection_requires_failure_evidence_for_innovation() {
            "insufficient innovation evidence cannot create a durable hypothesis");
 }
 
+void daily_reflection_skips_invalid_optional_fields() {
+    auto provider = std::make_unique<ReflectionProvider>();
+    auto* providerRaw = provider.get();
+    providerRaw->emitInvalidUpdate = true;
+    auto content = ContentPackLoader::load(ContentPackLoader::defaultRoot());
+    content.evolutionPolicy.enabled = true;
+    content.evolutionPolicy.level1IntervalDays = 1;
+    content.evolutionPolicy.level2IntervalDays = 0;
+    content.npcDeliberation.enabled = false;
+    auto service = WorldService::fromContent(content, std::move(provider));
+    service.advanceMinutes(kMinutesPerDay - (service.state().now.minute % kMinutesPerDay));
+    service.waitForAsyncTurns(1000);
+    expect(providerRaw->reflectionContexts.size() == 3,
+           "invalid reflection field still uses one request per NPC");
+    expect(std::count_if(service.state().events.begin(), service.state().events.end(),
+                         [](const auto& event) { return event.type == "reflection.committed"; }) == 3 &&
+               std::count_if(service.state().events.begin(), service.state().events.end(),
+                             [](const auto& event) { return event.type == "reflection.update_rejected"; }) == 3,
+           "Runtime commits the valid reflection remainder and audits skipped fields");
+    expect(service.state().npcs.at("mira").reflectionCursor.lastReflectionDay == 2,
+           "a bad optional cognition field cannot stall the daily reflection cursor");
+}
+
 void intelligence_profile_configures_decision_budgets() {
     const auto profile = loadIntelligenceProfile(defaultIntelligenceProfilePath());
     const auto& decision = profile.purposes.at("decision");
@@ -3618,6 +3647,8 @@ int main() {
         daily_reflection_routes_updates_and_keeps_incremental_cursor);
     run("daily_reflection_requires_failure_evidence_for_innovation",
         daily_reflection_requires_failure_evidence_for_innovation);
+    run("daily_reflection_skips_invalid_optional_fields",
+        daily_reflection_skips_invalid_optional_fields);
     run("intelligence_profile_configures_decision_budgets", intelligence_profile_configures_decision_budgets);
     run("intelligence_profile_decouples_models_from_api_keys",
         intelligence_profile_decouples_models_from_api_keys);

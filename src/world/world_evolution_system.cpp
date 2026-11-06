@@ -639,16 +639,23 @@ CommandResult WorldEvolutionSystem::commitReflection(const EvolutionRequest& req
     }
     const std::uint64_t boundarySequence = world_.state_.events.empty() ? 0 : world_.state_.events.back().sequence;
     std::set<std::uint64_t> evidence;
+    Json acceptedEvidence = Json::array();
+    Json rejectedUpdates = Json::array();
     const auto evidenceJson = result.value("evidence_event_sequences", Json::array());
     if (!evidenceJson.is_array() || evidenceJson.size() > 32) {
-        return world_.reject("invalid_reflection_evidence", "Reflection evidence must be a bounded array.");
+        rejectedUpdates.push_back(Json{{"kind", "evidence"}, {"code", "invalid_reflection_evidence"}});
     }
-    for (const auto& item : evidenceJson) {
-        if (!item.is_number_unsigned()) return world_.reject("invalid_reflection_evidence", "Reflection evidence must use event sequences.");
+    if (evidenceJson.is_array()) for (const auto& item : evidenceJson) {
+        if (!item.is_number_unsigned()) {
+            rejectedUpdates.push_back(Json{{"kind", "evidence"}, {"code", "invalid_reflection_evidence"}});
+            continue;
+        }
         const auto sequence = item.get<std::uint64_t>();
         if (sequence <= npc.reflectionCursor.lastEventSequence || sequence > boundarySequence ||
             !evidence.insert(sequence).second) {
-            return world_.reject("invalid_reflection_evidence", "Reflection evidence must be new, committed and unique.");
+            rejectedUpdates.push_back(Json{{"kind", "evidence"}, {"sequence", sequence},
+                                           {"code", "invalid_reflection_evidence"}});
+            continue;
         }
         const auto event = std::find_if(world_.state_.events.begin(), world_.state_.events.end(),
                                        [sequence](const auto& candidate) { return candidate.sequence == sequence; });
@@ -660,8 +667,12 @@ CommandResult WorldEvolutionSystem::commitReflection(const EvolutionRequest& req
         if (event == world_.state_.events.end() ||
             (privateEvent && event->actor != request.targetNpcId && event->target != request.targetNpcId &&
              event->target != npcEntityId(request.targetNpcId))) {
-            return world_.reject("reflection_private_evidence", "A reflection cannot cite another NPC's private cognition.");
+            rejectedUpdates.push_back(Json{{"kind", "evidence"}, {"sequence", sequence},
+                                           {"code", "reflection_private_evidence"}});
+            evidence.erase(sequence);
+            continue;
         }
+        acceptedEvidence.push_back(sequence);
     }
     const auto hasSource = [&evidence, boundarySequence, &npc](std::uint64_t sequence) {
         return sequence > npc.reflectionCursor.lastEventSequence && sequence <= boundarySequence && evidence.contains(sequence);
@@ -675,70 +686,100 @@ CommandResult WorldEvolutionSystem::commitReflection(const EvolutionRequest& req
     const auto beliefs = cognition.value("belief_updates", Json::array());
     const auto experiences = cognition.value("experience_updates", Json::array());
     const auto memories = cognition.value("memory_updates", Json::array());
-    if (!beliefs.is_array() || !experiences.is_array() || !memories.is_array() ||
-        beliefs.size() > 8 || experiences.size() > 8 || memories.size() > 8) {
-        return world_.reject("invalid_reflection_cognition", "Reflection cognition updates exceed bounded limits.");
-    }
-    for (const auto& item : beliefs) {
+    Json validBeliefs = Json::array();
+    Json validExperiences = Json::array();
+    Json validMemories = Json::array();
+    const auto boundedArray = [&rejectedUpdates](const Json& value, const char* kind) {
+        if (value.is_array() && value.size() <= 8) return true;
+        rejectedUpdates.push_back(Json{{"kind", kind}, {"code", "invalid_reflection_cognition"}});
+        return false;
+    };
+    const bool beliefsArray = boundedArray(beliefs, "beliefs");
+    const bool experiencesArray = boundedArray(experiences, "experiences");
+    const bool memoriesArray = boundedArray(memories, "memories");
+    if (beliefsArray) for (std::size_t index = 0; index < beliefs.size(); ++index) {
+        const auto& item = beliefs.at(index);
         if (!boundedText(item, "subject", 128) || !boundedText(item, "predicate", 128) ||
             !boundedText(item, "value", 512) || !item.contains("source_sequence") ||
             !item.at("source_sequence").is_number_unsigned() || !item.contains("confidence") ||
             !item.at("confidence").is_number() || item.at("confidence").get<double>() < 0.0 ||
             item.at("confidence").get<double>() > 1.0 ||
             !hasSource(item.at("source_sequence").get<std::uint64_t>())) {
-            return world_.reject("invalid_reflection_cognition", "Belief updates require bounded sourced fields.");
+            rejectedUpdates.push_back(Json{{"kind", "belief"}, {"index", index},
+                                           {"code", "invalid_reflection_cognition"}});
+            continue;
         }
+        validBeliefs.push_back(item);
     }
-    for (const auto& item : experiences) {
+    if (experiencesArray) for (std::size_t index = 0; index < experiences.size(); ++index) {
+        const auto& item = experiences.at(index);
         if (!boundedText(item, "domain", 128) || !boundedText(item, "trigger", 256) ||
             !boundedText(item, "action", 128) || !boundedText(item, "outcome", 512) ||
             !item.contains("source_sequence") || !item.at("source_sequence").is_number_unsigned() ||
             !item.contains("confidence") || !item.at("confidence").is_number() ||
             item.at("confidence").get<double>() < 0.0 || item.at("confidence").get<double>() > 1.0 ||
             !hasSource(item.at("source_sequence").get<std::uint64_t>())) {
-            return world_.reject("invalid_reflection_cognition", "Experience updates require bounded sourced fields.");
+            rejectedUpdates.push_back(Json{{"kind", "experience"}, {"index", index},
+                                           {"code", "invalid_reflection_cognition"}});
+            continue;
         }
+        validExperiences.push_back(item);
     }
-    for (const auto& item : memories) {
+    if (memoriesArray) for (std::size_t index = 0; index < memories.size(); ++index) {
+        const auto& item = memories.at(index);
         if (!boundedText(item, "text", 512) || !item.contains("source_sequence") ||
             !item.at("source_sequence").is_number_unsigned() ||
             (item.contains("confidence") && (!item.at("confidence").is_number() ||
                                               item.at("confidence").get<double>() < 0.0 ||
                                               item.at("confidence").get<double>() > 1.0)) ||
             !hasSource(item.at("source_sequence").get<std::uint64_t>())) {
-            return world_.reject("invalid_reflection_cognition", "Memory updates require a committed source event.");
+            rejectedUpdates.push_back(Json{{"kind", "memory"}, {"index", index},
+                                           {"code", "invalid_reflection_cognition"}});
+            continue;
         }
+        validMemories.push_back(item);
     }
     const auto strategy = result.value("strategy_adjustment", Json::object());
+    Json validStrategy = strategy;
     if (!strategy.is_object() || (strategy.contains("strategy") &&
         (!strategy.at("strategy").is_string() || strategy.at("strategy").get<std::string>().empty() ||
          strategy.at("strategy").get<std::string>().size() > 128))) {
-        return world_.reject("invalid_reflection_strategy", "Strategy adjustment must be a bounded string.");
+        rejectedUpdates.push_back(Json{{"kind", "strategy"}, {"code", "invalid_reflection_strategy"}});
+        validStrategy = Json::object();
     }
     const auto goal = result.value("goal_adjustment", Json::object());
-    if (!goal.is_object()) return world_.reject("invalid_reflection_goal", "Goal adjustment must be an object.");
-    if (goal.contains("priority_delta") && (!goal.at("priority_delta").is_number() ||
-        goal.at("priority_delta").get<double>() < -1.0 || goal.at("priority_delta").get<double>() > 1.0)) {
-        return world_.reject("invalid_reflection_goal", "Goal priority_delta must be bounded.");
-    }
-    if (goal.contains("status") && (!goal.at("status").is_string() || goal.at("status") != "cancelled")) {
-        return world_.reject("invalid_reflection_goal", "Only a governed cancellation may be requested by reflection.");
+    Json validGoal = goal;
+    if (!goal.is_object()) {
+        rejectedUpdates.push_back(Json{{"kind", "goal"}, {"code", "invalid_reflection_goal"}});
+        validGoal = Json::object();
+    } else {
+        if (goal.contains("priority_delta") && (!goal.at("priority_delta").is_number() ||
+            goal.at("priority_delta").get<double>() < -1.0 || goal.at("priority_delta").get<double>() > 1.0)) {
+            rejectedUpdates.push_back(Json{{"kind", "goal"}, {"code", "invalid_reflection_goal"}});
+            validGoal.erase("priority_delta");
+        }
+        if (goal.contains("status") && (!goal.at("status").is_string() || goal.at("status") != "cancelled")) {
+            rejectedUpdates.push_back(Json{{"kind", "goal"}, {"code", "invalid_reflection_goal"}});
+            validGoal.erase("status");
+        }
     }
     const auto openIssues = result.value("unresolved_issues", Json::array());
     const auto resolvedIssues = result.value("resolved_issues", Json::array());
     if (!openIssues.is_array() || !resolvedIssues.is_array() || openIssues.size() > 16 || resolvedIssues.size() > 16) {
-        return world_.reject("invalid_reflection_issues", "Reflection issue lists are bounded arrays.");
+        rejectedUpdates.push_back(Json{{"kind", "issues"}, {"code", "invalid_reflection_issues"}});
     }
     std::set<std::string> issueSet(npc.unresolvedIssues.begin(), npc.unresolvedIssues.end());
-    for (const auto& item : openIssues) {
+    if (openIssues.is_array()) for (const auto& item : openIssues) {
         if (!item.is_string() || item.get<std::string>().empty() || item.get<std::string>().size() > 256) {
-            return world_.reject("invalid_reflection_issues", "Unresolved issue text must be bounded.");
+            rejectedUpdates.push_back(Json{{"kind", "unresolved_issue"}, {"code", "invalid_reflection_issues"}});
+            continue;
         }
         issueSet.insert(item.get<std::string>());
     }
-    for (const auto& item : resolvedIssues) {
+    if (resolvedIssues.is_array()) for (const auto& item : resolvedIssues) {
         if (!item.is_string() || !issueSet.contains(item.get<std::string>())) {
-            return world_.reject("invalid_reflection_issues", "A reflection may resolve only a persisted issue.");
+            rejectedUpdates.push_back(Json{{"kind", "resolved_issue"}, {"code", "invalid_reflection_issues"}});
+            continue;
         }
         issueSet.erase(item.get<std::string>());
     }
@@ -835,24 +876,24 @@ CommandResult WorldEvolutionSystem::commitReflection(const EvolutionRequest& req
         }
         transitions.push_back(InnovationTransition{index, next});
     }
-    for (std::size_t index = 0; index < beliefs.size(); ++index) {
-        const auto& item = beliefs.at(index);
+    for (std::size_t index = 0; index < validBeliefs.size(); ++index) {
+        const auto& item = validBeliefs.at(index);
         const auto applied = CognitionSystem(world_).assertKnownFact(
             request.targetNpcId, item.at("subject"), item.at("predicate"), item.at("value"),
             item.at("source_sequence"), item.value("scope", "inference"), item.at("confidence"),
             request.targetNpcId, "reflection:" + request.targetNpcId + ":" + std::to_string(world_.state_.now.day()) + ":belief:" + std::to_string(index));
         if (!applied.accepted) { transaction.rollback(); return applied; }
     }
-    for (std::size_t index = 0; index < experiences.size(); ++index) {
-        const auto& item = experiences.at(index);
+    for (std::size_t index = 0; index < validExperiences.size(); ++index) {
+        const auto& item = validExperiences.at(index);
         const auto applied = CognitionSystem(world_).recordExperience(
             request.targetNpcId, item.at("domain"), item.at("trigger"), item.at("action"), item.at("outcome"),
             item.at("source_sequence"), item.at("confidence"), item.value("personal", true),
             request.targetNpcId, "reflection:" + request.targetNpcId + ":" + std::to_string(world_.state_.now.day()) + ":experience:" + std::to_string(index));
         if (!applied.accepted) { transaction.rollback(); return applied; }
     }
-    for (std::size_t index = 0; index < memories.size(); ++index) {
-        const auto& item = memories.at(index);
+    for (std::size_t index = 0; index < validMemories.size(); ++index) {
+        const auto& item = validMemories.at(index);
         npc.memories.push_back(Memory{item.value("kind", "reflection"), item.at("text"), world_.state_.now,
                                       item.value("confidence", 1.0)});
         world_.addEvent("memory.reflected", request.targetNpcId, request.targetNpcId,
@@ -876,20 +917,25 @@ CommandResult WorldEvolutionSystem::commitReflection(const EvolutionRequest& req
                              {"message", innovationRejection.value("message", "innovation branch rejected")},
                              {"provider", provider}});
     }
-    if (strategy.contains("strategy")) {
-        npc.strategy = strategy.at("strategy");
+    if (!rejectedUpdates.empty()) {
+        world_.addEvent("reflection.update_rejected", request.targetNpcId, request.targetNpcId,
+                        "The Runtime skipped bounded reflection fields while committing the valid remainder",
+                        Json{{"count", rejectedUpdates.size()}, {"updates", rejectedUpdates}, {"provider", provider}});
+    }
+    if (validStrategy.contains("strategy")) {
+        npc.strategy = validStrategy.at("strategy");
         ++npc.stateVersion;
         world_.addEvent("strategy.reflected", request.targetNpcId, request.targetNpcId,
                         "Daily reflection adjusted the NPC strategy", Json{{"strategy", npc.strategy}});
     }
-    if (goal.contains("priority_delta") && npc.activity.goal) {
-        npc.activity.goal->priority = std::clamp(npc.activity.goal->priority + goal.at("priority_delta").get<double>(), 0.0, 1.0);
+    if (validGoal.contains("priority_delta") && npc.activity.goal) {
+        npc.activity.goal->priority = std::clamp(npc.activity.goal->priority + validGoal.at("priority_delta").get<double>(), 0.0, 1.0);
         ++npc.stateVersion;
         world_.addEvent("goal.reflected", request.targetNpcId, request.targetNpcId,
                         "Daily reflection adjusted the active goal priority",
                         Json{{"priority", npc.activity.goal->priority}});
     }
-    if (goal.value("status", "") == "cancelled" && npc.activity.goal) {
+    if (validGoal.value("status", "") == "cancelled" && npc.activity.goal) {
         setActivityStatus(npc.activity, ActivityStatus::Cancelled);
         ++npc.stateVersion;
         world_.addEvent("goal.cancelled", request.targetNpcId, request.targetNpcId,
@@ -923,9 +969,10 @@ CommandResult WorldEvolutionSystem::commitReflection(const EvolutionRequest& req
     const auto reflectionEvent = world_.addEvent(
         "reflection.committed", request.targetNpcId, request.targetNpcId,
         "The Runtime committed a structured daily reflection",
-        Json{{"provider", provider}, {"evidence_event_sequences", evidenceJson},
+        Json{{"provider", provider}, {"evidence_event_sequences", acceptedEvidence},
              {"innovation_count", normalizedHypotheses.size()}, {"unresolved_issue_count", npc.unresolvedIssues.size()},
-             {"innovation_rejected", !innovationRejection.empty()}});
+             {"innovation_rejected", !innovationRejection.empty()},
+             {"rejected_update_count", rejectedUpdates.size()}});
     npc.reflectionCursor.lastEventSequence = reflectionEvent.sequence;
     npc.reflectionCursor.reflectionRevision = reflectionEvent.worldRevision;
     ++npc.stateVersion;
