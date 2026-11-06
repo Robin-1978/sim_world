@@ -530,6 +530,7 @@ ProviderResponse LlamaCppProvider::decide(const DecisionContext& context, const 
                                                             {"uniqueItems", true},
                                                             {"items", Json{{"type", "string"}, {"maxLength", 128}}}}},
                              {"tradeoffs", Json{{"type", "array"}, {"maxItems", 4},
+                                                   {"uniqueItems", true},
                                                    {"items", Json{{"type", "string"}, {"maxLength", 256}}}}},
                              {"expected_relief", Json{{"type", "object"},
                                                        {"additionalProperties", Json{{"type", "number"},
