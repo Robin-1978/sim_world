@@ -337,6 +337,8 @@ Reflection 的 `source_sequence` 和 `evidence_event_sequences` 在稳定 tool s
 
 小模型的 Provider 策略按决策价值分档，而不是固定追求最大思考预算：普通对白和低风险动作关闭 thinking；候选之间存在社会冲突、秘密或承诺权衡时使用约 128 token 的 reasoning budget；低置信度或校验失败才升级到 256。512 以上只用于演化提案、沙箱解释和离线分析，不进入每个 NPC Turn。预算升级必须记录原因、耗时、最终候选和校验结果，便于以后用真实回放重新校准。
 
+复杂内容不要求本地 4B 模型单独承担。当前 profile 已允许 `openai_compatible` Provider，并可让 `reflection`、`npc_evolution` 或 `world_evolution` 各自引用另一个 provider、模型、端点和 `api_key_env`；默认决策和离线回归仍使用本地 Qwen。推荐把更大的 API 模型先用于低频 Reflection/Evolution 对照，保持相同的短 function schema、Runtime 校验、Sandbox 和独立批准，再根据 v07/v08 的 finish reason、repair、缓存和提案质量决定是否把它设为正式 purpose。API key 只从环境变量读取，不能进入 Profile、Prompt、EventLog 或 Snapshot。
+
 Provider 与决策预算由可版本化的 Intelligence Profile 选择，不绑定具体模型。正式配置是 `data/intelligence-profile.json`；`purposes.decision`、`purposes.npc_evolution` 和 `purposes.world_evolution` 分别引用可复用 provider，并可覆盖兼容端点、模型、温度、超时和 `api_key_env`。决策阶段的 `utterance_understanding`、`player_dialogue` 和 `autonomous_reappraisal` 预算归属于 `purposes.decision.policies`；演化阶段分别使用两个演化 purpose 的 `policy`。密钥值只从进程环境读取，不进入 Profile、Prompt、日志、快照、Replay 或 SQLite。交互式 client、text UI 和 headless 默认使用 `profile`，测试与可重复离线批处理通过 `--provider mock` 显式选择。Schema 位于 `data/schemas/intelligence-profile.schema.json`。
 
 Profile 的 `purposes.decision.policies` 是按 channel 使用的命名策略表。Provider 接收 Runtime 解析后的 `provider_policy`，只负责执行对应预算和输出格式，不再根据 `player_dialogue` 或 `autonomous_reappraisal` 这样的业务触发字符串猜测决策类型。

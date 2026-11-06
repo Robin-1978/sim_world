@@ -230,7 +230,9 @@ Provider、模型和分档预算现在由 `data/intelligence-profile.json` 配�
 
 本阶段新增的运行契约保持两个入口分离：`reflection` 是自动日边界的认知整合，`npc_evolution` 是显式或治理队列的 Level 1 私有提案；反思没有创新时不会补发 `npc_evolution` 请求。`--governance-auto` 只用于审计型长跑，它把 proposal-ready 重新绑定到当前 Revision 后再沙箱和批准，避免审批事件与沙箱基线产生分叉；生产交互仍要求外部批准者。`TurnQueue`/`EvolutionQueue` 的 bounded drain 增加 ready hand-off settle 窗口，避免完成结果恰好在超时边界发布时报告伪 pending。决策 tool schema 将 tradeoffs、刺激引用和文本长度显式设上限，Level 1/Level 2 的 proposal_kind 枚举按治理范围收紧；Level 2 低频输出预算提升到 2048，以处理真实 Qwen 的思考段和工具参数，不改变每 Tick 的调用频率。
 
-最新 7 日真实 Qwen 对照命令为 `TIDE_MARKS_DEBUG_PROVIDER=1 ./build/tide_marks_headless --days 7 --provider profile --wait-llm-ms 60000 --replay /tmp/tide_marks-7d-real-v07.jsonl --dump-events`；最终统计和事件计数在该长跑结束后追加。评估门槛是三 NPC 每个日边界的 ReflectionCursor 前移、合法认知即使可选创新被拒也提交、`llm-drain pending=0`、源状态与 Replay 摘要一致，以及缓存、finish reason、repair 次数可从 provider debug 和事件审计复核。
+最新 7 日真实 Qwen 对照命令为 `TIDE_MARKS_DEBUG_PROVIDER=1 ./build/tide_marks_headless --days 7 --provider profile --wait-llm-ms 60000 --replay /tmp/tide_marks-7d-real-v07.jsonl --dump-events`；结果推进到第 8 天 06:00，`llm-drain: consumed=139 pending=0`，源状态与 Replay 都是 `revision=10179`、boat integrity 94、records integrity 94。日志共 142 provider records：decision 100（98 stop、2 length）、reflection 37（35 tool_calls、2 length）、Level 2 4（3 tool_calls、1 length）；EventLog 有 `reflection.committed=14`、`reflection.rejected=7`、`npc.intent=64`、`npc.process_completed=56`、`npc.process_failed=8`、`experience.recorded=82`、`memory.reflected=26`，没有队列残留。完整分阶段 token/cache 统计写入 [`qwen35-4b-llama-cpp-v07.json`](evidence/qwen35-4b-llama-cpp-v07.json)。该 v07 binary 早于局部 Reflection 接纳、决策数组上限和治理 harness，因而仍把 7 次坏 Reflection 作为整次 rejection；下一轮 v08 专门验证这些修复和独立批准/激活。
+
+评估门槛是三 NPC 每个日边界的 ReflectionCursor 前移、合法认知即使可选创新被拒也提交、`llm-drain pending=0`、源状态与 Replay 摘要一致，以及缓存、finish reason、repair 次数可从 provider debug 和事件审计复核。复杂 Reflection/Evolution 的 API 模型接入只改变 Provider profile，不改变这些 Runtime 门槛。
 
 ## 恢复工作入口
 

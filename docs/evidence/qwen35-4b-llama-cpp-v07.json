@@ -1,0 +1,103 @@
+{
+  "date": "2026-11-06",
+  "command": "TIDE_MARKS_DEBUG_PROVIDER=1 ./build/tide_marks_headless --days 7 --provider profile --wait-llm-ms 60000 --replay /tmp/tide_marks-7d-real-v07.jsonl --dump-events",
+  "provider": "llama.cpp",
+  "model": "Huihui-Qwen3.5-4B-abliterated.Q4_K_M",
+  "days_requested": 7,
+  "final": "day 8 6:00; boat_integrity=94; cooperation=6; grain=0; records_integrity=94; reputation=0; revision=10179",
+  "drain": "consumed=139 pending=0",
+  "replay_equal": true,
+  "stages": {
+    "understanding": {
+      "calls": 1,
+      "finish_reason": {
+        "stop": 1
+      },
+      "prompt_tokens_total": 893,
+      "completion_tokens_total": 227,
+      "cached_tokens_total": 0,
+      "cache_ratio": 0.0,
+      "completion_max": 227
+    },
+    "decision": {
+      "calls": 100,
+      "finish_reason": {
+        "stop": 98,
+        "length": 2
+      },
+      "prompt_tokens_total": 542669,
+      "completion_tokens_total": 40996,
+      "cached_tokens_total": 177895,
+      "cache_ratio": 0.3278,
+      "completion_max": 1024
+    },
+    "reflection": {
+      "calls": 37,
+      "finish_reason": {
+        "tool_calls": 35,
+        "length": 2
+      },
+      "prompt_tokens_total": 218494,
+      "completion_tokens_total": 34662,
+      "cached_tokens_total": 130463,
+      "cache_ratio": 0.5971,
+      "completion_max": 1536
+    },
+    "evolution_level2": {
+      "calls": 4,
+      "finish_reason": {
+        "tool_calls": 3,
+        "length": 1
+      },
+      "prompt_tokens_total": 29826,
+      "completion_tokens_total": 3610,
+      "cached_tokens_total": 9668,
+      "cache_ratio": 0.3241,
+      "completion_max": 1536
+    }
+  },
+  "events": {
+    "action.resource": 11,
+    "dialogue.turn": 1,
+    "drive.adapted": 47,
+    "evolution.proposal_rejected": 2,
+    "experience.observed": 56,
+    "experience.recorded": 82,
+    "innovation.hypothesis_rejected": 1,
+    "knowledge.asserted": 26,
+    "life.archive": 7,
+    "life.clue": 7,
+    "life.crossing": 7,
+    "life.day": 7,
+    "life.debt": 7,
+    "life.explain_ration": 7,
+    "life.ferry_decay": 7,
+    "life.protect_secret": 7,
+    "life.ration": 5,
+    "life.repair": 6,
+    "life.rest": 21,
+    "life.withhold": 7,
+    "memory.reflected": 26,
+    "need.critical": 7,
+    "need.deprived": 504,
+    "need.relieved": 238,
+    "npc.intent": 64,
+    "npc.intent_expired": 4,
+    "npc.intent_rejected": 6,
+    "npc.process_completed": 56,
+    "npc.process_failed": 8,
+    "npc.schedule_applied": 50,
+    "reflection.committed": 14,
+    "reflection.rejected": 7,
+    "stimulus.habituated": 30,
+    "strategy.reflected": 14,
+    "structure.ferry_closed": 7,
+    "structure.ferry_opened": 7,
+    "world.initialized": 1
+  },
+  "notes": [
+    "Stable decision/reflection/evolution schemas were present in the binary used for this run.",
+    "The run predates the later bounded tradeoffs schema, partial reflection acceptance, compact pending hypothesis projection, and explicit governance harness.",
+    "finish_reason=length remains a rejected candidate until bounded continuation or Runtime rejection; no provider tool call is executed without validation."
+  ]
+}
