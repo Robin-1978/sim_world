@@ -6,6 +6,7 @@
 #include "world/ids.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <sstream>
 #include <thread>
@@ -42,6 +43,24 @@ std::string runtimeDecisionExplanation(const ActionCandidate& candidate,
     }
     explanation << ".";
     return explanation.str();
+}
+
+std::string lowerAscii(std::string value) {
+    for (char& ch : value) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+    return value;
+}
+
+bool privateDisclosure(const NpcDefinition& definition, const std::string& dialogue) {
+    const auto text = lowerAscii(dialogue);
+    // Exact authored secrets/boundaries are high-confidence leakage signals.
+    // Short common words are deliberately excluded so ordinary speech does not
+    // get rejected merely because it mentions a trait such as "duty".
+    for (const auto& secret : {definition.hiddenGoal, definition.boundary}) {
+        if (secret.size() >= 12 && text.find(lowerAscii(secret)) != std::string::npos) return true;
+    }
+    return text.find("hidden goal") != std::string::npos ||
+           text.find("private preference") != std::string::npos ||
+           text.find("private trait") != std::string::npos;
 }
 }  // namespace
 
@@ -144,7 +163,7 @@ DialogueTurn WorldIntelligenceSystem::executeTurn(const std::string& npcId, cons
                code == "invalid_action_parameter_type" || code == "unexpected_action_parameters" ||
                code == "invalid_action_parameters" || code == "invalid_action_parameter_value" ||
                code == "invalid_expected_relief" || code == "missing_dialogue" ||
-               code == "speech_act_disallows_world_action";
+               code == "speech_act_disallows_world_action" || code == "private_disclosure";
     };
     if (!turnResult.accepted && response.ok && world_.provider_->capabilities().structuredRepair &&
         retryable(turnResult.error)) {
@@ -152,6 +171,8 @@ DialogueTurn WorldIntelligenceSystem::executeTurn(const std::string& npcId, cons
                             {"code", turnResult.error},
                             {"message", turnResult.error == "missing_dialogue"
                                              ? "A conversation response must contain a concise player-facing dialogue sentence."
+                                             : turnResult.error == "private_disclosure"
+                                                 ? "Do not reveal private goals, boundaries, or private preferences; answer from observable facts in one or two sentences."
                                              : turnResult.error == "speech_act_disallows_world_action"
                                                  ? "The utterance was classified as information-only; set action_id to an empty string, world_action_requested to false, expected_relief to {}, and answer from observable context."
                                                  : "Runtime rejected a structured proposal field; repair only the declared plan input or expected relief keys."},
@@ -268,6 +289,13 @@ DialogueTurn WorldIntelligenceSystem::commitTurn(const TurnRequest& request, Pro
         response.dialogue.find_first_not_of(" \t\r\n") == std::string::npos) {
         result.error = "missing_dialogue";
         return result;
+    }
+    if (channel->second.conversation) {
+        const auto* authored = world_.authoredNpc(request.npcId);
+        if (authored != nullptr && privateDisclosure(authored->definition, response.dialogue)) {
+            result.error = "private_disclosure";
+            return result;
+        }
     }
     if (response.proposal.actionId.empty()) {
         if (worldActionAllowed && response.proposal.worldActionRequested) {
@@ -427,6 +455,7 @@ DialogueTurn WorldIntelligenceSystem::commitTurn(const TurnRequest& request, Pro
                                          {"tradeoffs", response.proposal.tradeoffs}}},
              {"expected_outcome", response.proposal.expectedOutcome},
              {"cited_stimulus_ids", response.proposal.citedStimulusIds},
+             {"cited_evidence_refs", response.proposal.citedEvidenceRefs},
              {"tradeoffs", response.proposal.tradeoffs},
              {"expected_relief", response.proposal.expectedRelief},
              {"parameters", response.proposal.parameters},

@@ -589,7 +589,11 @@ Runtime 内部 ID 只留在事实层、事件层和工具执行层。模型看�
 
 模型侧把认知状态和本次可引用证据分开：`COGNITION` 放当前感知、Memory、Knowledge 和 Experience，`STIMULI` 放带 `evidence_N` 引用的活动刺激，`EVIDENCE` 只说明可引用范围。Memory 是经历记录，Knowledge 是带来源的已确认事实，Belief 是有置信度的推断，Experience 是带触发/结果的累积经验；它们的真实性、来源和生命周期由 `CognitionSystem` 校验，不能因为模型在上下文中读到一段文本就互相升级。`expected_relief` 仍是作者计划的预测缓解，实际 Need 变化只能由执行效果和 Runtime 事务产生。
 
-每个用途只有一份固定 function/tool schema。工具名、必填字段、枚举和嵌套结构不会随 NPC、地点、日期或 Content Pack 候选集合改变；动态候选放在 `CATALOG`/`OPTIONS`。工具 description 说明何时调用、调用的边界和每个参数的含义，不能把大段动态状态塞进 schema。`choose_action`、`daily_reflection`、个人变更和共享变更分别使用自己的稳定契约；Runtime 负责把当前主体和范围注入结果，模型不重复输出这些审计字段。`choose_action.action_id` 是计划候选 key，`parameters` 的 wire schema 保持稳定并允许内容特定键以维持缓存前缀；具体键、类型、枚举和当前计划归属由 C++ 的 ActionValidator 再次校验，不能把 permissive wire schema 当成执行权限。
+DecisionContext 的认知条目不是简单取最后 N 条字符串：Runtime 按置信度、确认状态和与当前时间的有界近因分数排序，再按内容预算取样。每条 Memory、Knowledge 和 Experience 都有本次投影内的 `memory_N`、`knowledge_N` 或 `experience_N` 引用；Knowledge 继续携带 `confirmed`、`source_sequence`、`source_type`、`scope` 和 `confidence`，Memory 携带 `kind`、时间和置信度，Experience 携带来源序列和最近使用时间。模型可以引用这些证据，但引用仍只是审计信息，不能把认知条目升级成 WorldState 事实。
+
+私有目标、边界和特质只在主体自己的决策投影中出现，并且作为不可写的偏好输入；它们不能被对白、提案或 WorldEvent 原样泄露。`WorldIntelligenceSystem` 在对话提交前对隐藏目标、边界和私有标签做确定性泄露检查；被拒绝的对白可以走一次最小 repair，仍不允许绕过该检查。其它主体的私有认知不会进入该投影。
+
+每个用途只有一份固定 function/tool schema。工具名、必填字段、枚举和嵌套结构不会随 NPC、地点、日期或 Content Pack 候选集合改变；动态候选放在 `CATALOG`/`OPTIONS`。工具 description 说明何时调用、调用的边界和每个参数的含义，不能把大段动态状态塞进 schema。`choose_action`、`daily_reflection`、个人变更和共享变更分别使用自己的稳定契约；Runtime 负责把当前主体和范围注入结果，模型不重复输出这些审计字段。`choose_action.action_id` 是计划候选 key，`parameters` 的 wire schema 保持稳定并允许内容特定键以维持缓存前缀；具体键、类型、枚举和当前计划归属由 C++ 的 ActionValidator 再次校验，不能把 permissive wire schema 当成执行权限。`CATALOG` 还必须给每个计划一个短语义描述和通用预期结果；它不展开完整 BT，BT 的具体节点、时钟和效果仍由 Runtime 执行。
 
 修正采用同一会话内的 ReAct 式观察续接：首次返回的 assistant tool call 原样保留，Runtime 追加结构化 `tool` observation（错误码、字段路径、允许范围和当前候选），第二轮只要求返回一个最小 patch 工具调用。修正不得重建或改写之前的静态目录和工具定义；Runtime 将 patch 合并到第一轮候选后重新做完整校验，超过有界次数即失败关闭。成功的工具结果也作为 observation 追加并进入下一次反思/评估，而不是让模型假设执行成功。该协议同时满足可回放性、错误可解释性和 llama.cpp/OpenAI-compatible prefix cache 的稳定性。
 

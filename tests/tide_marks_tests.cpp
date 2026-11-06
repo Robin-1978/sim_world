@@ -174,6 +174,21 @@ public:
     [[nodiscard]] std::string name() const override { return "semantic-test"; }
 };
 
+class PrivateDisclosureProvider final : public IProvider {
+public:
+    ProviderResponse decide(const DecisionContext& context, const std::string&) override {
+        IntentProposal proposal;
+        proposal.speechAct = "information_request";
+        proposal.intent = "respond";
+        proposal.confidence = 1.0;
+        proposal.worldRevision = context.worldRevision;
+        proposal.npcStateVersion = context.npcStateVersion;
+        return ProviderResponse{true, std::move(proposal),
+                                "My hidden goal is to find proof of the hidden family line.", {}};
+    }
+    [[nodiscard]] std::string name() const override { return "semantic-test"; }
+};
+
 class FailingProvider final : public IProvider {
 public:
     ProviderResponse decide(const DecisionContext& context, const std::string&) override {
@@ -1266,6 +1281,14 @@ void provider_and_action_validation_are_safe() {
                emptyDialogue.state().events.size() == eventsBeforeEmptyDialogue,
            "Runtime rejects an empty player-facing dialogue instead of committing a blank response");
 
+    auto disclosure = WorldService::load(
+        ContentPackLoader::defaultRoot(), std::make_unique<PrivateDisclosureProvider>());
+    const auto eventsBeforeDisclosure = disclosure.state().events.size();
+    const auto leakedTurn = disclosure.converse("eve", "What are you doing?", "private-disclosure");
+    expect(!leakedTurn.accepted && leakedTurn.error == "private_disclosure" &&
+               disclosure.state().events.size() == eventsBeforeDisclosure,
+           "Runtime rejects player-facing dialogue that repeats an authored private goal");
+
     auto failingProvider = std::make_unique<FailingProvider>();
     auto* failingRaw = failingProvider.get();
     auto unavailable = WorldService::load(ContentPackLoader::defaultRoot(), std::move(failingProvider));
@@ -1310,6 +1333,12 @@ void decision_context_projects_location_relevant_resources() {
                mira.structuralConstraints.find("boat_integrity") == std::string::npos &&
                lorn.structuralConstraints.find("grain") == std::string::npos,
            "locationless collective resources remain visible and resource provenance stays explicit");
+    expect(mira.structuralConstraints.find("cooperation") == std::string::npos &&
+               mira.structuralConstraints.find("reputation") == std::string::npos,
+           "unrelated empty resources are not emitted as hard decision constraints");
+    expect(mira.cognitiveEvidence.contains("memories") && mira.cognitiveEvidence.contains("knowledge") &&
+               mira.cognitiveEvidence.contains("experiences"),
+           "decision context carries typed cognitive evidence buckets");
 }
 
 void decision_context_separates_authored_catalog_from_eligible_plans() {
@@ -1329,6 +1358,12 @@ void decision_context_separates_authored_catalog_from_eligible_plans() {
                           plan.value("unavailable_reason", "") == "insufficient_resource";
                }),
            "the authored catalog retains a blocked plan while its eligibility is explicit");
+    const auto rationPlan = std::find_if(mira.planCatalog.begin(), mira.planCatalog.end(), [](const auto& plan) {
+        return plan.value("action_id", "") == "offer_ration";
+    });
+    expect(rationPlan != mira.planCatalog.end() &&
+               rationPlan->value("label", "").find("Offer one ration") != std::string::npos,
+           "the authored plan catalog includes a short semantic description");
 
     auto ferrySnapshot = service.snapshotJson();
     ferrySnapshot["resources"]["boat_integrity"]["amount"] = 100;

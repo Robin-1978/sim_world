@@ -6,7 +6,10 @@
 #include "world/ids.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <map>
+#include <numeric>
+#include <set>
 #include <sstream>
 #include <string_view>
 
@@ -21,16 +24,6 @@ std::string join(const std::vector<std::string>& values, std::string_view separa
         output << values[i];
     }
     return output.str();
-}
-
-std::string joinRecent(const std::vector<std::string>& values, std::size_t limit,
-                       std::string_view separator) {
-    if (values.empty()) return {};
-    const auto first = values.size() > limit ? values.size() - limit : 0;
-    std::vector<std::string> recent;
-    recent.reserve(values.size() - first);
-    for (std::size_t index = first; index < values.size(); ++index) recent.push_back(values[index]);
-    return join(recent, separator);
 }
 
 Json quantityMapJson(const std::map<std::string, int>& quantities) {
@@ -273,14 +266,6 @@ DecisionContext DecisionContextProjector::build(const WorldState& state,
     if (stimuli.str().empty()) stimuli << "none beyond the current public state;";
     context.externalStimuli = stimuli.str();
 
-    for (const auto& [resourceId, resource] : state.resources) {
-        const auto definition = content.resources.find(resourceId);
-        if (definition == content.resources.end() || !resourceVisible(definition->second)) continue;
-        if (resource.amount - resource.reserved > 0) continue;
-        context.constraints.push_back(StructuralConstraintView{
-            "resource:" + resourceId + ":unavailable", "resource", resourceId,
-            "world_resource_rule", "No unreserved units of " + resourceId + " are available.", true});
-    }
     for (const auto& link : content.links) {
         const auto runtime = state.links.find(link.id);
         if (runtime == state.links.end() || (runtime->second.traversable && !runtime->second.locked)) continue;
@@ -291,29 +276,101 @@ DecisionContext DecisionContextProjector::build(const WorldState& state,
     context.constraints.push_back(StructuralConstraintView{
         "actions:authored_vocabulary", "capability", npcId, "content_action_whitelist",
         "Only the supplied authored action ids may be proposed.", true});
-    std::ostringstream constraints;
-    for (const auto& constraint : context.constraints) {
-        constraints << constraint.id << " [" << (constraint.hard ? "hard" : "soft") << "] "
-                    << constraint.reason << ';';
+    for (std::size_t index = 0; index < context.stimuli.size(); ++index) {
+        context.evidenceRefs["evidence_" + std::to_string(index + 1)] =
+            "stimulus:" + context.stimuli.at(index).id;
     }
-    context.structuralConstraints = constraints.str();
 
+    const auto recency = [&state](const GameTime at) {
+        const auto age = std::max<std::int64_t>(0, state.now.minute - at.minute);
+        return 1.0 / (1.0 + static_cast<double>(age) / static_cast<double>(kMinutesPerDay));
+    };
+    std::vector<std::size_t> memoryOrder(npc.memories.size());
+    std::iota(memoryOrder.begin(), memoryOrder.end(), 0);
+    std::stable_sort(memoryOrder.begin(), memoryOrder.end(), [&npc, &recency](const auto left, const auto right) {
+        const auto& a = npc.memories.at(left);
+        const auto& b = npc.memories.at(right);
+        const double aScore = 0.7 * std::clamp(a.confidence, 0.0, 1.0) + 0.3 * recency(a.at);
+        const double bScore = 0.7 * std::clamp(b.confidence, 0.0, 1.0) + 0.3 * recency(b.at);
+        if (aScore != bScore) return aScore > bScore;
+        if (a.at.minute != b.at.minute) return a.at.minute > b.at.minute;
+        return a.text < b.text;
+    });
     std::vector<std::string> memories;
-    for (const auto& memory : npc.memories) memories.push_back(memory.text);
-    context.memories = joinRecent(memories, content.decisionContextPolicy.maxMemories, " | ");
-    std::vector<std::string> knowledge;
-    for (const auto& fact : npc.knowledge) {
-        knowledge.push_back(fact.subject + " " + fact.predicate + " " + fact.value +
-                           " [confidence=" + std::to_string(fact.confidence) + ", scope=" + fact.scope + "]");
+    const auto memoryLimit = std::min(content.decisionContextPolicy.maxMemories, memoryOrder.size());
+    for (std::size_t rank = 0; rank < memoryLimit; ++rank) {
+        const auto& memory = npc.memories.at(memoryOrder.at(rank));
+        const std::string ref = "memory_" + std::to_string(rank + 1);
+        context.evidenceRefs[ref] = "memory";
+        context.cognitiveEvidence["memories"].push_back(
+            Json{{"ref", ref}, {"kind", memory.kind}, {"text", memory.text},
+                 {"at", memory.at.toString()}, {"confidence", std::clamp(memory.confidence, 0.0, 1.0)}});
+        memories.push_back(ref + ": " + memory.text + " [kind=" + memory.kind + ", at=" +
+                           memory.at.toString() + ", confidence=" + std::to_string(memory.confidence) + "]");
     }
-    context.knowledge = joinRecent(knowledge, content.decisionContextPolicy.maxKnowledge, " | ");
+    context.memories = join(memories, " | ");
+
+    std::vector<std::size_t> knowledgeOrder(npc.knowledge.size());
+    std::iota(knowledgeOrder.begin(), knowledgeOrder.end(), 0);
+    std::stable_sort(knowledgeOrder.begin(), knowledgeOrder.end(), [&npc, &recency](const auto left, const auto right) {
+        const auto& a = npc.knowledge.at(left);
+        const auto& b = npc.knowledge.at(right);
+        const double aScore = 0.55 * std::clamp(a.confidence, 0.0, 1.0) +
+                              0.3 * (a.confirmed ? 1.0 : 0.0) + 0.15 * recency(a.learnedAt);
+        const double bScore = 0.55 * std::clamp(b.confidence, 0.0, 1.0) +
+                              0.3 * (b.confirmed ? 1.0 : 0.0) + 0.15 * recency(b.learnedAt);
+        if (aScore != bScore) return aScore > bScore;
+        if (a.learnedAt.minute != b.learnedAt.minute) return a.learnedAt.minute > b.learnedAt.minute;
+        return a.id < b.id;
+    });
+    std::vector<std::string> knowledge;
+    const auto knowledgeLimit = std::min(content.decisionContextPolicy.maxKnowledge, knowledgeOrder.size());
+    for (std::size_t rank = 0; rank < knowledgeLimit; ++rank) {
+        const auto& fact = npc.knowledge.at(knowledgeOrder.at(rank));
+        const std::string ref = "knowledge_" + std::to_string(rank + 1);
+        context.evidenceRefs[ref] = "knowledge";
+        context.cognitiveEvidence["knowledge"].push_back(
+            Json{{"ref", ref}, {"subject", fact.subject}, {"predicate", fact.predicate},
+                 {"value", fact.value}, {"source_sequence", fact.sourceSequence},
+                 {"source_type", fact.sourceType}, {"learned_at", fact.learnedAt.toString()},
+                 {"scope", fact.scope}, {"confidence", std::clamp(fact.confidence, 0.0, 1.0)},
+                 {"confirmed", fact.confirmed}});
+        knowledge.push_back(ref + ": " + fact.subject + " " + fact.predicate + " " + fact.value +
+                            " [confirmed=" + (fact.confirmed ? "true" : "false") +
+                            ", confidence=" + std::to_string(fact.confidence) + ", source=" +
+                            std::to_string(fact.sourceSequence) + ", scope=" + fact.scope + "]");
+    }
+    context.knowledge = join(knowledge, " | ");
+
+    std::vector<std::size_t> experienceOrder(npc.experiences.size());
+    std::iota(experienceOrder.begin(), experienceOrder.end(), 0);
+    std::stable_sort(experienceOrder.begin(), experienceOrder.end(), [&npc, &recency](const auto left, const auto right) {
+        const auto& a = npc.experiences.at(left);
+        const auto& b = npc.experiences.at(right);
+        const double aScore = 0.65 * std::clamp(a.confidence, 0.0, 1.0) + 0.35 * recency(a.lastUsed);
+        const double bScore = 0.65 * std::clamp(b.confidence, 0.0, 1.0) + 0.35 * recency(b.lastUsed);
+        if (aScore != bScore) return aScore > bScore;
+        if (a.lastUsed.minute != b.lastUsed.minute) return a.lastUsed.minute > b.lastUsed.minute;
+        return a.id < b.id;
+    });
     std::vector<std::string> experiences;
-    for (const auto& experience : npc.experiences) {
-        experiences.push_back(experience.domain + ": when " + experience.trigger + ", " +
+    const auto experienceLimit = std::min(content.decisionContextPolicy.maxExperiences, experienceOrder.size());
+    for (std::size_t rank = 0; rank < experienceLimit; ++rank) {
+        const auto& experience = npc.experiences.at(experienceOrder.at(rank));
+        const std::string ref = "experience_" + std::to_string(rank + 1);
+        context.evidenceRefs[ref] = "experience";
+        context.cognitiveEvidence["experiences"].push_back(
+            Json{{"ref", ref}, {"domain", experience.domain}, {"trigger", experience.trigger},
+                 {"action", experience.action}, {"outcome", experience.outcome},
+                 {"source_sequences", experience.sourceSequences}, {"learned_at", experience.learnedAt.toString()},
+                 {"last_used", experience.lastUsed.toString()},
+                 {"confidence", std::clamp(experience.confidence, 0.0, 1.0)},
+                 {"personal", experience.personal}});
+        experiences.push_back(ref + ": " + experience.domain + ": when " + experience.trigger + ", " +
                               experience.action + " -> " + experience.outcome +
                               " [confidence=" + std::to_string(experience.confidence) + "]");
     }
-    context.experiences = joinRecent(experiences, content.decisionContextPolicy.maxExperiences, " | ");
+    context.experiences = join(experiences, " | ");
     context.character = authoredDefinition.name + ": " + authoredDefinition.role + "; public goal=" +
                         authoredDefinition.publicGoal;
     context.privateCharacter = "hidden goal=" + authoredDefinition.hiddenGoal +
@@ -390,6 +447,35 @@ DecisionContext DecisionContextProjector::build(const WorldState& state,
     for (auto& candidate : context.candidates) {
         markAvailability(state, content, npcId, candidate);
     }
+    // A resource constraint is useful only when an authored candidate
+    // actually reserves that resource and the captured ledger cannot satisfy
+    // the reservation. Do not turn unrelated empty public pools into hard
+    // constraints for every plan in the context.
+    std::set<std::string> constrainedResources;
+    for (const auto& candidate : context.candidates) {
+        if (candidate.reservationMode != "input_resources") continue;
+        for (const auto& [resourceId, required] : candidate.reservations) {
+            if (required <= 0 || constrainedResources.contains(resourceId)) continue;
+            const auto found = state.resources.find(resourceId);
+            const int available = found == state.resources.end() ? 0 : found->second.amount - found->second.reserved;
+            if (available >= required) continue;
+            const int missing = required - std::max(0, available);
+            constrainedResources.insert(resourceId);
+            context.constraints.push_back(StructuralConstraintView{
+                "resource:" + resourceId + ":unavailable", "resource", resourceId,
+                "world_resource_rule",
+                "A plan requires " + std::to_string(required) + " " + resourceId +
+                    "; " + std::to_string(std::max(0, available)) + " unreserved, " +
+                    std::to_string(missing) + " missing.",
+                true});
+        }
+    }
+    std::ostringstream constraints;
+    for (const auto& constraint : context.constraints) {
+        constraints << constraint.id << " [" << (constraint.hard ? "hard" : "soft") << "] "
+                    << constraint.reason << ';';
+    }
+    context.structuralConstraints = constraints.str();
     for (const auto& needDefinition : needs) {
         const auto need = npc.needs.find(needDefinition.id);
         if (need == npc.needs.end()) continue;

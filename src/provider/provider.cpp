@@ -8,6 +8,7 @@
 #include <fstream>
 #include <iostream>
 #include <iomanip>
+#include <set>
 #include <sstream>
 
 namespace tide_marks {
@@ -106,15 +107,32 @@ std::string promptSections(const std::vector<std::pair<std::string, Json>>& sect
     return output.str();
 }
 
-std::string promptObjectSections(const Json& value) {
+std::string modelProjectionText(const Json& value) {
+    if (!value.is_object()) return promptScalar(value);
+    static const std::array<std::pair<const char*, const char*>, 6> ordered{
+        std::pair{"task", "TASK"}, std::pair{"state", "STATE"},
+        std::pair{"evidence", "EVIDENCE"}, std::pair{"innovation", "INNOVATION"},
+        std::pair{"constraints", "CONSTRAINTS"}, std::pair{"availability", "OPTIONS"}};
     std::vector<std::pair<std::string, Json>> sections;
-    if (value.is_object()) {
-        sections.reserve(value.size());
-        for (auto item = value.begin(); item != value.end(); ++item) {
-            sections.emplace_back(item.key(), item.value());
-        }
+    sections.reserve(value.size());
+    std::set<std::string> emitted;
+    for (const auto& [key, title] : ordered) {
+        if (!value.contains(key)) continue;
+        sections.emplace_back(title, value.at(key));
+        emitted.emplace(key);
+    }
+    for (auto item = value.begin(); item != value.end(); ++item) {
+        if (emitted.contains(item.key())) continue;
+        sections.emplace_back(item.key(), item.value());
     }
     return promptSections(sections);
+}
+
+Json layeredMessages(const std::string& systemPrompt, const Json& catalog,
+                     const std::string& dynamicText) {
+    return Json::array({Json{{"role", "system"}, {"content", systemPrompt}},
+                        Json{{"role", "user"}, {"content", promptSection("CATALOG", catalog)}},
+                        Json{{"role", "user"}, {"content", dynamicText}}});
 }
 
 Json decisionWorldForModel(const Json& source) {
@@ -408,48 +426,6 @@ std::string visibleNameFor(const DecisionContext& context, const std::string& id
     return "someone";
 }
 
-std::string decisionCatalogText(const Json& plans, const Json& speechActs) {
-    Json planLines = Json::array();
-    if (plans.is_array()) {
-        for (const auto& plan : plans) {
-            std::ostringstream line;
-            line << plan.value("action_id", "") << " — " << plan.value("name", "");
-            const auto label = plan.value("label", "");
-            if (!label.empty()) line << "; " << label;
-            line << "; takes " << plan.value("duration_minutes", 0) << " minutes"
-                 << "; " << (plan.value("interruptible", true) ? "interruptible" : "not interruptible")
-                 << "; priority " << plan.value("priority", 0);
-            const auto reservations = plan.value("reservations", Json::object());
-            if (reservations.is_object() && !reservations.empty()) {
-                line << "; reserves ";
-                bool first = true;
-                for (auto item = reservations.begin(); item != reservations.end(); ++item) {
-                    if (!first) line << ", ";
-                    first = false;
-                    line << item.key() << " " << promptScalar(item.value());
-                }
-            }
-            const auto parameters = plan.value("parameters", Json::array());
-            if (parameters.is_array() && !parameters.empty()) {
-                line << "; parameters ";
-                for (std::size_t index = 0; index < parameters.size(); ++index) {
-                    if (index != 0) line << ", ";
-                    line << promptScalar(parameters.at(index));
-                }
-            }
-            planLines.push_back(line.str());
-        }
-    }
-    Json speechLines = Json::array();
-    if (speechActs.is_array()) {
-        for (const auto& speech : speechActs) {
-            speechLines.push_back(speech.value("id", "") + ": " + speech.value("description", "") +
-                                  (speech.value("world_action_allowed", false) ? " (may request action)" : " (conversation only)"));
-        }
-    }
-    return promptSections({{"CATALOG", Json{{"plans", planLines}, {"speech", speechLines}}}});
-}
-
 std::string locationText(const Json& value) {
     if (!value.is_object()) return promptScalar(value);
     const auto name = value.value("name", "unknown place");
@@ -655,13 +631,23 @@ std::string decisionRuntimeText(const Json& task, const Json& state, const Json&
     appendTextBlock(output, "Private traits:", traitsText(state.value("private_traits", Json::object())));
     output << "</STATE>\n\n<COGNITION>\n";
     appendTextLine(output, "Perception: " + evidence.value("perception", ""));
-    appendTextLine(output, "Memories: " + evidence.value("memories", ""));
-    appendTextLine(output, "Knowledge: " + evidence.value("knowledge", ""));
-    appendTextLine(output, "Experience: " + evidence.value("experiences", ""));
+    const auto appendCognition = [&output](const std::string& title, const Json& entries) {
+        output << "  " << title << '\n';
+        if (entries.is_string()) {
+            appendTextBlock(output, "", entries.get<std::string>());
+        } else if (entries.is_array() || entries.is_object()) {
+            appendPromptValue(output, entries, 4);
+        } else {
+            output << "    (none)\n";
+        }
+    };
+    appendCognition("Memories:", evidence.value("memories", Json::array()));
+    appendCognition("Knowledge:", evidence.value("knowledge", Json::array()));
+    appendCognition("Experience:", evidence.value("experiences", Json::array()));
     output << "</COGNITION>\n\n<STIMULI>\n";
     appendTextBlock(output, "Active stimuli:", stimuliText(evidence.value("stimuli", Json::array())));
     output << "</STIMULI>\n\n<EVIDENCE>\n";
-    appendTextLine(output, "Citeable evidence refs are the evidence_N refs shown under STIMULI; empty means cite none.");
+    appendTextLine(output, "Cite only refs shown in this context: evidence_N stimuli, memory_N memories, knowledge_N facts, or experience_N experiences. Empty means cite none.");
     output << "</EVIDENCE>\n\n<CONSTRAINTS>\n";
     if (!constraints.is_array() || constraints.empty()) {
         appendTextLine(output, "No additional constraints.");
@@ -1213,7 +1199,8 @@ ProviderResponse LlamaCppProvider::decide(const DecisionContext& context, const 
         if (!plan.is_object()) continue;
         Json readable{{"action_id", plan.value("action_id", "")},
                       {"name", plan.value("recipe_id", plan.value("action_id", ""))},
-                      {"label", plan.value("label", "")},
+                      {"description", plan.value("label", "")},
+                      {"expected_result", "Complete the authored behavior and apply its declared effects."},
                       {"duration_minutes", plan.value("duration_minutes", 0)},
                       {"interruptible", plan.value("interruptible", true)},
                       {"priority", plan.value("priority", 0)},
@@ -1328,15 +1315,14 @@ ProviderResponse LlamaCppProvider::decide(const DecisionContext& context, const 
                                      {"referenced_entities", Json{{"type", "array"},
                                                                    {"items", Json{{"type", "string"}}}}},
                                      {"ambiguity", Json{{"type", "string"}}}}}};
+            const auto understandingMessages = layeredMessages(
+                understandingPrompt, understandingUser.at("catalog"),
+                promptSections({{"TASK", understandingUser.at("task")},
+                                {"STATE", understandingUser.at("state")}}));
             Json understandingRequest{
                 {"model", endpointConfig.model}, {"temperature", endpointConfig.temperature},
                 {"max_tokens", understandingPolicy->second.maxTokens},
-                {"messages", Json::array({Json{{"role", "system"}, {"content", understandingPrompt}},
-                                          Json{{"role", "user"},
-                                               {"content", promptSections({
-                                                                {"task", understandingUser.at("task")},
-                                                                {"state", understandingUser.at("state")},
-                                                                {"catalog", understandingUser.at("catalog")}})}}})},
+                {"messages", understandingMessages},
                 {"tools", Json::array({Json{{"type", "function"},
                                                {"function", Json{{"name", "understand_utterance"},
                                                                   {"description", "Interpret the player's utterance."},
@@ -1396,9 +1382,12 @@ ProviderResponse LlamaCppProvider::decide(const DecisionContext& context, const 
                                {"state", modelState},
                                {"evidence", Json{{"perception", context.perception},
                                                   {"stimuli", stimuli},
-                                                  {"memories", context.memories},
-                                                  {"knowledge", context.knowledge},
-                                                  {"experiences", context.experiences}}},
+                                                  {"memories", context.cognitiveEvidence.value(
+                                                       "memories", context.memories)},
+                                                  {"knowledge", context.cognitiveEvidence.value(
+                                                       "knowledge", context.knowledge)},
+                                                  {"experiences", context.cognitiveEvidence.value(
+                                                       "experiences", context.experiences)}}},
                                {"constraints", constraints},
                                {"availability", Json{{"eligible_plan_keys", availableActionIds},
                                                       {"unavailable_plans", unavailablePlans},
@@ -1423,14 +1412,11 @@ ProviderResponse LlamaCppProvider::decide(const DecisionContext& context, const 
         "- Keep dialogue to one or two first-person sentences. Do not reveal private preferences or generate an inner monologue.\n"
         "</rules>\n"
         "<output>Return exactly one function result. Autonomous output uses action_id, intent, confidence, evidence_refs, expected_relief and parameters. Conversation may also include dialogue.</output>";
-    Json messages = Json::array();
-    messages.push_back(Json{{"role", "system"}, {"content", systemPrompt}});
-    messages.push_back(Json{{"role", "user"},
-                            {"content", decisionCatalogText(staticPlanCatalog, speechActs)}});
-    messages.push_back(Json{{"role", "user"},
-                            {"content", decisionRuntimeText(dynamicContent.at("task"), dynamicContent.at("state"),
-                                                             dynamicContent.at("evidence"), constraints,
-                                                             dynamicContent.at("availability"))}});
+    Json messages = layeredMessages(
+        systemPrompt, stableContent.at("catalog"),
+        decisionRuntimeText(dynamicContent.at("task"), dynamicContent.at("state"),
+                            dynamicContent.at("evidence"), constraints,
+                            dynamicContent.at("availability")));
     // Keep the complete decision context byte-for-byte stable on a repair;
     // append the previous structured answer and Runtime observation as a
     // continuation instead of rebuilding the context from scratch.
@@ -1520,17 +1506,14 @@ ProviderResponse LlamaCppProvider::decide(const DecisionContext& context, const 
         proposal.npcStateVersion = context.npcStateVersion;
         const auto evidenceRefs = answer.value("evidence_refs", std::vector<std::string>{});
         for (const auto& ref : evidenceRefs) {
-            if (!ref.starts_with("evidence_")) return ProviderResponse{false, {}, {}, "unknown_evidence_ref"};
-            std::size_t index = 0;
-            try {
-                index = static_cast<std::size_t>(std::stoul(ref.substr(std::string("evidence_").size())));
-            } catch (...) {
+            const auto source = context.evidenceRefs.find(ref);
+            if (source == context.evidenceRefs.end()) {
                 return ProviderResponse{false, {}, {}, "unknown_evidence_ref"};
             }
-            if (index == 0 || index > context.stimuli.size()) {
-                return ProviderResponse{false, {}, {}, "unknown_evidence_ref"};
+            proposal.citedEvidenceRefs.push_back(ref);
+            if (source->second.starts_with("stimulus:")) {
+                proposal.citedStimulusIds.push_back(source->second.substr(std::string("stimulus:").size()));
             }
-            proposal.citedStimulusIds.push_back(context.stimuli.at(index - 1).id);
         }
         proposal.tradeoffs = answer.value("tradeoffs", std::vector<std::string>{});
         const auto expectedRelief = answer.value("expected_relief", Json::object());
@@ -1776,10 +1759,8 @@ ProviderResponse LlamaCppProvider::proposeEvolution(const Json& context,
     request["model"] = endpointConfig.model;
     request["temperature"] = endpointConfig.temperature;
     request["max_tokens"] = policy.maxTokens;
-    request["messages"] = Json::array({
-        Json{{"role", "system"}, {"content", systemPrompt}},
-        Json{{"role", "user"}, {"content", promptSections({{"catalog", stableContext}})}},
-        Json{{"role", "user"}, {"content", promptObjectSections(modelContext)}}});
+    request["messages"] = layeredMessages(systemPrompt, stableContext,
+                                            modelProjectionText(modelContext));
     const std::string toolName = evolutionLevel == "level1" ? "propose_npc_change" : "propose_world_change";
     appendValidationContinuation(request["messages"], validationFeedback, toolName, "previous_proposal");
     // Use a single forced tool call for proposals.  This follows the same
@@ -2032,10 +2013,8 @@ ProviderResponse LlamaCppProvider::proposeReflection(const Json& context,
     const std::string repairToolName = "repair_daily_reflection";
     Json request{
         {"model", endpointConfig.model}, {"temperature", endpointConfig.temperature}, {"max_tokens", policy.maxTokens},
-        {"messages", Json::array({Json{{"role", "system"}, {"content", systemPrompt}},
-                                   Json{{"role", "user"},
-                                        {"content", promptSections({{"catalog", stableContext.at("catalog")}})}},
-                                   Json{{"role", "user"}, {"content", promptObjectSections(modelContext)}}})},
+        {"messages", layeredMessages(systemPrompt, stableContext.at("catalog"),
+                                      modelProjectionText(modelContext))},
         {"tools", Json::array({Json{{"type", "function"},
                                      {"function", Json{{"name", "daily_reflection"},
                                                         {"description", "Return one bounded daily reflection result."},

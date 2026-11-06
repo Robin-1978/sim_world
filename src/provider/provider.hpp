@@ -98,6 +98,16 @@ struct DecisionContext {
     // into dialogue unless an authored disclosure rule permits it.
     std::string privateCharacter;
     Json privateTraits = Json::object();
+    // Bounded, provenance-bearing cognitive entries used in the model-facing
+    // projection. The legacy strings above remain for provider adapters and
+    // diagnostics; these arrays prevent recency-only text truncation.
+    Json cognitiveEvidence = Json{{"memories", Json::array()},
+                                  {"knowledge", Json::array()},
+                                  {"experiences", Json::array()}};
+    // Stable per-request references accepted in IntentProposal.evidence_refs.
+    // Values identify the source class; Runtime still validates stimulus IDs
+    // and all proposal revisions before committing a fact.
+    std::map<std::string, std::string> evidenceRefs;
     std::string internalDrives;
     std::string externalStimuli;
     std::string structuralConstraints;
@@ -132,6 +142,7 @@ struct IntentProposal {
     std::uint64_t worldRevision{0};
     std::uint64_t npcStateVersion{0};
     std::vector<std::string> citedStimulusIds;
+    std::vector<std::string> citedEvidenceRefs;
     std::vector<std::string> tradeoffs;
     std::map<std::string, double> expectedRelief;
     std::string speechAct;
