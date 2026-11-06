@@ -29,6 +29,20 @@ std::string stablePromptHash(const std::string& value) {
     output << std::hex << hash;
     return output.str();
 }
+
+std::string runtimeDecisionExplanation(const ActionCandidate& candidate,
+                                       const bool longRunning) {
+    std::ostringstream explanation;
+    explanation << "Runtime accepted authored action '" << candidate.actionId << "' after deterministic "
+                << "candidate, utility, permission, and constraint validation";
+    if (longRunning) {
+        explanation << "; its behavior tree runs for " << candidate.durationMinutes << " simulated minutes";
+    } else {
+        explanation << "; its immediate effects were applied in the committed transaction";
+    }
+    explanation << ".";
+    return explanation.str();
+}
 }  // namespace
 
 DialogueTurn WorldIntelligenceSystem::converse(const std::string& npcId,
@@ -271,7 +285,9 @@ DialogueTurn WorldIntelligenceSystem::commitTurn(const TurnRequest& request, Pro
                  {"context_npc_state_version", response.proposal.npcStateVersion}});
         result.accepted = true;
         result.intent = response.proposal.intent;
-        result.motivation = response.proposal.rationale;
+        result.motivation = response.proposal.rationale.empty()
+                                ? "Runtime accepted a conversation-only response; no world action was selected."
+                                : response.proposal.rationale;
         result.dialogue = response.dialogue;
         result.event = event;
         world_.syncNpcEntityState();
@@ -295,6 +311,11 @@ DialogueTurn WorldIntelligenceSystem::commitTurn(const TurnRequest& request, Pro
         result.error = "unknown_action_id";
         return result;
     }
+    const std::string runtimeExplanation =
+        runtimeDecisionExplanation(*candidate, candidate->durationMinutes > 0);
+    const std::string effectiveMotivation = response.proposal.rationale.empty()
+                                                ? runtimeExplanation
+                                                : response.proposal.rationale;
     auto& mutableNpc = world_.state_.npcs.at(request.npcId);
     if (mutableNpc.activity.process) {
         double incomingSalience = channel->second.conversation ? 1.0 : 0.0;
@@ -355,7 +376,7 @@ DialogueTurn WorldIntelligenceSystem::commitTurn(const TurnRequest& request, Pro
         mutableNpc.activity.goal = GoalState{goalId, response.proposal.intent, candidate->actionId,
                                              response.proposal.confidence, GoalStatus::Active, world_.state_.now,
                                              GameTime{world_.state_.now.minute + candidate->durationMinutes},
-                                             response.proposal.rationale};
+                                             effectiveMotivation};
         ProcessExecution process;
         process.id = processId;
         process.goalId = goalId;
@@ -394,6 +415,10 @@ DialogueTurn WorldIntelligenceSystem::commitTurn(const TurnRequest& request, Pro
              {"duration_minutes", candidate->durationMinutes},
              {"process_status", candidate->durationMinutes > 0 ? "running" : "completed"},
              {"intent", response.proposal.intent}, {"motivation", response.proposal.rationale},
+             {"runtime_explanation", runtimeExplanation},
+             {"model_explanation", Json{{"motivation", response.proposal.rationale},
+                                         {"expected_outcome", response.proposal.expectedOutcome},
+                                         {"tradeoffs", response.proposal.tradeoffs}}},
              {"expected_outcome", response.proposal.expectedOutcome},
              {"cited_stimulus_ids", response.proposal.citedStimulusIds},
              {"tradeoffs", response.proposal.tradeoffs},
@@ -406,7 +431,7 @@ DialogueTurn WorldIntelligenceSystem::commitTurn(const TurnRequest& request, Pro
              {"context_npc_state_version", response.proposal.npcStateVersion}});
     result.actionId = response.proposal.actionId;
     result.intent = response.proposal.intent;
-    result.motivation = response.proposal.rationale;
+    result.motivation = effectiveMotivation;
     result.dialogue = response.dialogue;
     result.event = event;
     world_.syncNpcEntityState();

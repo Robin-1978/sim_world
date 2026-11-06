@@ -24,6 +24,25 @@ std::string clipDebug(const std::string& value, const std::size_t limit = 4096) 
     if (value.size() <= limit) return value;
     return value.substr(0, limit) + "...[debug output clipped]";
 }
+std::string summarizeDebugToolCalls(const Json& toolCalls, const bool full) {
+    if (!toolCalls.is_array()) return "[]";
+    if (full) return clipDebug(toolCalls.dump(), 16384);
+    Json summary = Json::array();
+    for (const auto& call : toolCalls) {
+        if (!call.is_object()) {
+            summary.push_back(Json{{"type", "invalid"}});
+            continue;
+        }
+        const auto function = call.value("function", Json::object());
+        const auto arguments = function.value("arguments", "");
+        summary.push_back(Json{{"id", call.value("id", "")},
+                               {"type", call.value("type", "")},
+                               {"name", function.value("name", "")},
+                               {"argument_bytes", arguments.size()},
+                               {"arguments", clipDebug(arguments, 768)}});
+    }
+    return summary.dump();
+}
 struct ProviderJsonResult {
     bool ok{false};
     Json value = Json::object();
@@ -129,11 +148,14 @@ ProviderJsonResult requestProviderJson(const LlamaCppConfig& config, const Json&
         if (const char* debug = std::getenv("TIDE_MARKS_DEBUG_PROVIDER");
             debug != nullptr && *debug != '\0' && std::string(debug) != "0") {
             const auto& debugMessage = choice.at("message");
+            const char* fullDebugEnv = std::getenv("TIDE_MARKS_DEBUG_PROVIDER_FULL");
+            const bool fullDebug = fullDebugEnv != nullptr && *fullDebugEnv != '\0' &&
+                                   std::string(fullDebugEnv) != "0";
             std::cerr << "provider_debug stage=" << stage
                       << " finish_reason=" << choice.value("finish_reason", "")
                       << " usage=" << outer.value("usage", Json::object()).dump()
-                      << " content=" << clipDebug(debugMessage.value("content", ""))
-                      << " tool_calls=" << clipDebug(debugMessage.value("tool_calls", Json::array()).dump())
+                      << " content=" << clipDebug(debugMessage.value("content", ""), fullDebug ? 16384 : 1024)
+                      << " tool_calls=" << summarizeDebugToolCalls(debugMessage.value("tool_calls", Json::array()), fullDebug)
                       << "\n";
         }
         if (choice.value("finish_reason", "") == "length") {
@@ -498,12 +520,13 @@ ProviderResponse LlamaCppProvider::decide(const DecisionContext& context, const 
         "Do not ask the player to repeat information already present in player_input. "
         "cited_stimulus_ids may contain only IDs from the supplied stimuli array. If that array is empty, cited_stimulus_ids MUST be []. Never use a drive or need ID as a stimulus ID. "
         "expected_relief is a map of predicted need relief, not a copy of utility_contributions or utility terms. It may contain only need IDs from the supplied drives array. Never put resource_cost, risk, future_value, relationship_effect, trait terms, or any other utility label in expected_relief. Use an empty object when none are supplied, and expected_relief MUST be empty when action_id is empty. "
-        "expected_outcome is a short natural-language outcome sentence; do not serialize utility terms or JSON into it. "
-        "confidence and expected_relief values must be numbers from 0 to 1. dialogue must be one or two natural first-person sentences spoken by the NPC, never a dump of context fields. "
+        "expected_outcome is optional diagnostic text for a player-facing response; do not serialize utility terms or JSON into it. "
+        "For autonomous decisions, omit motivation, expected_outcome, tradeoffs, and dialogue unless a short diagnostic is explicitly useful. "
+        "For player-facing conversation, dialogue must be one or two natural first-person sentences spoken by the NPC, never a dump of context fields. "
         "knowledge and experiences are NPC-scoped, sourced context; they may guide a proposal but never authorize bypassing current facts or constraints. "
         "If validation_feedback is non-empty, repair only the reported action, parameter, or expected relief field problem in one response. "
         "Do not repeat an invalid action or parameter, and do not invent a candidate outside plan_catalog. "
-        "motivation and tradeoffs explain the decision; they are not actions. Do not use markdown or add explanation outside the JSON object.";
+        "motivation and tradeoffs are optional explanation fields, never actions. Do not generate an inner monologue or repeat the decision context. Do not use markdown or add explanation outside the JSON object.";
     Json messages = Json::array();
     messages.push_back(Json{{"role", "system"}, {"content", systemPrompt}});
     messages.push_back(Json{{"role", "user"}, {"content", userContent.dump()}});
@@ -516,10 +539,12 @@ ProviderResponse LlamaCppProvider::decide(const DecisionContext& context, const 
     // caching; ActionValidator still checks every key against the selected
     // plan's authored schema and the current needs before committing facts.
     Json parametersSchema{{"type", "object"}, {"additionalProperties", true}};
+    std::vector<std::string> requiredFields{"action_id", "intent", "confidence", "cited_stimulus_ids",
+                                             "expected_relief", "parameters"};
+    if (context.speechActClassificationRequired) requiredFields.push_back("dialogue");
     const Json responseSchema{
         {"type", "object"}, {"additionalProperties", false},
-        {"required", Json::array({"action_id", "intent", "motivation", "expected_outcome", "confidence",
-                                   "dialogue", "cited_stimulus_ids", "tradeoffs", "expected_relief", "parameters"})},
+        {"required", requiredFields},
         {"properties", Json{{"action_id", Json{{"type", "string"}}},
                              {"intent", Json{{"type", "string"}, {"maxLength", 128}}},
                              {"motivation", Json{{"type", "string"}, {"maxLength", 512}}},

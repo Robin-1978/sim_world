@@ -953,6 +953,12 @@ void async_turn_queue_commits_results_with_current_context() {
                return event.type == "npc.intent";
            }),
            "a current asynchronous proposal commits through the normal intent path");
+    const auto intentEvent = std::find_if(service.state().events.begin(), service.state().events.end(),
+                                          [](const auto& event) { return event.type == "npc.intent"; });
+    expect(intentEvent != service.state().events.end() &&
+               intentEvent->data.contains("runtime_explanation") &&
+               intentEvent->data.at("model_explanation").is_object(),
+           "accepted autonomous intent keeps a deterministic Runtime explanation separate from optional model text");
     expect(std::any_of(service.state().npcs.begin(), service.state().npcs.end(), [](const auto& entry) {
                return entry.second.activity.status == ActivityStatus::Active ||
                       entry.second.activity.status == ActivityStatus::Completed;

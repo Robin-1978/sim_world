@@ -80,9 +80,9 @@ JSON 是内容和提案的机器边界，C++ 类型是编译期契约，WorldSta
 
 内驱是主体内部的连续状态；外驱是世界对主体施加的已记录刺激；结构约束不是驱动力，而是定义哪些意图可以落地的边界。LLM 可以把“粮食减少、邻居求助和承诺截止”理解为一组社会情境，但不能把不存在的粮食、权限或道路写进上下文。
 
-Runtime 状态的事实投影与 LLM 的解释字段严格分开。`current_activity`、位置、需求缺口、Goal、`ProcessExecution`、BT 进度、资源预留和关系都由 C++ 维护；LLM 只根据授权投影组织语言或选择候选计划。`utterance_understanding.ambiguity` 是输入分类的不确定性，`IntentProposal.motivation` 是对已选计划的短解释；二者以及 `dialogue`、`rationale`、`tradeoffs`、`expected_outcome` 都不具备事实写入权，不能创建或修改 Goal、hidden goal、Memory、需求权重或世界事件。只有经过 ActionValidator、Revision/权限校验并由 Runtime 执行 BT 后，实际效果才进入 WorldState、EventLog 和认知投影。
+Runtime 状态的事实投影与 LLM 的解释字段严格分开。`current_activity`、位置、需求缺口、Goal、`ProcessExecution`、BT 进度、资源预留和关系都由 C++ 维护；LLM 只根据授权投影组织语言或选择候选计划。`utterance_understanding.ambiguity` 是输入分类的不确定性，`IntentProposal.motivation` 是对已选计划的可选短解释；二者以及 `dialogue`、`rationale`、`tradeoffs`、`expected_outcome` 都不具备事实写入权，不能创建或修改 Goal、hidden goal、Memory、需求权重或世界事件。自主决策的最小输出只包含 `action_id`、`parameters`、`confidence`、`cited_stimulus_ids`、`expected_relief` 等 Runtime 必需字段；玩家对话才要求非空 `dialogue`。只有经过 ActionValidator、Revision/权限校验并由 Runtime 执行 BT 后，实际效果才进入 WorldState、EventLog 和认知投影。
 
-这些字段服务于可读性和审计，允许客户端呈现 NPC 的“内心独白风格”，但不宣称它们是模型真实推理的忠实因果追踪；它们可能是事后合理化。可验证解释必须同时展示 Runtime 的候选计划、确定性 utility/需求贡献、硬约束过滤、模型选中的 `action_id`、校验结果和 BT 实际结果。若模型 `motivation` 与这些事实冲突，保留冲突并以 Runtime 记录为准。
+这些字段服务于可读性和审计，允许客户端在需要时呈现 NPC 的“内心独白风格”，但不宣称它们是模型真实推理的忠实因果追踪；它们可能是事后合理化，也不应在每次自主行动中强制生成。可验证解释必须同时展示 Runtime 的候选计划、确定性 utility/需求贡献、硬约束过滤、模型选中的 `action_id`、校验结果和 BT 实际结果。Runtime 会为已提交的行动生成确定性摘要，并把模型自述放在独立的 `model_explanation` 审计字段中；若模型 `motivation` 与这些事实冲突，保留冲突并以 Runtime 记录为准。
 
 ### 内驱：需求域、驱动状态与自动适应
 
@@ -277,7 +277,7 @@ NPC 不每帧调用 LLM。日常移动、进食、休息、工作、资源结算
 
 ## 6. 对话、记忆和 LLM 演化
 
-对话输入先进入 LLM 的 `utterance_understanding` 阶段，由模型根据内容包为每类话语行为提供的 `description` 和 `world_action_allowed` 识别通信意图；Runtime 不扫描玩家文本，也不保存关键词表，更不能从候选动作反推玩家意图。随后 `player_dialogue` 阶段读取结构化理解、当前活动、记忆和授权事实，生成回答以及可选的 `action_id`。主体投影把公开角色信息与 `private_character` 分开；隐藏目标、私有边界和内部策略可以用于权衡，但除非内容显式授权披露，否则不能被复制到对白、记忆或玩家可见事件。Provider 失败时，对话 Turn 直接失败且不写事件、不启动过程；Runtime 不会用关键词或固定台词伪造一次语义理解。Runtime 永远根据模型返回的话语行为 ID 和内容包权限重新校验是否允许行动，不接受模型自行授予权限。问候、询问、结束和普通陈述可以配置为仅对话；请求、命令、谈判和承诺可以配置为允许产生行动提案。结构化理解包含 `speech_act`、`communication_goal`、`action_requested`、引用实体和歧义；结构化决策包含 `action_id`、`parameters`、`intent`、`motivation`、`dialogue`、`cited_stimulus_ids`、`tradeoffs`、`expected_relief`、候选记忆和上下文版本。`parameters` 只能填充候选计划声明的 JSON Schema，并随 `ProcessExecution` 保存，恢复时不要求模型重建。`cited_stimulus_ids` 指出模型实际依据的外驱，`tradeoffs` 解释权衡，`expected_relief` 表达预测；这些字段用于审计、学习和回放校验，不能直接写入事实。`motivation` 只用于解释和诊断；`action_id` 必须属于当前 DecisionContext。仅对话响应使用空 `action_id`，必须同时包含非空玩家可见 `dialogue`，否则 Runtime 失败关闭且不写事件；它不会进入行为树或修改世界事实。
+对话输入先进入 LLM 的 `utterance_understanding` 阶段，由模型根据内容包为每类话语行为提供的 `description` 和 `world_action_allowed` 识别通信意图；Runtime 不扫描玩家文本，也不保存关键词表，更不能从候选动作反推玩家意图。随后 `player_dialogue` 阶段读取结构化理解、当前活动、记忆和授权事实，生成回答以及可选的 `action_id`。主体投影把公开角色信息与 `private_character` 分开；隐藏目标、私有边界和内部策略可以用于权衡，但除非内容显式授权披露，否则不能被复制到对白、记忆或玩家可见事件。Provider 失败时，对话 Turn 直接失败且不写事件、不启动过程；Runtime 不会用关键词或固定台词伪造一次语义理解。Runtime 永远根据模型返回的话语行为 ID 和内容包权限重新校验是否允许行动，不接受模型自行授予权限。问候、询问、结束和普通陈述可以配置为仅对话；请求、命令、谈判和承诺可以配置为允许产生行动提案。结构化理解包含 `speech_act`、`communication_goal`、`action_requested`、引用实体和歧义；结构化决策要求 `action_id`、`parameters`、`confidence`、`cited_stimulus_ids`、`expected_relief`，对话通道额外要求 `dialogue`，而 `intent`、`motivation`、`tradeoffs` 和 `expected_outcome` 是可选诊断字段。`parameters` 只能填充候选计划声明的 JSON Schema，并随 `ProcessExecution` 保存，恢复时不要求模型重建。`cited_stimulus_ids` 指出模型实际依据的外驱，`tradeoffs` 解释权衡，`expected_relief` 表达预测；这些字段用于审计、学习和回放校验，不能直接写入事实。`motivation` 只用于解释和诊断；`action_id` 必须属于当前 DecisionContext。仅对话响应使用空 `action_id`，必须同时包含非空玩家可见 `dialogue`，否则 Runtime 失败关闭且不写事件；它不会进入行为树或修改世界事实。
 
 对话和自驱不是 Runtime 中的两个写死分支，而是世界内容包中的 `decision_channels`。每个 channel 配置是否是会话、是否进行话语行为分类、默认行动权限、事件类型、记忆类型、事件目标和对应的 Intelligence Profile 策略；`conversation_channel` 与 `autonomous_channel` 只是当前实例选择的两个入口。Runtime 按 channel 属性执行同一条提案校验和事务路径，因此新的观察者、定时器、群体审议或外部传感器入口只需增加 JSON channel，不需要增加 `if (trigger == ...)` 的业务耦合。
 
