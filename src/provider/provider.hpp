@@ -273,6 +273,10 @@ struct PurposeProvider {
 
 struct LlamaCppConfig {
     std::string profileId;
+    // Stable non-secret profile provider id used in audit events.  The
+    // adapter name must not pretend every OpenAI-compatible endpoint is
+    // llama.cpp, especially when a purpose is routed to beam-free.
+    std::string providerId;
     // The adapter supports both local llama.cpp and generic OpenAI-compatible
     // endpoints.  Keep provider-specific decoding hints out of the latter.
     std::string providerType{"llama_cpp"};
@@ -311,7 +315,9 @@ public:
     [[nodiscard]] ProviderCapabilities capabilities() const override {
         return ProviderCapabilities{true, true, true};
     }
-    [[nodiscard]] std::string name() const override { return "llama.cpp"; }
+    [[nodiscard]] std::string name() const override {
+        return config_.providerId.empty() ? config_.providerType : config_.providerId;
+    }
 
 private:
     LlamaCppConfig config_;
