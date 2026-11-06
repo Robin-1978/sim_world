@@ -138,6 +138,80 @@ Json stimulusEvidence(const NpcState& npc) {
     return result;
 }
 
+// Level 2 is a world-evaluation lane, not a calendar-driven idea generator.
+// Keep a small deterministic index of public problem evidence so the model is
+// only woken when the world has something persistent to explain or repair.
+struct PublicProblemEvidence {
+    std::uint64_t lastSequence{0};
+    Json events = Json::array();
+};
+
+PublicProblemEvidence publicProblemEvidence(const WorldState& state) {
+    std::map<std::string, std::vector<std::uint64_t>> failures;
+    std::map<std::string, std::vector<std::uint64_t>> deprivation;
+    Json direct = Json::array();
+    for (const auto& event : state.events) {
+        if (event.type == "npc.process_failed") {
+            const auto action = event.data.value("action_id", event.target);
+            if (!action.empty()) failures[action].push_back(event.sequence);
+            continue;
+        }
+        if (event.type == "need.deprived") {
+            const auto key = event.actor + ":" + event.data.value("need_id", event.target);
+            deprivation[key].push_back(event.sequence);
+            continue;
+        }
+        if (event.type == "innovation.adoption_failed" || event.type == "innovation.adoption_blocked") {
+            direct.push_back(Json{{"sequence", event.sequence}, {"type", event.type},
+                                  {"actor", event.actor}, {"target", event.target},
+                                  {"detail", event.detail}});
+        }
+    }
+    for (const auto& [action, sequences] : failures) {
+        if (sequences.size() < 2) continue;
+        const auto begin = sequences.size() > 4 ? sequences.size() - 4 : 0;
+        for (std::size_t index = begin; index < sequences.size(); ++index) {
+            direct.push_back(Json{{"sequence", sequences.at(index)}, {"type", "npc.process_failed"},
+                                  {"action_id", action}});
+        }
+    }
+    for (const auto& [need, sequences] : deprivation) {
+        if (sequences.size() < 2) continue;
+        direct.push_back(Json{{"sequence", sequences.back()}, {"type", "need.deprived"},
+                              {"need", need}, {"count", sequences.size()}});
+    }
+    std::vector<Json> ordered;
+    ordered.reserve(direct.size());
+    for (const auto& item : direct) ordered.push_back(item);
+    std::sort(ordered.begin(), ordered.end(), [](const Json& left, const Json& right) {
+        return left.value("sequence", std::uint64_t{0}) < right.value("sequence", std::uint64_t{0});
+    });
+    constexpr std::size_t kMaxProblemEntries = 8;
+    const auto begin = ordered.size() > kMaxProblemEntries ? ordered.size() - kMaxProblemEntries : 0;
+    PublicProblemEvidence result;
+    for (std::size_t index = begin; index < ordered.size(); ++index) {
+        result.lastSequence = std::max(result.lastSequence,
+                                       ordered.at(index).value("sequence", std::uint64_t{0}));
+        result.events.push_back(ordered.at(index));
+    }
+    return result;
+}
+
+std::uint64_t lastLevel2EvaluationSequence(const WorldState& state) {
+    std::uint64_t sequence = 0;
+    for (const auto& event : state.events) {
+        if (event.target != "level2" || !event.data.is_object() ||
+            event.data.value("evolution_level", "") != "level2") {
+            continue;
+        }
+        if (event.type == "evolution.proposal_ready" || event.type == "evolution.proposal_rejected" ||
+            event.type == "evolution.proposal_failed" || event.type == "evolution.proposal_expired") {
+            sequence = std::max(sequence, event.sequence);
+        }
+    }
+    return sequence;
+}
+
 bool isPrivateCognitiveEvent(const std::string& type);
 
 Json reflectionEvidence(const WorldState& state, const NpcState& npc) {
@@ -273,7 +347,8 @@ Json WorldEvolutionSystem::proposalContext(const WorldService& world,
         {"behavior_recipes", content.behaviorRecipes.size()},
         {"strategy_rules", content.strategyRules.size()},
         {"entity_archetype_ids", Json::array()}, {"behavior_recipe_ids", Json::array()},
-        {"registered_meta_actions", Json::array()}, {"registered_conditions", Json::array()}};
+        {"registered_meta_actions", Json::array()}, {"registered_conditions", Json::array()},
+        {"active_overlays", Json::array()}};
     for (const auto& archetype : content.entityArchetypes) contentSummary["entity_archetype_ids"].push_back(archetype.id);
     for (const auto& recipe : content.behaviorRecipes) contentSummary["behavior_recipe_ids"].push_back(recipe.id);
     for (const auto& [id, definition] : content.metaActions) {
@@ -284,6 +359,12 @@ Json WorldEvolutionSystem::proposalContext(const WorldService& world,
         (void)definition;
         contentSummary["registered_conditions"].push_back(id);
     }
+    for (const auto& overlay : state.activeOverlays) {
+        contentSummary["active_overlays"].push_back(
+            Json{{"proposal_id", overlay.proposalId}, {"overlay_version", overlay.overlayVersion}});
+    }
+    const auto problemEvidence = evolutionLevel == "level2" ? publicProblemEvidence(state)
+                                                              : PublicProblemEvidence{};
     return Json{{"trigger", trigger}, {"evolution_level", evolutionLevel},
                 {"target_npc", scopedTarget},
                 {"reflection", Json{{"cadence", "daily_boundary"},
@@ -301,6 +382,7 @@ Json WorldEvolutionSystem::proposalContext(const WorldService& world,
                 {"world_time", state.now.minute}, {"resources", resources},
                 {"npcs", npcs}, {"content", contentSummary},
                 {"allowed_operations", allowedOperations}, {"evidence_events", events},
+                {"problem_evidence", problemEvidence.events},
                 {"validation_feedback", validationFeedback}};
 }
 
@@ -332,7 +414,8 @@ Json WorldEvolutionSystem::reflectionContext(const WorldService& world,
                          {"behavior_recipe_ids", Json::array()},
                          {"entity_archetype_ids", Json::array()},
                          {"registered_meta_actions", Json::array()},
-                         {"registered_conditions", Json::array()}};
+                         {"registered_conditions", Json::array()},
+                         {"active_overlays", Json::array()}};
     for (const auto& recipe : world.content_.behaviorRecipes) {
         contentSummary["behavior_recipe_ids"].push_back(recipe.id);
     }
@@ -346,6 +429,10 @@ Json WorldEvolutionSystem::reflectionContext(const WorldService& world,
     for (const auto& [id, definition] : world.content_.conditions) {
         (void)definition;
         contentSummary["registered_conditions"].push_back(id);
+    }
+    for (const auto& overlay : world.state_.activeOverlays) {
+        contentSummary["active_overlays"].push_back(
+            Json{{"proposal_id", overlay.proposalId}, {"overlay_version", overlay.overlayVersion}});
     }
     Json pendingHypotheses = Json::array();
     for (const auto& hypothesis : npc.innovationHypotheses) {
@@ -396,7 +483,22 @@ Json WorldEvolutionSystem::reflectionContext(const WorldService& world,
                                         {"relationships", relationshipEvidence(npc)},
                                         {"stimuli", stimulusEvidence(npc)},
                                         {"pending_innovation_hypotheses", pendingHypotheses},
-                                        {"innovation_adoptions", [&npc] { Json value = Json::array(); for (const auto& adoption : npc.innovationAdoptions) value.push_back(Json{{"proposal_id", adoption.proposalId}, {"recipe_id", adoption.recipeId}, {"status", toString(adoption.status)}, {"reason", adoption.reason}}); return value; }()}}},
+                                        {"innovation_adoptions", [&npc] {
+                                             Json value = Json::array();
+                                             for (const auto& adoption : npc.innovationAdoptions) {
+                                                 value.push_back(Json{
+                                                     {"proposal_id", adoption.proposalId},
+                                                     {"recipe_id", adoption.recipeId},
+                                                     {"status", toString(adoption.status)},
+                                                     {"reason", adoption.reason},
+                                                     // Adoption metrics are Runtime facts. They are included in the
+                                                     // next reflection so the model can assess a completed horizon,
+                                                     // while the model remains unable to write or self-approve them.
+                                                     {"observed_metrics", compactEvidenceJson(adoption.observedMetrics)},
+                                                     {"metric_evaluation", compactEvidenceJson(adoption.metricEvaluation)}});
+                                             }
+                                             return value;
+                                         }()}}},
                 {"reflection_cursor", Json{{"last_event_sequence", npc.reflectionCursor.lastEventSequence},
                                              {"last_reflection_day", npc.reflectionCursor.lastReflectionDay},
                                              {"reflection_revision", npc.reflectionCursor.reflectionRevision}}},
@@ -439,6 +541,8 @@ void WorldEvolutionSystem::scheduleAutomatic() {
         return;
     }
     const int day = world_.state_.now.day();
+    const auto publicProblems = publicProblemEvidence(world_.state_);
+    const auto lastLevel2Evaluation = lastLevel2EvaluationSequence(world_.state_);
     const auto schedule = [this, day](const std::string& level, int intervalDays,
                                       const std::string& targetNpcId) {
         if (intervalDays <= 0 || day % intervalDays != 0) return;
@@ -477,7 +581,12 @@ void WorldEvolutionSystem::scheduleAutomatic() {
             }
         }
     }
-    schedule("level2", world_.content_.evolutionPolicy.level2IntervalDays, {});
+    // A world reflection is only useful when a new public problem appeared
+    // after the previous Level 2 evaluation. This prevents the same healthy
+    // world from generating a fresh proposal every configured period.
+    if (publicProblems.lastSequence > lastLevel2Evaluation) {
+        schedule("level2", world_.content_.evolutionPolicy.level2IntervalDays, {});
+    }
 }
 
 std::size_t WorldEvolutionSystem::pumpAsyncProposals() {
@@ -820,6 +929,16 @@ CommandResult WorldEvolutionSystem::commitReflection(const EvolutionRequest& req
     }
     Json innovationRejection = Json::object();
     if (!hypotheses.empty()) {
+        const bool existingHypothesis = std::any_of(
+            npc.innovationHypotheses.begin(), npc.innovationHypotheses.end(), [](const Json& item) {
+                const auto status = item.value("innovation_status", "hypothesized");
+                return status != "rejected" && status != "abandoned";
+            });
+        if (existingHypothesis) {
+            innovationRejection = Json{
+                {"code", "innovation_already_pending"},
+                {"message", "An NPC must finish evaluating its existing innovation hypothesis before creating another."}};
+        }
         // A reflection may suggest innovation only after a durable problem
         // exists and the cited window contains two failures of the same
         // authored process.  This is a deterministic admission gate: the
@@ -828,7 +947,7 @@ CommandResult WorldEvolutionSystem::commitReflection(const EvolutionRequest& req
         const bool repeatedFailure = std::any_of(
             failureSequences.begin(), failureSequences.end(),
             [](const auto& item) { return item.second.size() >= 2; });
-        if (issueSet.empty() || !repeatedFailure) {
+        if (innovationRejection.empty() && (issueSet.empty() || !repeatedFailure)) {
             innovationRejection = Json{
                 {"code", "innovation_evidence_insufficient"},
                 {"message", "An innovation hypothesis requires a persisted unresolved issue and two cited failures of the same process."}};
@@ -943,24 +1062,30 @@ CommandResult WorldEvolutionSystem::commitReflection(const EvolutionRequest& req
                         "The Runtime skipped bounded reflection fields while committing the valid remainder",
                         Json{{"count", rejectedUpdates.size()}, {"updates", rejectedUpdates}, {"provider", provider}});
     }
-    if (validStrategy.contains("strategy")) {
+    if (validStrategy.contains("strategy") && validStrategy.at("strategy") != npc.strategy && !evidence.empty()) {
+        const auto previousStrategy = npc.strategy;
         npc.strategy = validStrategy.at("strategy");
         ++npc.stateVersion;
         world_.addEvent("strategy.reflected", request.targetNpcId, request.targetNpcId,
-                        "Daily reflection adjusted the NPC strategy", Json{{"strategy", npc.strategy}});
+                        "Daily reflection adjusted the NPC strategy",
+                        Json{{"previous", previousStrategy}, {"strategy", npc.strategy},
+                             {"evidence_event_sequences", acceptedEvidence}});
     }
-    if (validGoal.contains("priority_delta") && npc.activity.goal) {
+    if (validGoal.contains("priority_delta") && npc.activity.goal && !evidence.empty() &&
+        validGoal.at("priority_delta").get<double>() != 0.0) {
         npc.activity.goal->priority = std::clamp(npc.activity.goal->priority + validGoal.at("priority_delta").get<double>(), 0.0, 1.0);
         ++npc.stateVersion;
         world_.addEvent("goal.reflected", request.targetNpcId, request.targetNpcId,
                         "Daily reflection adjusted the active goal priority",
-                        Json{{"priority", npc.activity.goal->priority}});
+                        Json{{"priority", npc.activity.goal->priority},
+                             {"evidence_event_sequences", acceptedEvidence}});
     }
-    if (validGoal.value("status", "") == "cancelled" && npc.activity.goal) {
+    if (validGoal.value("status", "") == "cancelled" && npc.activity.goal && !evidence.empty()) {
         setActivityStatus(npc.activity, ActivityStatus::Cancelled);
         ++npc.stateVersion;
         world_.addEvent("goal.cancelled", request.targetNpcId, request.targetNpcId,
-                        "Daily reflection cancelled the active goal", Json::object());
+                        "Daily reflection cancelled the active goal",
+                        Json{{"evidence_event_sequences", acceptedEvidence}});
     }
     npc.unresolvedIssues.assign(issueSet.begin(), issueSet.end());
     for (const auto& hypothesis : normalizedHypotheses) {

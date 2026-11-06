@@ -409,7 +409,9 @@ public:
                          {"subject", "harbor"}, {"predicate", "safe"}, {"value", "known"},
                          {"source_sequence", source}, {"scope", "witness"}, {"confidence", 0.8}}})},
                                                    {"experience_updates", Json::array()}, {"memory_updates", Json::array()}}},
-                    {"strategy_adjustment", Json{{"strategy", "reflective"}}},
+                    {"strategy_adjustment", Json{{"strategy", keepStrategy
+                                                               ? context.value("current_state", Json::object()).value("strategy", "routine")
+                                                               : "reflective"}}},
                     {"goal_adjustment", Json::object()},
                     {"unresolved_issues", Json::array({"verify the harbor signal"})},
                     {"resolved_issues", Json::array()}, {"innovation_hypotheses", Json::array()},
@@ -463,6 +465,7 @@ public:
     std::vector<Json> reflectionContexts;
     bool emitInnovation{false};
     bool emitInvalidUpdate{false};
+    bool keepStrategy{false};
 };
 
 void village_has_three_independent_npcs() {
@@ -3293,6 +3296,30 @@ void automatic_evolution_uses_async_llm_and_audits_sandbox() {
            "the same configured queue also drives Level 2 world-foundation proposals through the LLM");
 }
 
+void level_two_evolution_waits_for_new_public_problem_evidence() {
+    auto provider = std::make_unique<EvolutionProposalProvider>();
+    auto* providerRaw = provider.get();
+    auto content = ContentPackLoader::load(ContentPackLoader::defaultRoot());
+    content.evolutionPolicy.enabled = true;
+    content.evolutionPolicy.level1IntervalDays = 0;
+    content.evolutionPolicy.level2IntervalDays = 1;
+    content.npcDeliberation.enabled = false;
+    for (auto& npc : content.npcs) {
+        for (auto& need : npc.needs) {
+            need.initialDeficit = 0.0;
+            need.decayPerHour = 0.0;
+            need.criticalThreshold = 1.0;
+        }
+    }
+    auto service = WorldService::fromContent(content, std::move(provider));
+    service.advanceMinutes(kMinutesPerDay - (service.state().now.minute % kMinutesPerDay));
+    service.waitForAsyncTurns(1000);
+    expect(providerRaw->observedLevel.empty() &&
+               std::none_of(service.state().events.begin(), service.state().events.end(),
+                            [](const auto& event) { return event.type == "evolution.proposal_ready"; }),
+           "Level 2 does not ask for an innovation when a quiet world has no new public problem evidence");
+}
+
 void daily_reflection_routes_updates_and_keeps_incremental_cursor() {
     auto provider = std::make_unique<ReflectionProvider>();
     auto* providerRaw = provider.get();
@@ -3317,6 +3344,7 @@ void daily_reflection_routes_updates_and_keeps_incremental_cursor() {
     const auto firstContextCount = providerRaw->reflectionContexts.size();
     expect(firstContextCount == 3, "one reflection result is requested for each NPC");
 
+    providerRaw->keepStrategy = true;
     service.advanceMinutes(kMinutesPerDay);
     service.waitForAsyncTurns(1000);
     expect(providerRaw->reflectionContexts.size() == 6,
@@ -3328,6 +3356,9 @@ void daily_reflection_routes_updates_and_keeps_incremental_cursor() {
     expect(std::count_if(service.state().events.begin(), service.state().events.end(),
                          [](const auto& event) { return event.type == "reflection.committed"; }) >= 6,
            "reflection commits remain auditable across day boundaries");
+    expect(std::count_if(service.state().events.begin(), service.state().events.end(),
+                         [](const auto& event) { return event.type == "strategy.reflected"; }) == 3,
+           "a repeated strategy result does not create a second no-op strategy change");
     const auto worldContext = WorldEvolutionSystem::proposalContext(service, "level2", "world_reflection", Json::object());
     expect(std::all_of(worldContext.at("evidence_events").begin(), worldContext.at("evidence_events").end(),
                        [](const auto& event) {
@@ -3653,6 +3684,8 @@ int main() {
         level_one_evolution_is_scoped_to_target_npc);
     run("automatic_evolution_uses_async_llm_and_audits_sandbox",
         automatic_evolution_uses_async_llm_and_audits_sandbox);
+    run("level_two_evolution_waits_for_new_public_problem_evidence",
+        level_two_evolution_waits_for_new_public_problem_evidence);
     run("daily_reflection_routes_updates_and_keeps_incremental_cursor",
         daily_reflection_routes_updates_and_keeps_incremental_cursor);
     run("daily_reflection_requires_failure_evidence_for_innovation",
