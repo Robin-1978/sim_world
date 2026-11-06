@@ -636,7 +636,7 @@ ProviderResponse LlamaCppProvider::proposeEvolution(const Json& context,
         "Never request Runtime Core mutation, arbitrary code, scripts, permissions, transactions, event schemas, "
         "or persistence changes. A proposal is only a suggestion: the Runtime will validate it, run it in an isolated "
         "sandbox, and require independent approval before activation. "
-        "The proposal object uses proposal_kind (content, knowledge, strategy, declarative_capability, or innovation); the operation "
+        "The proposal object uses proposal_kind (no_change, content, knowledge, strategy, declarative_capability, or innovation); the operation "
         "create_entity_archetype separately uses kind for the entity kind. Every operation MUST use the exact keys operation and id. "
         "For create_entity_archetype, kind is REQUIRED and "
         "must be a short noun such as facility, place, or object; use optional "
@@ -661,7 +661,7 @@ ProviderResponse LlamaCppProvider::proposeEvolution(const Json& context,
         "invent a node name or create an empty sequence/selector. If feedback says invalid_behavior_parameters, "
         "replace parameters with a JSON Schema such as {\"type\":\"object\",\"properties\":{},\"additionalProperties\":false}; "
         "never put a runtime parameter value such as destination directly beside type. "
-        "If proposal_kind is innovation, include innovation with hypothesis, novelty_basis, operation_ids, "
+        "If proposal_kind is no_change, return an empty operations array and cite the evidence that was evaluated; Runtime will record the no-change result without creating an overlay. If proposal_kind is innovation, include innovation with hypothesis, novelty_basis, operation_ids, "
         "expected_benefits, risks and test_plan {horizon_minutes, metrics, baseline, scenario, expected_metrics, constraints, resource_budget, success_criteria, failure_criteria}. Innovation is an optional daily-reflection "
         "result, not a per-tick request. Level 1 innovation must keep available_to exactly at target_npc; Level 2 may "
         "promote a hypothesis into a shared recipe or archetype. Use only metric ids events_added, final_revision, "
@@ -678,8 +678,8 @@ ProviderResponse LlamaCppProvider::proposeEvolution(const Json& context,
     responseSchema["properties"] = Json::object();
     responseSchema["properties"]["id"] = Json{{"type", "string"}, {"minLength", 1}};
     const Json proposalKinds = evolutionLevel == "level1"
-                                   ? Json::array({"strategy", "declarative_capability", "innovation"})
-                                   : Json::array({"content", "declarative_capability", "innovation"});
+                                   ? Json::array({"no_change", "strategy", "declarative_capability", "innovation"})
+                                   : Json::array({"no_change", "content", "declarative_capability", "innovation"});
     responseSchema["properties"]["proposal_kind"] = Json{{"type", "string"},
                                                              {"enum", proposalKinds}};
     // Evidence membership is captured data, not a tool-contract variant. A
@@ -822,7 +822,7 @@ ProviderResponse LlamaCppProvider::proposeEvolution(const Json& context,
                                     : Json::array({createOperation, recipeOperation});
     responseSchema["properties"]["operations"] = Json::object();
     responseSchema["properties"]["operations"]["type"] = "array";
-    responseSchema["properties"]["operations"]["minItems"] = 1;
+    responseSchema["properties"]["operations"]["minItems"] = 0;
     responseSchema["properties"]["operations"]["maxItems"] = 1;
     responseSchema["properties"]["operations"]["items"] = std::move(operationItems);
     Json request = Json::object();

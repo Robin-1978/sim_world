@@ -305,7 +305,7 @@ Level 1 是主体行为演化：Runtime 先把一个主体的需求压力、失�
 
 创新分支是反思结果中的可选部分，不能阻塞认知游标：如果模型提交的假设没有持久未解决问题、没有引用同一过程至少两次已提交的 `npc.process_failed`（失败可以跨越多个反思窗口），没有说明相对当前机制的增量收益，或其声明式配方/测试计划未通过 Runtime 校验，Runtime 会记录 `innovation.hypothesis_rejected`，丢弃该可选分支，同时仍在同一事务中提交合法的 Belief、Experience、Memory、Strategy、Goal 和新的 `ReflectionCursor`。当 Runtime 观察到同一主体的重复失败时，会保存有界的 `process_failed:<action_id>` 未解决问题键，并把最近的失败序列作为 `failure_candidates` 投影给后续反思；这只是确定性证据索引，模型仍必须引用两条真实失败并通过完整治理校验。相同问题已有未完成假设时，Runtime 只允许继续评估/细化该假设，不接受同一问题的第二个并行创新。只有核心反思字段（主体、来源事件、权限和边界）无效时，整条 ReflectionResult 才进入有界修正或拒绝。
 
-反思的停止条件是“问题已由现有机制解决”或“没有足够新证据”。Runtime 比较反思前后的确定性指标：需求缺口、失败次数、过程完成率、资源消耗、关系/群体指标和 Adoption 结果。指标没有恶化时，LLM 可以返回 `no_change`，不会为了产生 `strategy.reflected` 或新 Proposal 而制造版本；已有 Overlay 的效果由 Runtime 延迟到测试 horizon 结束后测量，LLM 只能解释结果和选择保留、细化、放弃或回滚。这样“修改”是问题修复或验证过的调参，“创新”是现有机制不足时的最小候选，而不是日历驱动的创意产出。
+反思的停止条件是“问题已由现有机制解决”或“没有足够新证据”。Runtime 比较反思前后的确定性指标：需求缺口、失败次数、过程完成率、资源消耗、关系/群体指标和 Adoption 结果。指标没有恶化时，Level 1 Reflection 可以返回空的可选更新，Level 2 World Reflection 可以通过 `proposal_kind=no_change` 明确结束本轮；Runtime 只记录 `evolution.no_change`，不会为了产生 `strategy.reflected` 或新 Proposal 而制造版本。已有 Overlay 的效果由 Runtime 延迟到测试 horizon 结束后测量，LLM 只能解释结果和选择保留、细化、放弃或回滚。这样“修改”是问题修复或验证过的调参，“创新”是现有机制不足时的最小候选，而不是日历驱动的创意产出。
 
 每日反思是幂等的日边界事务。`ReflectionCursor.last_event_sequence` 只在结果和审计事件提交后前移，输入窗口按游标增量聚合，并始终附带未解决问题；同一 NPC 同一天重复调度返回 `reflection_already_processed`。Runtime 先校验全部结构化结果，再以同一事务提交认知事件、Goal/Strategy 投影、创新假设事件和新的游标，因此模型重试或进程恢复不会重复消费证据。创新假设、Overlay 激活和 NPC Adoption 仍分别保留自己的生命周期。
 

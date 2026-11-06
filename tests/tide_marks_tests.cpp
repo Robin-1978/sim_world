@@ -338,6 +338,12 @@ public:
         observedContext = context;
         observedTargets.push_back(context.value("target_npc", ""));
         const auto evidence = context.at("evidence_events").at(0).at("sequence");
+        if (returnNoChange) {
+            return ProviderResponse{true, {}, "The world evidence does not justify a new overlay.", {},
+                                     Json{{"id", "world-no-change"}, {"proposal_kind", "no_change"},
+                                          {"evidence_event_sequences", Json::array({evidence})},
+                                          {"operations", Json::array()}}};
+        }
         const auto targetNpc = context.value("target_npc", "mira");
         Json proposal;
         if (level == "level1") {
@@ -391,6 +397,7 @@ public:
     Json observedContext = Json::object();
     std::vector<std::string> observedTargets;
     std::vector<std::string> observedReflectionTargets;
+    bool returnNoChange{false};
 };
 
 class ReflectionProvider final : public IProvider {
@@ -3320,6 +3327,27 @@ void level_two_evolution_waits_for_new_public_problem_evidence() {
            "Level 2 does not ask for an innovation when a quiet world has no new public problem evidence");
 }
 
+void level_two_reflection_can_commit_no_change() {
+    auto provider = std::make_unique<EvolutionProposalProvider>();
+    auto* providerRaw = provider.get();
+    providerRaw->returnNoChange = true;
+    auto content = ContentPackLoader::load(ContentPackLoader::defaultRoot());
+    content.evolutionPolicy.enabled = true;
+    content.evolutionPolicy.level1IntervalDays = 0;
+    content.evolutionPolicy.level2IntervalDays = 1;
+    content.npcDeliberation.enabled = false;
+    auto service = WorldService::fromContent(content, std::move(provider));
+    service.advanceMinutes(kMinutesPerDay - (service.state().now.minute % kMinutesPerDay));
+    service.waitForAsyncTurns(1000);
+    expect(providerRaw->observedLevel == "level2" &&
+               std::any_of(service.state().events.begin(), service.state().events.end(),
+                           [](const auto& event) { return event.type == "evolution.no_change" &&
+                                                          event.target == "level2"; }) &&
+               std::none_of(service.state().events.begin(), service.state().events.end(),
+                            [](const auto& event) { return event.type == "evolution.proposal_ready"; }),
+           "a Level 2 reflection can record no_change without creating or activating an overlay");
+}
+
 void daily_reflection_routes_updates_and_keeps_incremental_cursor() {
     auto provider = std::make_unique<ReflectionProvider>();
     auto* providerRaw = provider.get();
@@ -3686,6 +3714,7 @@ int main() {
         automatic_evolution_uses_async_llm_and_audits_sandbox);
     run("level_two_evolution_waits_for_new_public_problem_evidence",
         level_two_evolution_waits_for_new_public_problem_evidence);
+    run("level_two_reflection_can_commit_no_change", level_two_reflection_can_commit_no_change);
     run("daily_reflection_routes_updates_and_keeps_incremental_cursor",
         daily_reflection_routes_updates_and_keeps_incremental_cursor);
     run("daily_reflection_requires_failure_evidence_for_innovation",

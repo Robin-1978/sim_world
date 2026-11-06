@@ -686,6 +686,14 @@ std::size_t WorldEvolutionSystem::pumpAsyncProposals() {
             finish();
             continue;
         }
+        if (queued.response.evolutionProposal.is_object() &&
+            queued.response.evolutionProposal.value("proposal_kind", "") == "no_change") {
+            audit("evolution.no_change", "The world reflection found no justified declarative change",
+                  Json{{"evidence_event_sequences", queued.response.evolutionProposal.value(
+                                                       "evidence_event_sequences", Json::array())}});
+            finish();
+            continue;
+        }
         try {
             auto proposal = EvolutionManager::normalizeProviderProposal(
                 queued.response.evolutionProposal, world_, queued.request.evolutionLevel, queued.provider);
