@@ -756,6 +756,36 @@ std::size_t WorldEvolutionSystem::pumpAsyncProposals() {
                 const auto reflectionEventStart = world_.state_.events.size();
                 const auto result = commitReflection(queued.request, queued.response, queued.provider);
                 if (!result.accepted) {
+                    // An overlay may be activated by a sibling Level 2
+                    // request while this immutable reflection snapshot is in
+                    // flight. The old context must not mutate facts against
+                    // a changed content view, but dropping the day would
+                    // permanently lose the NPC's reflection. Re-project the
+                    // current state and continue the same bounded provider
+                    // session with a complete replacement call. This is a
+                    // rebase, rather than a root patch: the previous result
+                    // is retained as an assistant/tool observation only so
+                    // the model can account for the race without copying its
+                    // stale event or content references.
+                    if (result.code == "reflection_stale" && queued.request.attempt < 2) {
+                        auto rebase = queued.request;
+                        ++rebase.attempt;
+                        rebase.requestId += ":rebase:" + std::to_string(rebase.attempt);
+                        rebase.baseContentVersion = world_.content_.contentVersion;
+                        rebase.baseWorldRevision = world_.state_.revision;
+                        rebase.createdAt = world_.state_.now;
+                        rebase.deadline = GameTime{world_.state_.now.minute +
+                                                   world_.content_.evolutionPolicy.maxProposalAgeMinutes};
+                        rebase.context = reflectionContext(world_, queued.request.targetNpcId);
+                        rebase.validationFeedback = Json{
+                            {"attempt", rebase.attempt},
+                            {"code", result.code},
+                            {"message", "The world content changed while this reflection was pending. Re-evaluate the current state and return one complete daily_reflection call."},
+                            {"repair_mode", "rebase"},
+                            {"repair_tool_name", "daily_reflection"},
+                            {"previous_result", queued.response.reflectionResult}};
+                        if (world_.evolution_->submit(std::move(rebase)).accepted) continue;
+                    }
                     if (queued.request.attempt < 2 && world_.provider_->capabilities().structuredRepair &&
                         result.code.starts_with("invalid_reflection")) {
                         const Json feedback{{"attempt", queued.request.attempt + 1},

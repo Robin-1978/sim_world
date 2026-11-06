@@ -3530,8 +3530,12 @@ void automatic_level_one_innovation_is_admitted_and_adopted() {
             return event.type == type && (actor.empty() || event.actor == actor);
         });
     };
-    expect(providerRaw->reflectionContexts.size() == 42,
-           "Level 1 innovation admission still performs one bounded reflection per NPC across fourteen days");
+    expect(providerRaw->reflectionContexts.size() >= 42,
+           "Level 1 innovation admission still performs at least one bounded reflection request per NPC across fourteen days");
+    expect(std::count_if(events.begin(), events.end(), [](const auto& event) {
+               return event.type == "reflection.committed";
+           }) == 42,
+           "content changes rebase queued reflections so every NPC still commits one reflection per day");
     expect(hasEvent("innovation.hypothesis_created") && hasEvent("evolution.approved", "world") &&
                hasEvent("evolution.overlay_activated", "runtime_governor"),
            "Runtime automatically admits and activates a valid private Level 1 innovation");
