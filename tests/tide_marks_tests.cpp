@@ -3638,6 +3638,8 @@ void intelligence_profile_decouples_models_from_api_keys() {
     const auto routed = makeProviderFromProfile(loaded);
     expect(routed->runtimeMetadata("decision").at("provider_type") == "openai_compatible",
            "the runtime retains the selected transport type so provider-specific request fields stay gated");
+    expect(routed->name() == "shared",
+           "provider audit identity comes from the configured profile binding rather than a llama.cpp label");
     std::error_code ignored;
     std::filesystem::remove(path, ignored);
 }
