@@ -1187,9 +1187,41 @@ CommandResult WorldEvolutionSystem::commitReflection(const EvolutionRequest& req
         }
     }
     std::vector<EvolutionProposal> normalizedHypotheses;
+    Json innovationNormalizations = Json::array();
     if (innovationRejection.empty()) for (const auto& hypothesis : hypotheses) {
         try {
-            auto proposal = EvolutionManager::normalizeProviderProposal(hypothesis, world_, "level1", provider);
+            // The reflection envelope intentionally stays permissive for
+            // OpenAI-compatible gateways.  Normalize only two mechanical
+            // fields before Runtime validation: a one-operation hypothesis
+            // has one unambiguous operation id, and an invalid horizon gets
+            // the bounded default used by the authored village policy.  No
+            // world fact, operator, evidence or permission is invented here;
+            // all semantic checks still run below in EvolutionManager.
+            Json candidate = hypothesis;
+            auto innovation = candidate.value("innovation", Json::object());
+            const auto operations = candidate.value("operations", Json::array());
+            if (innovation.is_object() && operations.is_array() && operations.size() == 1 &&
+                operations.at(0).is_object() && operations.at(0).contains("id") &&
+                operations.at(0).at("id").is_string() && !operations.at(0).at("id").get<std::string>().empty()) {
+                const auto operationId = operations.at(0).at("id").get<std::string>();
+                const Json expectedIds = Json::array({operationId});
+                if (innovation.value("operation_ids", Json::array()) != expectedIds) {
+                    innovation["operation_ids"] = expectedIds;
+                    innovationNormalizations.push_back("operation_ids_from_single_operation");
+                }
+                auto testPlan = innovation.value("test_plan", Json::object());
+                if (testPlan.is_object()) {
+                    const auto horizon = testPlan.value("horizon_minutes", Json{});
+                    if (!testPlan.contains("horizon_minutes") || !horizon.is_number_integer() ||
+                        horizon.get<int>() < 1 || horizon.get<int>() > 10080) {
+                        testPlan["horizon_minutes"] = 60;
+                        innovation["test_plan"] = std::move(testPlan);
+                        innovationNormalizations.push_back("bounded_horizon_default_60");
+                    }
+                }
+                candidate["innovation"] = std::move(innovation);
+            }
+            auto proposal = EvolutionManager::normalizeProviderProposal(candidate, world_, "level1", provider);
             proposal.targetNpcId = request.targetNpcId;
             proposal.kind = "innovation";
             proposal.innovationStatus = "hypothesized";
@@ -1351,6 +1383,7 @@ CommandResult WorldEvolutionSystem::commitReflection(const EvolutionRequest& req
         Json{{"provider", provider}, {"evidence_event_sequences", acceptedEvidence},
              {"innovation_count", normalizedHypotheses.size()}, {"unresolved_issue_count", npc.unresolvedIssues.size()},
              {"innovation_rejected", !innovationRejection.empty()},
+             {"innovation_normalizations", innovationNormalizations},
              {"rejected_update_count", rejectedUpdates.size()}});
     npc.reflectionCursor.lastEventSequence = reflectionEvent.sequence;
     npc.reflectionCursor.reflectionRevision = reflectionEvent.worldRevision;

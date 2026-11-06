@@ -1,0 +1,98 @@
+{
+  "run_id": "beam-free-opencode-7d-v14",
+  "date": "2026-11-06",
+  "provider": "openai_compatible",
+  "model": "beam-free",
+  "transport": "https://opencode.ai/inference/go/openai/v1",
+  "command": "TIDE_MARKS_DEBUG_PROVIDER=1 ./build/tide_marks_headless --days 7 --profile /home/robin/.sim_world/config/intelligence-profile.json --provider profile --governance-auto --wait-llm-ms 60000 --replay /tmp/tide_marks-beam-free-7d-fixed-envelope.jsonl --dump-events",
+  "commits": ["5518e7c", "74e2fe9", "2fde239"],
+  "world_boundary": {
+    "before": "day 1 06:00",
+    "after": "day 8 06:00",
+    "revision": 10175,
+    "boat_integrity": 91,
+    "records_integrity": 94,
+    "replay_matches_source": true,
+    "pending_async_results": 0,
+    "event_count": 1339,
+    "event_lines_with_more_than_6_decimal_places": 0
+  },
+  "queue": {
+    "consumed": 96,
+    "provider_debug_records": 96,
+    "pending": 0
+  },
+  "provider_records": {
+    "understanding": {
+      "count": 1,
+      "finish_reason": {"stop": 1},
+      "prompt_tokens": 927,
+      "cached_tokens": 0,
+      "completion_tokens": 94,
+      "reasoning_tokens": 50
+    },
+    "decision": {
+      "count": 71,
+      "finish_reason": {"stop": 71},
+      "prompt_tokens": 376139,
+      "cached_tokens": 76032,
+      "cache_ratio": 0.2021,
+      "completion_tokens": 25780,
+      "reasoning_tokens": 20611
+    },
+    "reflection": {
+      "count": 23,
+      "finish_reason": {"tool_calls": 23},
+      "prompt_tokens": 94813,
+      "cached_tokens": 22080,
+      "cache_ratio": 0.2329,
+      "completion_tokens": 31485,
+      "reasoning_tokens": 25423
+    },
+    "evolution_level2": {
+      "count": 1,
+      "finish_reason": {"tool_calls": 1},
+      "prompt_tokens": 5875,
+      "cached_tokens": 0,
+      "cache_ratio": 0.0,
+      "completion_tokens": 2073,
+      "reasoning_tokens": 1967
+    },
+    "all": {
+      "count": 96,
+      "prompt_tokens": 477754,
+      "cached_tokens": 98112,
+      "cache_ratio": 0.2054,
+      "completion_tokens": 59432,
+      "reasoning_tokens": 48051
+    }
+  },
+  "events": {
+    "reflection.committed": 20,
+    "reflection.update_rejected": 4,
+    "reflection.failed": 1,
+    "evolution.no_change": 1,
+    "evolution.proposal_failed": 1,
+    "innovation.hypothesis_rejected": 4,
+    "evolution.proposal_ready": 0,
+    "evolution.approved": 0,
+    "evolution.overlay_activated": 0,
+    "npc.intent": 67,
+    "npc.intent_expired": 3,
+    "npc.intent_rejected": 0,
+    "npc.process_completed": 58,
+    "npc.process_failed": 8,
+    "experience.recorded": 66,
+    "experience.observed": 58,
+    "memory.reflected": 15,
+    "knowledge.asserted": 17
+  },
+  "observations": [
+    "All decision responses ended with stop and all Reflection responses ended with a complete tool call; no provider truncation occurred.",
+    "The permissive evolution tool envelope was accepted by beam-free; Level 2 returned a valid no_change result instead of failing schema admission.",
+    "One later Level 2 request and one Level 1 reflection hit provider_request_failed; neither mutated world facts.",
+    "Four optional Level 1 innovation hypotheses were rejected by Runtime for operation scope, test-plan horizon, or unknown meta-action references while the valid Reflection remainder committed.",
+    "No proposal was approved or activated in this run, so this run proves stable cognition and behavior progression but not a Level 2 overlay effect."
+  ],
+  "comparison_baseline": "qwen35-4b-llama-cpp-v11"
+}
