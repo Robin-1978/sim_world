@@ -24,6 +24,10 @@ std::string clipDebug(const std::string& value, const std::size_t limit = 4096) 
     if (value.size() <= limit) return value;
     return value.substr(0, limit) + "...[debug output clipped]";
 }
+std::string jsonStringOr(const Json& value, const char* key, const std::string& fallback = {}) {
+    if (!value.is_object() || !value.contains(key) || !value.at(key).is_string()) return fallback;
+    return value.at(key).get<std::string>();
+}
 std::string summarizeDebugToolCalls(const Json& toolCalls, const bool full) {
     if (!toolCalls.is_array()) return "[]";
     if (full) return clipDebug(toolCalls.dump(), 16384);
@@ -34,10 +38,10 @@ std::string summarizeDebugToolCalls(const Json& toolCalls, const bool full) {
             continue;
         }
         const auto function = call.value("function", Json::object());
-        const auto arguments = function.value("arguments", "");
-        summary.push_back(Json{{"id", call.value("id", "")},
-                               {"type", call.value("type", "")},
-                               {"name", function.value("name", "")},
+        const auto arguments = jsonStringOr(function, "arguments");
+        summary.push_back(Json{{"id", jsonStringOr(call, "id")},
+                               {"type", jsonStringOr(call, "type")},
+                               {"name", jsonStringOr(function, "name")},
                                {"argument_bytes", arguments.size()},
                                {"arguments", clipDebug(arguments, 768)}});
     }
@@ -191,8 +195,8 @@ ProviderJsonResult requestProviderJson(const LlamaCppConfig& config, const Json&
             if (outer.contains("error")) {
                 const auto& error = outer.at("error");
                 if (error.is_object()) {
-                    detail = error.value("type", "error");
-                    const auto message = error.value("message", "");
+                    detail = jsonStringOr(error, "type", "error");
+                    const auto message = jsonStringOr(error, "message");
                     if (!message.empty()) detail += ":" + clipDebug(message, 256);
                 } else if (error.is_string()) {
                     detail = clipDebug(error.get<std::string>(), 256);
@@ -208,13 +212,13 @@ ProviderJsonResult requestProviderJson(const LlamaCppConfig& config, const Json&
             const bool fullDebug = fullDebugEnv != nullptr && *fullDebugEnv != '\0' &&
                                    std::string(fullDebugEnv) != "0";
             std::cerr << "provider_debug stage=" << stage
-                      << " finish_reason=" << choice.value("finish_reason", "")
+                      << " finish_reason=" << jsonStringOr(choice, "finish_reason")
                       << " usage=" << outer.value("usage", Json::object()).dump()
-                      << " content=" << clipDebug(debugMessage.value("content", ""), fullDebug ? 16384 : 1024)
+                      << " content=" << clipDebug(jsonStringOr(debugMessage, "content"), fullDebug ? 16384 : 1024)
                       << " tool_calls=" << summarizeDebugToolCalls(debugMessage.value("tool_calls", Json::array()), fullDebug)
                       << "\n";
         }
-        if (choice.value("finish_reason", "") == "length") {
+        if (jsonStringOr(choice, "finish_reason") == "length") {
             return {false, {}, "provider_truncated:" + stage};
         }
         const auto& message = choice.at("message");
@@ -946,7 +950,7 @@ ProviderResponse LlamaCppProvider::proposeEvolution(const Json& context,
     if (!completed.value.is_object()) {
         return ProviderResponse{false, {}, {}, "invalid_evolution_proposal", Json::object()};
     }
-    return ProviderResponse{true, {}, completed.value.value("rationale", ""), {}, completed.value};
+    return ProviderResponse{true, {}, jsonStringOr(completed.value, "rationale"), {}, completed.value};
 }
 
 ProviderResponse LlamaCppProvider::proposeReflection(const Json& context,
@@ -1168,7 +1172,7 @@ ProviderResponse LlamaCppProvider::proposeReflection(const Json& context,
     ProviderResponse response;
     response.ok = completed.value.is_object();
     response.error = response.ok ? "" : "invalid_reflection_result";
-    response.dialogue = response.ok ? completed.value.value("rationale", "") : "";
+    response.dialogue = response.ok ? jsonStringOr(completed.value, "rationale") : "";
     response.reflectionResult = response.ok ? std::move(completed.value) : Json::object();
     return response;
 }
