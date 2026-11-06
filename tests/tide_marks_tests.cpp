@@ -3774,7 +3774,7 @@ void intelligence_profile_configures_decision_budgets() {
     expect(policies.at("autonomous_reappraisal").enableThinking &&
                policies.at("autonomous_reappraisal").reasoningBudgetTokens == 128 &&
                policies.at("autonomous_reappraisal").reasoningEffort == "low" &&
-               policies.at("autonomous_reappraisal").maxTokens == 1536,
+               policies.at("autonomous_reappraisal").maxTokens == 2048,
            "autonomous reappraisal uses its bounded thinking policy");
     expect(policies.size() == 3 && policies.contains("player_dialogue") &&
                policies.contains("utterance_understanding") && policies.contains("autonomous_reappraisal"),

@@ -32,7 +32,7 @@
           "thinking": true,
           "reasoning_budget_tokens": 128,
           "reasoning_effort": "low",
-          "max_tokens": 1536
+          "max_tokens": 2048
         }
       }
     },
@@ -42,7 +42,7 @@
         "thinking": true,
         "reasoning_budget_tokens": 256,
         "reasoning_effort": "medium",
-        "max_tokens": 1024
+        "max_tokens": 2048
       }
     },
     "reflection": {
@@ -51,7 +51,7 @@
         "thinking": true,
         "reasoning_budget_tokens": 256,
         "reasoning_effort": "medium",
-        "max_tokens": 1536
+        "max_tokens": 3072
       }
     },
     "world_evolution": {
@@ -60,7 +60,7 @@
         "thinking": true,
         "reasoning_budget_tokens": 512,
         "reasoning_effort": "high",
-        "max_tokens": 2048
+        "max_tokens": 3072
       }
     }
   }
