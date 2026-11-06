@@ -985,14 +985,16 @@ ProviderResponse LlamaCppProvider::proposeReflection(const Json& context,
         "resolved_issues may contain only exact strings from unresolved_issues; when that list is empty, return resolved_issues=[]. "
         "When current_state.activity has no active goal, keep goal_adjustment={} and never request status=cancelled. "
         "If evidence is insufficient, return empty updates and preserve unresolved issues. "
-        "If validation_feedback is present, repair only the reported field error and keep all other empty/default fields.";
+        "If validation_feedback is present, repair only the reported field error and keep all other empty/default fields. "
+        "schema_version is the integer 1; never copy response_schema_version or any runtime_metadata value into the tool result. "
+        "Knowledge scope must be one of direct, witness, testimony, or inference; use inference for a derived belief.";
     Json beliefItem{{"type", "object"}, {"additionalProperties", false},
                           {"required", Json::array({"subject", "predicate", "value", "source_sequence", "confidence"})},
                           {"properties", Json{{"subject", Json{{"type", "string"}, {"minLength", 1}, {"maxLength", 128}}},
                                                 {"predicate", Json{{"type", "string"}, {"minLength", 1}, {"maxLength", 128}}},
                                                 {"value", Json{{"type", "string"}, {"minLength", 1}, {"maxLength", 512}}},
                                                 {"source_sequence", Json{{"type", "integer"}, {"minimum", 1}}},
-                                                {"scope", Json{{"type", "string"}, {"maxLength", 32}}},
+                                                {"scope", Json{{"enum", Json::array({"direct", "witness", "testimony", "inference"})}}},
                                                 {"confidence", Json{{"type", "number"}, {"minimum", 0.0}, {"maximum", 1.0}}}}}};
     Json experienceItem{{"type", "object"}, {"additionalProperties", false},
                               {"required", Json::array({"domain", "trigger", "action", "outcome", "source_sequence", "confidence"})},
@@ -1143,6 +1145,11 @@ ProviderResponse LlamaCppProvider::proposeReflection(const Json& context,
     // a second copy in the dynamic user projection wastes tokens and invites
     // the model to treat it as ordinary world data.
     modelContext.erase("reflection_prompt");
+    // Provider/runtime identifiers are an audit envelope, not reflection
+    // output data. In particular, response_schema_version is a string label
+    // such as reflection-v1 and smaller models tend to copy it into the
+    // integer schema_version field unless it is removed from their view.
+    modelContext.erase("runtime_metadata");
     Json request{
         {"model", endpointConfig.model}, {"temperature", endpointConfig.temperature}, {"max_tokens", policy.maxTokens},
         {"messages", Json::array({Json{{"role", "system"}, {"content", systemPrompt}},
