@@ -1443,7 +1443,18 @@ CommandResult WorldEvolutionSystem::commitReflection(const EvolutionRequest& req
                              {"evidence_event_sequences", acceptedEvidence}});
     }
     if (validGoal.value("status", "") == "cancelled" && npc.activity.goal && !evidence.empty()) {
-        setActivityStatus(npc.activity, ActivityStatus::Cancelled);
+        // Goal cancellation must use the same terminal process path as an
+        // interruption or preemption. Merely projecting Cancelled onto the
+        // activity leaves a terminal ProcessExecution in the single activity
+        // slot; the scheduler no longer advances it, while intent and
+        // adoption validation still see the NPC as busy forever. Preserve
+        // committed leaf effects, release any remaining reservation, emit the
+        // interruption audit, then clear the slot for a later decision.
+        if (npc.activity.process) {
+            world_.cancelProcess(request.targetNpcId, *npc.activity.process,
+                                 "daily_reflection_goal_cancelled");
+        }
+        npc.activity = NpcActivity{};
         ++npc.stateVersion;
         world_.addEvent("goal.cancelled", request.targetNpcId, request.targetNpcId,
                         "Daily reflection cancelled the active goal",
@@ -1558,6 +1569,13 @@ CommandResult WorldEvolutionSystem::startAdoption(const std::string& npcId,
                                                 {"required_resources", requirements}});
         return CommandResult{true, "resource_blocked", reason, event};
     };
+    if (npcFound->second.activity.process &&
+        npcFound->second.activity.process->status != ProcessStatus::Running &&
+        npcFound->second.activity.process->status != ProcessStatus::Suspended) {
+        // A terminal process from an older snapshot is audit data, not a live
+        // adoption conflict. Reconcile it before allocating the new slot.
+        npcFound->second.activity = NpcActivity{};
+    }
     if (npcFound->second.activity.status != ActivityStatus::Proposed || npcFound->second.activity.process) {
         return world_.reject("npc_busy", "An innovation adoption cannot replace an active NPC process.");
     }

@@ -358,6 +358,15 @@ DialogueTurn WorldIntelligenceSystem::commitTurn(const TurnRequest& request, Pro
                                                 ? runtimeExplanation
                                                 : response.proposal.rationale;
     auto& mutableNpc = world_.state_.npcs.at(request.npcId);
+    // Terminal activity projections may be present in old snapshots for
+    // audit, but they do not occupy the live execution slot. Reconcile them
+    // before admitting a new intent; only running or suspended processes
+    // participate in busy/interruption arbitration.
+    if (mutableNpc.activity.process &&
+        mutableNpc.activity.process->status != ProcessStatus::Running &&
+        mutableNpc.activity.process->status != ProcessStatus::Suspended) {
+        mutableNpc.activity = NpcActivity{};
+    }
     if (mutableNpc.activity.process) {
         double incomingSalience = channel->second.conversation ? 1.0 : 0.0;
         for (const auto& stimulus : context.stimuli) {

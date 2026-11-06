@@ -3651,6 +3651,54 @@ void daily_reflection_routes_updates_and_keeps_incremental_cursor() {
            "Level 2 receives committed hypothesis evidence without a private Level 1 proposal payload");
 }
 
+void reflection_goal_cancellation_clears_process_slot() {
+    auto content = ContentPackLoader::load(ContentPackLoader::defaultRoot());
+    content.npcDeliberation.enabled = false;
+    content.evolutionPolicy.enabled = false;
+    auto service = WorldService::fromContent(
+        content, std::make_unique<SpeechActProvider>("request", "repair_ferry"));
+
+    const auto started = service.converse("lorn", "repair the ferry", "reflection-cancel-start");
+    expect(started.accepted && service.state().npcs.at("lorn").activity.process &&
+               service.state().npcs.at("lorn").activity.process->status == ProcessStatus::Running,
+           "reflection cancellation fixture starts a live process");
+    if (!started.accepted || service.state().events.empty()) return;
+
+    const auto evidence = service.state().events.back().sequence;
+    ProviderResponse response;
+    response.ok = true;
+    response.reflectionResult = Json{
+        {"schema_version", 1},
+        {"npc_id", "lorn"},
+        {"evidence_event_sequences", Json::array({evidence})},
+        {"cognition_updates", Json{{"belief_updates", Json::array()},
+                                      {"experience_updates", Json::array()},
+                                      {"memory_updates", Json::array()}}},
+        {"strategy_adjustment", Json::object()},
+        {"goal_adjustment", Json{{"status", "cancelled"}}},
+        {"unresolved_issues", Json::array()},
+        {"resolved_issues", Json::array()},
+        {"innovation_hypotheses", Json::array()},
+        {"innovation_actions", Json::array()},
+        {"rationale", "The active ferry process is no longer justified."}};
+    const auto reflected = service.commitDailyReflection("lorn", response);
+    expect(reflected.accepted, "a sourced reflection can cancel the active goal");
+    expect(!service.state().npcs.at("lorn").activity.process &&
+               service.state().npcs.at("lorn").activity.status == ActivityStatus::Proposed,
+           "goal cancellation clears the terminal process from the live activity slot");
+    expect(std::any_of(service.state().events.begin(), service.state().events.end(),
+                       [](const auto& event) {
+                           return event.type == "npc.process_interrupted" &&
+                                  event.data.value("reason", "") == "daily_reflection_goal_cancelled";
+                       }),
+           "goal cancellation records the process interruption and reason");
+
+    const auto restarted = service.converse("lorn", "repair the ferry again", "reflection-cancel-restart");
+    expect(restarted.accepted && service.state().npcs.at("lorn").activity.process &&
+               service.state().npcs.at("lorn").activity.process->status == ProcessStatus::Running,
+           "a later intent can start after reflection cancelled the prior process");
+}
+
 void reflection_context_exposes_deterministic_innovation_gate() {
     auto content = ContentPackLoader::load(ContentPackLoader::defaultRoot());
     content.evolutionPolicy.enabled = false;
@@ -4158,6 +4206,8 @@ int main() {
     run("level_two_reflection_can_commit_no_change", level_two_reflection_can_commit_no_change);
     run("daily_reflection_routes_updates_and_keeps_incremental_cursor",
         daily_reflection_routes_updates_and_keeps_incremental_cursor);
+    run("reflection_goal_cancellation_clears_process_slot",
+        reflection_goal_cancellation_clears_process_slot);
     run("reflection_context_exposes_deterministic_innovation_gate",
         reflection_context_exposes_deterministic_innovation_gate);
     run("sync_daily_reflection_uses_patch_continuation",
