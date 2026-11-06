@@ -6,13 +6,13 @@
       "npc": "mira",
       "allowed_actions": ["offer_ration", "protect_secret", "explain_ration", "rest"],
       "behaviors": {
-        "offer_ration": {"duration_minutes": 30, "interruptible": true, "interrupt_salience_threshold": 0.85,
+        "offer_ration": {"description": "Offer one ration to a person who needs food.", "duration_minutes": 30, "interruptible": true, "interrupt_salience_threshold": 0.85,
                           "utility_profile": {"trait_effects": {"cooperation": 0.35, "duty": 0.20}}},
-        "protect_secret": {"duration_minutes": 45, "interruptible": true, "interrupt_salience_threshold": 0.9,
+        "protect_secret": {"description": "Protect a private family matter from exposure.", "duration_minutes": 45, "interruptible": true, "interrupt_salience_threshold": 0.9,
                             "utility_profile": {"trait_effects": {"secrecy": 0.40, "autonomy": 0.25}}},
-        "explain_ration": {"duration_minutes": 20, "interruptible": true, "interrupt_salience_threshold": 0.7,
+        "explain_ration": {"description": "Explain how a ration was allocated or used.", "duration_minutes": 20, "interruptible": true, "interrupt_salience_threshold": 0.7,
                             "utility_profile": {"trait_effects": {"cooperation": 0.15, "secrecy": -0.15}}},
-        "rest": {"duration_minutes": 480, "interruptible": true, "interrupt_salience_threshold": 0.95}
+        "rest": {"description": "Rest at the current place and recover over time.", "duration_minutes": 480, "interruptible": true, "interrupt_salience_threshold": 0.95}
       }
     },
     {
@@ -20,13 +20,13 @@
       "npc": "lorn",
       "allowed_actions": ["repair_ferry", "offer_crossing", "ask_debt", "rest"],
       "behaviors": {
-        "repair_ferry": {"duration_minutes": 120, "interruptible": false, "interrupt_salience_threshold": 1.0,
+        "repair_ferry": {"description": "Repair the ferry and restore safe crossing.", "duration_minutes": 120, "interruptible": false, "interrupt_salience_threshold": 1.0,
                           "utility_profile": {"trait_effects": {"duty": 0.30, "risk_tolerance": -0.20}}},
-        "offer_crossing": {"duration_minutes": 45, "interruptible": true, "interrupt_salience_threshold": 0.8,
+        "offer_crossing": {"description": "Offer a safe ferry crossing to another person.", "duration_minutes": 45, "interruptible": true, "interrupt_salience_threshold": 0.8,
                             "utility_profile": {"trait_effects": {"cooperation": 0.15, "risk_tolerance": 0.10}}},
-        "ask_debt": {"duration_minutes": 15, "interruptible": true, "interrupt_salience_threshold": 0.7,
+        "ask_debt": {"description": "Ask for repayment of an outstanding debt.", "duration_minutes": 15, "interruptible": true, "interrupt_salience_threshold": 0.7,
                       "utility_profile": {"trait_effects": {"assertiveness": 0.20, "cooperation": -0.10}}},
-        "rest": {"duration_minutes": 480, "interruptible": true, "interrupt_salience_threshold": 0.95}
+        "rest": {"description": "Rest at the current place and recover over time.", "duration_minutes": 480, "interruptible": true, "interrupt_salience_threshold": 0.95}
       }
     },
     {
@@ -34,13 +34,13 @@
       "npc": "eve",
       "allowed_actions": ["share_record", "withhold_record", "reveal_clue", "rest"],
       "behaviors": {
-        "share_record": {"duration_minutes": 60, "interruptible": true, "interrupt_salience_threshold": 0.8,
+        "share_record": {"description": "Share a relevant archive record with another person.", "duration_minutes": 60, "interruptible": true, "interrupt_salience_threshold": 0.8,
                           "utility_profile": {"trait_effects": {"cooperation": 0.15, "secrecy": -0.25}}},
-        "withhold_record": {"duration_minutes": 30, "interruptible": true, "interrupt_salience_threshold": 0.7,
+        "withhold_record": {"description": "Keep a sensitive archive record private.", "duration_minutes": 30, "interruptible": true, "interrupt_salience_threshold": 0.7,
                              "utility_profile": {"trait_effects": {"secrecy": 0.35, "risk_tolerance": -0.10}}},
-        "reveal_clue": {"duration_minutes": 20, "interruptible": true, "interrupt_salience_threshold": 0.85,
+        "reveal_clue": {"description": "Examine an archive record for a clue relevant to an investigation.", "duration_minutes": 20, "interruptible": true, "interrupt_salience_threshold": 0.85,
                          "utility_profile": {"trait_effects": {"novelty_seeking": 0.40, "secrecy": -0.30}}},
-        "rest": {"duration_minutes": 480, "interruptible": true, "interrupt_salience_threshold": 0.95}
+        "rest": {"description": "Rest at the current place and recover over time.", "duration_minutes": 480, "interruptible": true, "interrupt_salience_threshold": 0.95}
       }
     }
   ]

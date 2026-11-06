@@ -1312,7 +1312,7 @@ void decision_context_projects_location_relevant_resources() {
            "locationless collective resources remain visible and resource provenance stays explicit");
 }
 
-void decision_context_projects_only_startable_behavior_plans() {
+void decision_context_separates_authored_catalog_from_eligible_plans() {
     auto service = WorldService::load(ContentPackLoader::defaultRoot(), std::make_unique<MockProvider>());
     auto snapshot = service.snapshotJson();
     snapshot["resources"]["grain"]["amount"] = 0;
@@ -1323,10 +1323,12 @@ void decision_context_projects_only_startable_behavior_plans() {
                                      [](const auto& candidate) { return candidate.actionId == "offer_ration"; });
     expect(ration != mira.candidates.end() && !ration->availableNow &&
                ration->unavailableReason == "insufficient_resource" &&
-               std::none_of(mira.planCatalog.begin(), mira.planCatalog.end(), [](const auto& plan) {
-                   return plan.value("action_id", "") == "offer_ration";
+               std::any_of(mira.planCatalog.begin(), mira.planCatalog.end(), [](const auto& plan) {
+                   return plan.value("action_id", "") == "offer_ration" &&
+                          !plan.value("available_now", true) &&
+                          plan.value("unavailable_reason", "") == "insufficient_resource";
                }),
-           "a plan whose declared reservation cannot start is retained for Runtime diagnostics but hidden from the model");
+           "the authored catalog retains a blocked plan while its eligibility is explicit");
 
     auto ferrySnapshot = service.snapshotJson();
     ferrySnapshot["resources"]["boat_integrity"]["amount"] = 100;
@@ -1336,10 +1338,12 @@ void decision_context_projects_only_startable_behavior_plans() {
                                      [](const auto& candidate) { return candidate.actionId == "repair_ferry"; });
     expect(repair != lorn.candidates.end() && !repair->availableNow &&
                repair->unavailableReason == "precondition_failed" &&
-               std::none_of(lorn.planCatalog.begin(), lorn.planCatalog.end(), [](const auto& plan) {
-                   return plan.value("action_id", "") == "repair_ferry";
+               std::any_of(lorn.planCatalog.begin(), lorn.planCatalog.end(), [](const auto& plan) {
+                   return plan.value("action_id", "") == "repair_ferry" &&
+                          !plan.value("available_now", true) &&
+                          plan.value("unavailable_reason", "") == "precondition_failed";
                }),
-           "a behavior tree whose first condition is false is omitted from the provider decision catalog");
+           "a behavior tree whose first condition is false remains cataloged with an explicit ineligible reason");
 }
 
 void decision_context_obeys_authored_visibility_budgets() {
@@ -3938,8 +3942,8 @@ int main() {
     run("provider_and_action_validation_are_safe", provider_and_action_validation_are_safe);
     run("decision_context_projects_location_relevant_resources",
         decision_context_projects_location_relevant_resources);
-    run("decision_context_projects_only_startable_behavior_plans",
-        decision_context_projects_only_startable_behavior_plans);
+    run("decision_context_separates_authored_catalog_from_eligible_plans",
+        decision_context_separates_authored_catalog_from_eligible_plans);
     run("decision_context_obeys_authored_visibility_budgets",
         decision_context_obeys_authored_visibility_budgets);
     run("action_validator_rejects_malformed_nested_schema_without_throwing",

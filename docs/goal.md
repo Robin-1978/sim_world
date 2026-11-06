@@ -27,6 +27,7 @@
 - 事实变化经统一事务提交，产生带版本、来源和因果关联的 `WorldEvent`，再驱动需求、刺激、关系、记忆、知识和经验。
 - Level 1 提案只获得目标 NPC 的私有认知窗口；Level 2 获得经权限裁剪的跨主体摘要。提案不能把一个 NPC 的私有策略无条件共享给所有主体。
 - LLM 不可用时，时间和已批准过程仍可推进；对话和新自驱提案明确失败关闭，不使用关键词、固定目标或 Mock 冒充主体决策。
+- 所有 LLM 入口遵循同一“固定规则/工具 → 稳定内容目录 → 动态任务与事实 → tool call → Runtime observation/有界 patch”协议骨架。决策、每日反思、个体变更和共享变更只改变任务目标、可见证据和权限范围；缓存命中必须由 Provider usage 证实，协议结构本身不被当作命中证明。
 
 ## 验收判据
 
@@ -36,6 +37,7 @@
 4. 普通 Tick 不触发 LLM；玩家交互、自驱重评估、显著刺激和 Level 1/2 演化边界才进入模型队列。
 5. Provider 错误、参数错误、Revision 过期、资源不足和权限拒绝都不提交部分事实，并产生可审计结果。
 6. Snapshot 恢复、显式 Replay、JSON/SQLite 持久化和三个内容实例回归通过；模型调用不参与恢复或 Replay。
+7. 长期演化必须分别证明认知累积、个体采用和共享效果：至少 14 个游戏日内三名主体的 ReflectionCursor 前移，合法认知不因可选创新拒绝而丢失；Level 1 形成 `hypothesis → Runtime accept → private Overlay → adoption → measured outcome`，Level 2 形成共享 Overlay 并由后续 Runtime 指标和反思判断效果。没有这些事件链，只能称为“模型请求跑过”，不能称为自主演化闭环完成。
 
 ## 后续扩展
 

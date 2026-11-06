@@ -279,7 +279,7 @@ DecisionContext DecisionContextProjector::build(const WorldState& state,
         if (resource.amount - resource.reserved > 0) continue;
         context.constraints.push_back(StructuralConstraintView{
             "resource:" + resourceId + ":unavailable", "resource", resourceId,
-            "world_resource_rule", "No unreserved units are available.", true});
+            "world_resource_rule", "No unreserved units of " + resourceId + " are available.", true});
     }
     for (const auto& link : content.links) {
         const auto runtime = state.links.find(link.id);
@@ -511,7 +511,6 @@ DecisionContext DecisionContextProjector::build(const WorldState& state,
                  {"fear", relation.fear}, {"owed", relation.owed}};
     }
     for (const auto& candidate : context.candidates) {
-        if (!candidate.availableNow) continue;
         Json plan{{"action_id", candidate.actionId}, {"plan_id", candidate.planId},
                   {"recipe_id", candidate.recipeId}, {"label", candidate.label},
                   {"duration_minutes", candidate.durationMinutes},
@@ -520,7 +519,9 @@ DecisionContext DecisionContextProjector::build(const WorldState& state,
                   {"utility_score", candidate.utilityScore},
                   {"utility_contributions", candidate.utilityContributions},
                   {"reservations", candidate.reservations},
-                  {"parameter_schema", candidate.parameterSchema}};
+                  {"parameter_schema", candidate.parameterSchema},
+                  {"available_now", candidate.availableNow},
+                  {"unavailable_reason", candidate.unavailableReason}};
         const auto recipe = std::find_if(content.behaviorRecipes.begin(), content.behaviorRecipes.end(),
                                          [&candidate](const auto& item) { return item.id == candidate.recipeId; });
         if (recipe != content.behaviorRecipes.end()) plan["behavior_tree"] = behaviorNodeProjection(recipe->root);

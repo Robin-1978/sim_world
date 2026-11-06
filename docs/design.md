@@ -579,9 +579,17 @@ LLM 是对结构化上下文的解释器和候选方案生成器，不是事实�
 4. `EVIDENCE` 只包含经过 Runtime 检索的近期事件、记忆、知识、经验、预测误差和未解决问题；每条可用于认知更新的证据带来源序号。
 5. `OPTIONS` 只列当前可执行的已登记计划及其参数要求和 Runtime 计算的预期结果。候选集合变化属于消息上下文，不修改工具 schema。
 
+决策投影还明确区分作者目录和当前资格。`CATALOG` 保留本主体可见的全部作者计划，包含短语义描述、持续时间、可打断性、预留资源和参数名；`OPTIONS` 的 `eligible_plan_keys` 只列当前前置条件、资源预留和权限检查均通过的计划，`unavailable_plans` 给出按计划归因的原因。被阻塞的计划不会从内容目录消失，也不会被模型当作当前可选项。资源约束必须指出资源名和未预留数量状态，不能使用重复的无上下文“没有可用单位”。
+
 Runtime 内部 ID 只留在事实层、事件层和工具执行层。模型看到的是内容数据库映射的显示名称：人物使用 `name`，地点使用 `name`、`type` 和 `tags`，连接使用两个端点的地点名称及通行状态，导航参数使用地点名称或稳定内容 key。提交前由 Runtime 根据当前可见名称目录解析回内部 ID，并再次检查歧义、可见性和拓扑。模型不接收其他主体的内部 ID、`target_npc`、Provider/Revision 元数据或“Level 1/Level 2”等工程术语；目标主体由调用上下文注入，而不是让模型填写。
 
-每个用途只有一份固定 function/tool schema。工具名、必填字段、枚举和嵌套结构不会随 NPC、地点、日期或 Content Pack 候选集合改变；动态候选放在 `CATALOG`/`OPTIONS`。工具 description 说明何时调用、调用的边界和每个参数的含义，不能把大段动态状态塞进 schema。`choose_action`、`daily_reflection`、个人变更和共享变更分别使用自己的稳定契约；Runtime 负责把当前主体和范围注入结果，模型不重复输出这些审计字段。
+所有模型入口共享同一协议骨架，而不是共享同一个任务：固定 `system` 规则和工具描述先发送，稳定的作者目录随后发送，当前任务/状态/证据/资格作为动态消息尾部发送，模型只返回一个强制的顶层 function call，Runtime 再追加结构化 observation 并决定是否提交。`decision` 的目标是选择一个当前可执行计划，`reflection` 的目标是整理认知和效果并可选提出一个私有假设，个人变更的目标是提出主体范围内的声明式变更，共享变更的目标是提出世界范围内的声明式变更。四个入口各自拥有稳定的工具名和参数契约，但不各自发明上下文格式；差异只放在任务说明、可见证据、允许操作和验证器。
+
+决策状态把长期动机、当前 Goal 和执行过程分开投影：`Private preferences` 只表达作者定义的长期动机/边界，`Active goal` 表达 GoalSystem 当前激活的意图、原因和截止时间，`Current activity` 表达 Goal/Process 的生命周期和 BT 进度。Goal 的创建、激活、进展、完成、失败和取消仍由 Runtime 管理；LLM 只能提出本次 `choose_action`，不能直接写 Goal Progress、Need 或 Process 状态。已有运行中的 Process 且没有明确中断触发时，决策入口不会启动第二个 Process。
+
+模型侧把认知状态和本次可引用证据分开：`COGNITION` 放当前感知、Memory、Knowledge 和 Experience，`STIMULI` 放带 `evidence_N` 引用的活动刺激，`EVIDENCE` 只说明可引用范围。Memory 是经历记录，Knowledge 是带来源的已确认事实，Belief 是有置信度的推断，Experience 是带触发/结果的累积经验；它们的真实性、来源和生命周期由 `CognitionSystem` 校验，不能因为模型在上下文中读到一段文本就互相升级。`expected_relief` 仍是作者计划的预测缓解，实际 Need 变化只能由执行效果和 Runtime 事务产生。
+
+每个用途只有一份固定 function/tool schema。工具名、必填字段、枚举和嵌套结构不会随 NPC、地点、日期或 Content Pack 候选集合改变；动态候选放在 `CATALOG`/`OPTIONS`。工具 description 说明何时调用、调用的边界和每个参数的含义，不能把大段动态状态塞进 schema。`choose_action`、`daily_reflection`、个人变更和共享变更分别使用自己的稳定契约；Runtime 负责把当前主体和范围注入结果，模型不重复输出这些审计字段。`choose_action.action_id` 是计划候选 key，`parameters` 的 wire schema 保持稳定并允许内容特定键以维持缓存前缀；具体键、类型、枚举和当前计划归属由 C++ 的 ActionValidator 再次校验，不能把 permissive wire schema 当成执行权限。
 
 修正采用同一会话内的 ReAct 式观察续接：首次返回的 assistant tool call 原样保留，Runtime 追加结构化 `tool` observation（错误码、字段路径、允许范围和当前候选），第二轮只要求返回一个最小 patch 工具调用。修正不得重建或改写之前的静态目录和工具定义；Runtime 将 patch 合并到第一轮候选后重新做完整校验，超过有界次数即失败关闭。成功的工具结果也作为 observation 追加并进入下一次反思/评估，而不是让模型假设执行成功。该协议同时满足可回放性、错误可解释性和 llama.cpp/OpenAI-compatible prefix cache 的稳定性。
 

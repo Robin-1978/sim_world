@@ -350,7 +350,8 @@ std::vector<ActionCandidate> parseActions(const Json& beats, const std::string& 
             }
             const auto definition = behaviorSet.value(id, Json::object());
             if (!definition.is_object()) throw std::runtime_error("dialogue behavior must be an object: " + id);
-            ActionCandidate candidate{id, recipe->planId, beat.value("id", "content"), recipe->durationMinutes,
+            ActionCandidate candidate{id, recipe->planId,
+                                      definition.value("description", beat.value("id", "content")), recipe->durationMinutes,
                                       recipe->interruptible, recipe->interruptSalienceThreshold,
                                       recipe->reservationMode, recipe->id, {}, recipe->priority,
                                       recipe->preemptionPolicy, 0.0, Json::object(), Json::object(), 0.0, 0.0, 0.0,

@@ -562,6 +562,14 @@ Json WorldEvolutionSystem::reflectionContext(const WorldService& world,
     } else {
         innovationGate["reason"] = "repeated_failure_supports_one_private_hypothesis";
     }
+    Json peopleNames = Json::object();
+    for (const auto& authored : world.content_.npcs) {
+        peopleNames[authored.definition.id] = authored.definition.name;
+    }
+    Json placeNames = Json::object();
+    for (const auto& place : world.content_.spatialEntities) {
+        placeNames[place.id] = place.spatial.displayName;
+    }
     const auto* authoredTarget = world.authoredNpc(targetNpcId);
     return Json{{"schema_version", 1}, {"trigger", "daily_reflection"},
                 {"target_npc", targetNpcId},
@@ -608,7 +616,11 @@ Json WorldEvolutionSystem::reflectionContext(const WorldService& world,
                 {"failure_candidates", failureCandidates},
                 {"innovation_gate", innovationGate},
                 {"unresolved_issues", npc.unresolvedIssues},
-                {"pending_innovation_hypotheses", pendingHypotheses}, {"content", contentSummary}};
+                {"pending_innovation_hypotheses", pendingHypotheses}, {"content", contentSummary},
+                // Provider replaces these identifiers with authored names and
+                // removes the maps before constructing model-facing messages.
+                {"projection_names", Json{{"people", std::move(peopleNames)},
+                                           {"places", std::move(placeNames)}}}};
 }
 
 ProviderResponse WorldEvolutionSystem::requestReflection(const WorldService& world,
