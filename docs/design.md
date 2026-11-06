@@ -82,6 +82,8 @@ JSON 是内容和提案的机器边界，C++ 类型是编译期契约，WorldSta
 
 Runtime 状态的事实投影与 LLM 的解释字段严格分开。`current_activity`、位置、需求缺口、Goal、`ProcessExecution`、BT 进度、资源预留和关系都由 C++ 维护；LLM 只根据授权投影组织语言或选择候选计划。`utterance_understanding.ambiguity` 是输入分类的不确定性，`IntentProposal.motivation` 是对已选计划的短解释；二者以及 `dialogue`、`rationale`、`tradeoffs`、`expected_outcome` 都不具备事实写入权，不能创建或修改 Goal、hidden goal、Memory、需求权重或世界事件。只有经过 ActionValidator、Revision/权限校验并由 Runtime 执行 BT 后，实际效果才进入 WorldState、EventLog 和认知投影。
 
+这些字段服务于可读性和审计，允许客户端呈现 NPC 的“内心独白风格”，但不宣称它们是模型真实推理的忠实因果追踪；它们可能是事后合理化。可验证解释必须同时展示 Runtime 的候选计划、确定性 utility/需求贡献、硬约束过滤、模型选中的 `action_id`、校验结果和 BT 实际结果。若模型 `motivation` 与这些事实冲突，保留冲突并以 Runtime 记录为准。
+
 ### 内驱：需求域、驱动状态与自动适应
 
 当前实现使用四个可同时激活的需求域。它们用于建模和内容校验，不是严格互斥的心理实体，也不形成一个固定先后顺序：
