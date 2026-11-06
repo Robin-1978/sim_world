@@ -54,7 +54,7 @@
       "policy": {
         "thinking": true,
         "reasoning_budget_tokens": 512,
-        "max_tokens": 1536
+        "max_tokens": 2048
       }
     }
   }

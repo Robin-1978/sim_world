@@ -375,7 +375,7 @@ Profile 的 `purposes.decision.policies` 是按 channel 使用的命名策略表
     },
     "world_evolution": {
       "provider": "local_qwen",
-      "policy": {"thinking": true, "reasoning_budget_tokens": 512, "max_tokens": 1536}
+      "policy": {"thinking": true, "reasoning_budget_tokens": 512, "max_tokens": 2048}
     }
   }
 }
