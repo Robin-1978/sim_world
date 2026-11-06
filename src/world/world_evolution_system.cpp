@@ -574,7 +574,6 @@ Json WorldEvolutionSystem::reflectionContext(const WorldService& world,
                                         {"memories", memoryEvidence(npc)},
                                         {"relationships", relationshipEvidence(npc)},
                                         {"stimuli", stimulusEvidence(npc)},
-                                        {"pending_innovation_hypotheses", pendingHypotheses},
                                         {"innovation_adoptions", [&npc] {
                                              Json value = Json::array();
                                              for (const auto& adoption : npc.innovationAdoptions) {

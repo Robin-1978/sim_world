@@ -3496,6 +3496,9 @@ void daily_reflection_routes_updates_and_keeps_incremental_cursor() {
     expect(secondContext.at("reflection_cursor").at("last_event_sequence").get<std::uint64_t>() > 0 &&
                !secondContext.at("unresolved_issues").empty(),
            "the next reflection receives the persisted cursor and unresolved issue set");
+    expect(!secondContext.at("current_state").contains("pending_innovation_hypotheses") &&
+               secondContext.contains("pending_innovation_hypotheses"),
+           "the reflection projection carries pending hypotheses once instead of duplicating them");
     expect(std::count_if(service.state().events.begin(), service.state().events.end(),
                          [](const auto& event) { return event.type == "reflection.committed"; }) >= 6,
            "reflection commits remain auditable across day boundaries");
