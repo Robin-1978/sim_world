@@ -273,6 +273,12 @@ DialogueTurn WorldIntelligenceSystem::commitTurn(const TurnRequest& request, Pro
             return result;
         }
     }
+    for (const auto& evidenceRef : response.proposal.citedEvidenceRefs) {
+        if (!context.evidenceRefs.contains(evidenceRef)) {
+            result.error = "unknown_evidence_ref";
+            return result;
+        }
+    }
     for (const auto& [needId, expected] : response.proposal.expectedRelief) {
         if (expected < 0.0 || expected > 1.0 || !world_.state_.npcs.at(request.npcId).needs.contains(needId)) {
             result.error = "invalid_expected_relief";
@@ -315,6 +321,7 @@ DialogueTurn WorldIntelligenceSystem::commitTurn(const TurnRequest& request, Pro
                  {"speech_act", effectiveSpeechAct}, {"world_action_requested", false},
                  {"utterance_understanding", response.proposal.utteranceUnderstanding},
                  {"process_status", "conversation_only"}, {"provider", result.provider},
+                 {"cited_evidence_refs", response.proposal.citedEvidenceRefs},
                  {"context_world_revision", response.proposal.worldRevision},
                  {"context_npc_state_version", response.proposal.npcStateVersion}});
         result.accepted = true;
