@@ -585,7 +585,7 @@ Runtime 内部 ID 只留在事实层、事件层和工具执行层。模型看�
 
 所有模型入口共享同一协议骨架，而不是共享同一个任务：固定 `system` 规则和工具描述先发送，稳定的作者目录随后发送，当前任务/状态/证据/资格作为动态消息尾部发送，模型只返回一个强制的顶层 function call，Runtime 再追加结构化 observation 并决定是否提交。`decision` 的目标是选择一个当前可执行计划，`reflection` 的目标是整理认知和效果并可选提出一个私有假设，个人变更的目标是提出主体范围内的声明式变更，共享变更的目标是提出世界范围内的声明式变更。四个入口各自拥有稳定的工具名和参数契约，但不各自发明上下文格式；差异只放在任务说明、可见证据、允许操作和验证器。
 
-决策状态把长期动机、当前 Goal 和执行过程分开投影：`Private preferences` 只表达作者定义的长期动机/边界，`Active goal` 表达 GoalSystem 当前激活的意图、原因和截止时间，`Current activity` 表达 Goal/Process 的生命周期和 BT 进度。Goal 的创建、激活、进展、完成、失败和取消仍由 Runtime 管理；LLM 只能提出本次 `choose_action`，不能直接写 Goal Progress、Need 或 Process 状态。已有运行中的 Process 且没有明确中断触发时，决策入口不会启动第二个 Process。
+决策状态把长期动机、当前 Goal 和执行过程分开投影：`Private preferences` 只表达作者定义的长期动机/边界，`Active goal` 表达 GoalSystem 当前激活的意图、原因和截止时间，`Current activity` 表达 Goal/Process 的生命周期和 BT 进度。空闲主体显式收到 `active_goal=none` 与 `active_process=none`，避免把“没有活动”和“上下文未加载”混淆；运行中的过程还投影 `behavior_step`，但不暴露内部身份或状态版本。Goal 的创建、激活、进展、完成、失败和取消仍由 Runtime 管理；LLM 只能提出本次 `choose_action`，不能直接写 Goal Progress、Need 或 Process 状态。已有运行中的 Process 且没有明确中断触发时，决策入口不会启动第二个 Process。
 
 模型侧把认知状态和本次可引用证据分开：`COGNITION` 放当前感知、Memory、Knowledge 和 Experience，`STIMULI` 放带 `evidence_N` 引用的活动刺激，`EVIDENCE` 只说明可引用范围。Memory 是经历记录，Knowledge 是带来源的已确认事实，Belief 是有置信度的推断，Experience 是带触发/结果的累积经验；它们的真实性、来源和生命周期由 `CognitionSystem` 校验，不能因为模型在上下文中读到一段文本就互相升级。`expected_relief` 仍是作者计划的预测缓解，实际 Need 变化只能由执行效果和 Runtime 事务产生。
 

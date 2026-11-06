@@ -390,19 +390,35 @@ DecisionContext DecisionContextProjector::build(const WorldState& state,
                              ",fear:" + std::to_string(relation.fear) +
                              ",owed:" + std::to_string(relation.owed);
     }
+    context.currentActivity = Json{{"status", npc.activity.goal || npc.activity.process
+                                               ? toString(npc.activity.status)
+                                               : "idle"},
+                                   {"active_goal", "none"}, {"active_process", "none"}};
     if (npc.activity.goal) {
-        context.currentActivity = Json{{"status", toString(npc.activity.status)},
-                                       {"goal_id", npc.activity.goal->id},
-                                       {"intent", npc.activity.goal->intent},
-                                       {"action_id", npc.activity.goal->target},
-                                       {"reason", npc.activity.goal->reason},
-                                       {"deadline", npc.activity.goal->deadline.toString()}};
+        context.currentActivity["active_goal"] = Json{
+            {"intent", npc.activity.goal->intent},
+            {"plan_key", npc.activity.goal->target},
+            {"reason", npc.activity.goal->reason},
+            {"deadline", npc.activity.goal->deadline.toString()}};
+        context.currentActivity["goal_id"] = npc.activity.goal->id;
+        context.currentActivity["intent"] = npc.activity.goal->intent;
+        context.currentActivity["action_id"] = npc.activity.goal->target;
+        context.currentActivity["reason"] = npc.activity.goal->reason;
+        context.currentActivity["deadline"] = npc.activity.goal->deadline.toString();
     }
     if (npc.activity.process) {
+        context.currentActivity["active_process"] = Json{
+            {"plan_key", npc.activity.process->planId},
+            {"recipe_key", npc.activity.process->recipeId},
+            {"progress", npc.activity.process->progress},
+            {"behavior_step", npc.activity.process->behaviorStep},
+            {"behavior_status", npc.activity.process->behaviorStatus},
+            {"completes_at", npc.activity.process->completesAt.toString()}};
         context.currentActivity["process_id"] = npc.activity.process->id;
         context.currentActivity["recipe_id"] = npc.activity.process->recipeId;
         context.currentActivity["plan_id"] = npc.activity.process->planId;
         context.currentActivity["progress"] = npc.activity.process->progress;
+        context.currentActivity["behavior_step"] = npc.activity.process->behaviorStep;
         context.currentActivity["behavior_status"] = npc.activity.process->behaviorStatus;
         context.currentActivity["completes_at"] = npc.activity.process->completesAt.toString();
     }
