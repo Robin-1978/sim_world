@@ -506,6 +506,7 @@ ProviderResponse LlamaCppProvider::decide(const DecisionContext& context, const 
         "Choose exactly one action_id from plan_catalog, or use an empty action_id for a conversation-only response or refusal. "
         "Each non-empty action_id selects one registered behavior plan: Runtime will execute its complete content-authored behavior tree. "
         "The behavior_tree shown in plan_catalog is descriptive context; do not invent or partially execute its nodes in this response. "
+        "When decision_channel is npc_autonomous_intent, emit only the compact machine proposal fields action_id, intent, confidence, cited_stimulus_ids, expected_relief, and parameters (plus any required speech-act field); omit dialogue and all explanation fields. "
         "If the selected plan has a parameter_schema, fill only those declared parameters (for example destination); "
         "parameters are proposals for Runtime validation, not direct world writes. Plans without declared properties MUST use parameters={}; never copy a parameter from another candidate. "
         "A non-empty action_id starts an authored world process and may change world facts; it is never merely a dialogue style or answer type. "
