@@ -516,6 +516,48 @@ Json WorldEvolutionSystem::reflectionContext(const WorldService& world,
     for (std::size_t index = firstFailure; index < failureRecords.size(); ++index) {
         failureCandidates.push_back(failureRecords.at(index));
     }
+    // This is an advisory, deterministic affordance projection.  It tells a
+    // small model exactly when a private innovation is worth proposing and
+    // which bounded recipe shape the current Runtime lane accepts.  The
+    // proposal still has to cite the same committed events and pass the full
+    // EvolutionManager validator; the model cannot turn this hint into
+    // authority or invent a new operator.
+    std::map<std::string, std::vector<std::uint64_t>> failuresByAction;
+    for (const auto& item : failureRecords) {
+        const auto actionId = item.value("action_id", "");
+        const auto sequence = item.value("sequence", std::uint64_t{0});
+        if (!actionId.empty() && sequence != 0) failuresByAction[actionId].push_back(sequence);
+    }
+    std::string gatedAction;
+    std::vector<std::uint64_t> gatedSequences;
+    for (const auto& [actionId, sequences] : failuresByAction) {
+        if (sequences.size() < 2) continue;
+        if (gatedSequences.empty() || sequences.size() > gatedSequences.size() ||
+            (sequences.size() == gatedSequences.size() && actionId < gatedAction)) {
+            gatedAction = actionId;
+            gatedSequences = sequences;
+        }
+    }
+    Json allowedLeafNodes = Json::array();
+    for (const auto& [actionId, definition] : world.content_.metaActions) {
+        (void)definition;
+        allowedLeafNodes.push_back(actionId);
+    }
+    const Json parameterSchemaShape{{"type", "object"}, {"properties", Json::object()},
+                                    {"required", Json::array()}, {"additionalProperties", false}};
+    Json innovationGate{{"eligible", !gatedAction.empty()},
+                        {"action_id", gatedAction},
+                        {"failure_event_sequences", gatedSequences},
+                        {"required_operation", "register_behavior_recipe"},
+                        {"allowed_leaf_nodes", allowedLeafNodes},
+                        {"recipe_root_type", "meta_action"},
+                        {"available_to", Json::array({targetNpcId})},
+                        {"parameter_schema_shape", parameterSchemaShape}};
+    if (gatedAction.empty()) {
+        innovationGate["reason"] = "need_two_same_action_failures";
+    } else {
+        innovationGate["reason"] = "repeated_failure_supports_one_private_hypothesis";
+    }
     return Json{{"schema_version", 1}, {"trigger", "daily_reflection"},
                 {"target_npc", targetNpcId}, {"base_world_revision", world.state_.revision},
                 {"world_time", world.state_.now.minute},
@@ -558,6 +600,7 @@ Json WorldEvolutionSystem::reflectionContext(const WorldService& world,
                 // checks the cited sequences and repeats the admission gate;
                 // the hint is advisory context, never authority.
                 {"failure_candidates", failureCandidates},
+                {"innovation_gate", innovationGate},
                 {"unresolved_issues", npc.unresolvedIssues},
                 {"pending_innovation_hypotheses", pendingHypotheses}, {"content", contentSummary}};
 }

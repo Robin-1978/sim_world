@@ -3511,6 +3511,51 @@ void daily_reflection_routes_updates_and_keeps_incremental_cursor() {
            "Level 2 receives committed hypothesis evidence without a private Level 1 proposal payload");
 }
 
+void reflection_context_exposes_deterministic_innovation_gate() {
+    auto content = ContentPackLoader::load(ContentPackLoader::defaultRoot());
+    content.evolutionPolicy.enabled = false;
+    content.npcDeliberation.enabled = false;
+    auto seed = WorldService::fromContent(content, std::make_unique<MockProvider>());
+    const auto withoutFailures = WorldEvolutionSystem::reflectionContext(seed, "mira");
+    const auto emptyGate = withoutFailures.at("innovation_gate");
+    expect(!emptyGate.at("eligible").get<bool>() &&
+               emptyGate.at("reason") == "need_two_same_action_failures" &&
+               emptyGate.at("failure_event_sequences").empty(),
+           "the innovation gate stays closed without two committed failures of one action");
+
+    auto snapshot = seed.snapshotJson();
+    const auto baseEvent = snapshot.at("events").back();
+    const auto revision = snapshot.at("world_revision").get<std::uint64_t>();
+    for (std::uint64_t sequence = 2; sequence <= 3; ++sequence) {
+        auto failure = baseEvent;
+        failure["schema_version"] = 4;
+        failure["sequence"] = sequence;
+        failure["event_id"] = "event:" + std::to_string(sequence);
+        failure["correlation_id"] = "correlation:2";
+        failure["causation_sequence"] = sequence == 2 ? 0 : 2;
+        failure["world_revision"] = revision;
+        failure["type"] = "npc.process_failed";
+        failure["actor"] = "mira";
+        failure["target"] = "repair_ferry";
+        failure["detail"] = "A deterministic repeated process failure for the gate projection.";
+        failure["data"] = Json{{"action_id", "repair_ferry"}, {"process_id", "failed:" + std::to_string(sequence)}};
+        snapshot["events"].push_back(std::move(failure));
+    }
+    snapshot["event_sequence"] = snapshot.at("events").size();
+    auto restored = WorldService::fromContentSnapshot(content, snapshot, std::make_unique<MockProvider>());
+    const auto context = WorldEvolutionSystem::reflectionContext(restored, "mira");
+    const auto gate = context.at("innovation_gate");
+    const auto leaves = gate.at("allowed_leaf_nodes");
+    expect(gate.at("eligible").get<bool>() && gate.at("action_id") == "repair_ferry" &&
+               gate.at("failure_event_sequences") == Json::array({2, 3}) &&
+               gate.at("required_operation") == "register_behavior_recipe" &&
+               gate.at("recipe_root_type") == "meta_action" &&
+               gate.at("available_to") == Json::array({"mira"}) &&
+               gate.at("parameter_schema_shape").value("additionalProperties", true) == false &&
+               std::find(leaves.begin(), leaves.end(), "relieve_need") != leaves.end(),
+           "the innovation gate projects repeated evidence and the bounded private recipe affordance");
+}
+
 void sync_daily_reflection_uses_patch_continuation() {
     auto provider = std::make_unique<ReflectionProvider>();
     auto* providerRaw = provider.get();
@@ -3969,6 +4014,8 @@ int main() {
     run("level_two_reflection_can_commit_no_change", level_two_reflection_can_commit_no_change);
     run("daily_reflection_routes_updates_and_keeps_incremental_cursor",
         daily_reflection_routes_updates_and_keeps_incremental_cursor);
+    run("reflection_context_exposes_deterministic_innovation_gate",
+        reflection_context_exposes_deterministic_innovation_gate);
     run("sync_daily_reflection_uses_patch_continuation",
         sync_daily_reflection_uses_patch_continuation);
     run("semantic_reflection_innovation_uses_patch_continuation",
