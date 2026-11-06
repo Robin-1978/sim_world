@@ -753,13 +753,16 @@ void accepted_intent_runs_without_reasking_llm() {
     expect(restored.state().npcs.at("mira").activity.process->reservationMode == "input_resources",
            "a process restores its authored reservation policy");
     restored.advanceMinutes(29);
-    expect(restored.state().resources.at("grain").amount == 100,
-           "long-running effects are not committed before completion");
-    expect(restored.state().resources.at("grain").reserved == 5,
-           "inputs are reserved while the process runs");
+    expect(restored.state().resources.at("grain").amount == 95,
+           "a resource leaf commits during the long-running process");
+    expect(restored.state().resources.at("grain").reserved == 0,
+           "a committed resource leaf releases its consumed reservation");
+    expect(restored.state().npcs.at("mira").activity.process.has_value() &&
+               restored.state().npcs.at("mira").activity.process->behaviorStep == 2,
+           "the durable process records the completed condition and resource leaves");
     restored.advanceMinutes(1);
     expect(restored.state().resources.at("grain").amount == 95,
-           "completion transaction applies the authored resource effect");
+           "completion does not replay already committed behavior leaves");
     expect(restored.state().resources.at("grain").reserved == 0,
            "completion releases the process reservation");
     expect(!restored.state().npcs.at("mira").activity.process,
@@ -768,6 +771,10 @@ void accepted_intent_runs_without_reasking_llm() {
                return event.type == "npc.process_completed";
            }),
            "completion is recorded as a world event");
+    expect(std::count_if(restored.state().events.begin(), restored.state().events.end(), [](const auto& event) {
+               return event.type == "npc.behavior_leaf_completed";
+           }) == 3,
+           "each authored behavior leaf commits exactly once");
     expect(providerCalls == 1, "world time advances without another model call");
 }
 
@@ -1210,6 +1217,46 @@ void high_salience_stimulus_interrupts_and_releases_reservations() {
            }) || service.state().npcs.at("mira").activity.status == ActivityStatus::Active,
            "the suspended activity resumes after the interruption clears");
     expect(providerCalls == 1, "interruption and resume do not re-query the model inside the tick loop");
+}
+
+void behavior_leaf_effects_survive_interruption_and_resume() {
+    int providerCalls = 0;
+    auto content = ContentPackLoader::load(ContentPackLoader::defaultRoot());
+    content.npcDeliberation.enabled = false;
+    for (auto& rule : content.stimulusRules) {
+        if (rule.eventPrefix == "promise.") {
+            rule.intensity = 1.0;
+            rule.urgency = 1.0;
+            rule.ttlMinutes = 10;
+        }
+    }
+    auto service = WorldService::fromContent(content, std::make_unique<CountingProvider>(providerCalls));
+    expect(service.converse("mira", "offer a ration", "leaf-interrupt-start").accepted,
+           "a persistent recipe starts before a leaf interruption");
+    service.advanceMinutes(20);
+    expect(service.state().resources.at("grain").amount == 95 &&
+               service.state().npcs.at("mira").activity.process &&
+               service.state().npcs.at("mira").activity.process->behaviorStep == 2,
+           "effects from completed leaves are visible before the process finishes");
+    expect(service.createPromise("player", "mira", "bring the missing ledger", 1,
+                                 "leaf-interrupt-stimulus").accepted,
+           "the interruption stimulus is committed");
+    service.advanceMinutes(1);
+    const auto& suspended = service.state().npcs.at("mira").activity;
+    expect(suspended.status == ActivityStatus::Suspended && suspended.process &&
+               suspended.process->behaviorStep == 2 && service.state().resources.at("grain").amount == 95,
+           "suspension preserves the committed leaf step and its world effect");
+    service.advanceMinutes(20);
+    const auto actionResourceCount = std::count_if(
+        service.state().events.begin(), service.state().events.end(), [](const auto& event) {
+            return event.type == "action.resource" && event.data.value("resource", "") == "grain";
+        });
+    expect(actionResourceCount == 1 && service.state().resources.at("grain").amount == 95 &&
+               std::any_of(service.state().events.begin(), service.state().events.end(), [](const auto& event) {
+                   return event.type == "npc.process_completed";
+               }),
+           "resumption continues from the saved leaf without replaying earlier effects");
+    expect(providerCalls == 1, "leaf interruption and resume never re-query the model");
 }
 
 void behavior_tree_supports_sequence_timeout_and_interrupt() {
@@ -4021,6 +4068,8 @@ int main() {
     run("time_step_partitioning_preserves_deterministic_world_state",
         time_step_partitioning_preserves_deterministic_world_state);
     run("high_salience_stimulus_interrupts_and_releases_reservations", high_salience_stimulus_interrupts_and_releases_reservations);
+    run("behavior_leaf_effects_survive_interruption_and_resume",
+        behavior_leaf_effects_survive_interruption_and_resume);
     run("reservation_policy_is_authored_per_process", reservation_policy_is_authored_per_process);
     run("resource_preemption_is_declared_and_atomic", resource_preemption_is_declared_and_atomic);
     run("exchange_contracts_are_durable_and_atomic", exchange_contracts_are_durable_and_atomic);

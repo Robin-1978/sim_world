@@ -314,6 +314,11 @@ private:
                                        const BehaviorNodeContent& node,
                                        const std::map<std::string, int>* reservedResources,
                                        const Json* parameters = nullptr);
+    [[nodiscard]] bool applyBehaviorLeaf(const std::string& npcId, const std::string& actionId,
+                                          const BehaviorNodeContent& node,
+                                          const std::map<std::string, int>* reservedResources,
+                                          const Json* parameters = nullptr);
+    void recordActionExperience(const std::string& npcId, const std::string& actionId);
     [[nodiscard]] const BehaviorRecipeContent* recipeForAction(const std::string& actionId);
     void tickProcesses(const std::set<std::string>& dueNpcIds);
     void resumeSuspendedProcesses(const std::set<std::string>& dueNpcIds);

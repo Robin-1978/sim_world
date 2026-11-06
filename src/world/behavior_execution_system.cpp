@@ -158,9 +158,9 @@ bool BehaviorExecutionSystem::applyActionEffects(const std::string& npcId, const
                                       const Json* parameters) {
     const auto* recipe = recipeForAction(actionId);
     if (recipe == nullptr) return false;
-    const std::size_t eventCountBefore = world_.state_.events.size();
-    // A recipe is one atomic transition. Its conditions and all meta-action
-    // effects either commit together or disappear together.
+    // This is the atomic fallback used for immediate actions and recipes with
+    // dynamic branch state. Linear long-running recipes are advanced by
+    // applyBehaviorLeaf so already committed stages are never replayed.
     WorldService::TransactionScope recipeTransaction(world_);
     const auto result = BehaviorRecipeRuntime::run(
         *recipe,
@@ -174,26 +174,46 @@ bool BehaviorExecutionSystem::applyActionEffects(const std::string& npcId, const
         recipeTransaction.rollback();
         return false;
     }
-    // A successfully committed action is an episode. Record it through the
-    // cognition boundary so the source event, confidence merge, and audit
-    // event use the same validation path as authored knowledge actions.
-    const auto effectEvent = std::find_if(world_.state_.events.rbegin(), world_.state_.events.rend(),
-                                          [eventCountBefore](const auto& event) { return event.sequence > eventCountBefore; });
-    if (effectEvent != world_.state_.events.rend()) {
-        const auto sourceSequence = effectEvent->sequence;
-        const auto sourceType = effectEvent->type;
-        const auto recorded = world_.recordExperience(
-            npcId, "action", "observed_context", actionId, sourceType, sourceSequence, 0.5, true, npcId,
-            "recipe:" + npcId + ":" + actionId + ":experience:" + std::to_string(sourceSequence));
-        if (recorded.accepted) {
-            world_.addEvent("experience.observed", npcId, npcId,
-                            "A committed action outcome became reusable NPC experience",
-                            Json{{"action_id", actionId}, {"source_sequence", sourceSequence},
-                                 {"source_type", sourceType}, {"domain", "action"},
-                                 {"recorded_experience", recorded.message}});
-        }
-    }
+    recordActionExperience(npcId, actionId);
     return result.status == NodeStatus::Success;
+}
+
+bool BehaviorExecutionSystem::applyBehaviorLeaf(const std::string& npcId,
+                                                const std::string& actionId,
+                                                const BehaviorNodeContent& node,
+                                                const std::map<std::string, int>* reservedResources,
+                                                const Json* parameters) {
+    WorldService::TransactionScope leafTransaction(world_);
+    bool applied = false;
+    if (node.type == "condition") {
+        applied = evaluateBehaviorCondition(npcId, node);
+    } else if (node.type == "meta_action") {
+        applied = applyMetaAction(npcId, actionId, node, reservedResources, parameters);
+    }
+    if (!applied) leafTransaction.rollback();
+    return applied;
+}
+
+void BehaviorExecutionSystem::recordActionExperience(const std::string& npcId,
+                                                     const std::string& actionId) {
+    const auto effectEvent = std::find_if(world_.state_.events.rbegin(), world_.state_.events.rend(),
+                                          [&npcId](const auto& event) {
+                                              return event.actor == npcId && event.type != "experience.observed" &&
+                                                     event.type != "experience.recorded";
+                                          });
+    if (effectEvent == world_.state_.events.rend()) return;
+    const auto sourceSequence = effectEvent->sequence;
+    const auto sourceType = effectEvent->type;
+    const auto recorded = world_.recordExperience(
+        npcId, "action", "observed_context", actionId, sourceType, sourceSequence, 0.5, true, npcId,
+        "recipe:" + npcId + ":" + actionId + ":experience:" + std::to_string(sourceSequence));
+    if (recorded.accepted) {
+        world_.addEvent("experience.observed", npcId, npcId,
+                        "A committed action outcome became reusable NPC experience",
+                        Json{{"action_id", actionId}, {"source_sequence", sourceSequence},
+                             {"source_type", sourceType}, {"domain", "action"},
+                             {"recorded_experience", recorded.message}});
+    }
 }
 
 void BehaviorExecutionSystem::applyNeedRelief(const std::string& npcId, const std::string& actionId) {

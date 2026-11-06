@@ -267,7 +267,7 @@ NPC 不每帧调用 LLM。日常移动、进食、休息、工作、资源结算
 
 `WorldService` 是唯一协调入口，但不应成为所有领域规则的实现容器。合同协调由 `ContractSystem` 负责承诺和交换的状态机、参与方权限、截止时间与结算规划；NPC 活动推进由 `NpcSimulationSystem` 负责日程边界、长过程、预留抢占、挂起/恢复和策略日界修订；这两个系统都通过 WorldService 的统一事务和事件回调提交事实，不拥有独立状态副本。资源、社会、元动作、NPC 活动和合同系统都遵守同一条 `validate -> transaction -> WorldState/EventLog` 路径。
 
-一次有效的 `IntentProposal` 只负责选择并启动一个已登记的行为/过程，不负责逐 tick 指挥。运行时把它固化为 NPC 的 `ProcessExecution`：记录 `process_id`、动作与配方 ID、开始/完成时间、进度、资源预留、上下文 Revision、可中断策略和状态。之后每个游戏时间步只推进过程、重算前置条件和检查中断信号；完成、失败或中断才提交对应事实。只要过程仍有效，不重复询问 LLM；过程结束后或出现高显著性外驱、硬约束变化、资源失效时，当前 WorldService 的重评估入口才重新安排意图，未来可抽出独立 GoalSystem。一个 NPC 只有一个 `NpcActivity` 槽，它是活动生命周期的唯一所有者；槽中的 `ActivityStatus` 是唯一阶段，Goal 和 ProcessExecution 的状态字段只是该阶段的持久化投影。Goal、ProcessExecution、FSM 和 BT 是同一个活动的四个视角，各自只回答一个问题：Goal 回答“为什么做、是否仍值得做”，ProcessExecution 回答“正在执行哪个过程、进度和预留是什么”，FSM 回答“NPC 当前处于什么运行模式”，BT/BehaviorRecipe 回答“当前过程如何逐步执行”。Goal 的终止状态只能由 `NpcActivity` 的转换函数根据过程结果、中断信号或失效条件统一写入；FSM 模式由同一转换函数投影得到；BT 只返回 `Running/Success/Failure/Interrupted`，不能直接改写 Goal 或过程状态。
+一次有效的 `IntentProposal` 只负责选择并启动一个已登记的行为/过程，不负责逐 tick 指挥。运行时把它固化为 NPC 的 `ProcessExecution`：记录 `process_id`、动作与配方 ID、开始/完成时间、进度、资源预留、上下文 Revision、可中断策略、当前 BT 叶子和 `behavior_step`。之后每个游戏时间步由 Runtime 推进过程、重算前置条件和检查中断信号；可线性化的 Sequence/包装节点按声明阶段逐叶子提交，每个叶子拥有短事务和事件，之前已提交的叶子效果在后续失败或打断时保留；无法安全线性化的 Selector 等动态分支仍在完成边界以原子配方路径执行。只要过程仍有效，不重复询问 LLM；过程结束后或出现高显著性外驱、硬约束变化、资源失效时，当前 WorldService 的重评估入口才重新安排意图，未来可抽出独立 GoalSystem。一个 NPC 只有一个 `NpcActivity` 槽，它是活动生命周期的唯一所有者；槽中的 `ActivityStatus` 是唯一阶段，Goal 和 ProcessExecution 的状态字段只是该阶段的持久化投影。Goal、ProcessExecution、FSM 和 BT 是同一个活动的四个视角，各自只回答一个问题：Goal 回答“为什么做、是否仍值得做”，ProcessExecution 回答“正在执行哪个过程、进度和预留是什么”，FSM 回答“NPC 当前处于什么运行模式”，BT/BehaviorRecipe 回答“当前过程如何逐步执行”。Goal 的终止状态只能由 `NpcActivity` 的转换函数根据过程结果、中断信号或失效条件统一写入；FSM 模式由同一转换函数投影得到；BT 只返回 `Running/Success/Failure/Interrupted`，不能直接改写 Goal 或过程状态。
 
 角色独特性来自角色底稿、价值观、秘密、底线、玩家历史、关系四轴（trust、respect、fear、owed）、当前需求、已确认事实和世界事件的组合。角色底稿由作者维护，不由模型静默改写。NPC 可以从未相识进入初次接触、试探、关系建立或冲突，再进入压力事件、兑现/失信和新目标；这是内容和规则的推进状态，不是模型自由发明的剧情。
 
@@ -462,7 +462,7 @@ Command / IntentProposal / EvolutionProposal
 
 逻辑提交和 durable commit 是两层契约。逻辑提交保证内存中的 `WorldState`、`EventLog`、Revision 和幂等记录作为一个状态转换成功或失败；durable commit 通过当前持久化适配器把已提交 Snapshot、Replay 和索引载荷作为一个检查点替换。当前原型不会为每个根事务同步写盘，因此进程崩溃可能丢失最近一个检查点，但不会在内存中产生事实与事件分叉；需要逐事务崩溃恢复时，必须先定义数据库 schema、恢复顺序和幂等协议。EventBus 只在逻辑提交成功后通知，不能成为事实提交的一部分。
 
-事务只覆盖一次状态转换，不跨越整个长过程。长过程采用“启动事务 → 资源预留与 `ProcessExecution` → 时间推进/中断检查 → 完成或失败事务”的边界。当前配方的中间 Tick 不产生虚假的完成效果；如果未来行为需要真实的中间物理效果，必须把它拆成声明式阶段，每个阶段拥有独立提交事件和可选补偿，而不是让 BT 在事务外直接写事实。完成时消费本过程拥有的预留并写入效果；被高显著性外驱打断时进入 `ActivityStatus::Suspended`，同一事务释放预留并记录 `npc.process_suspended`，保留目标、进度和计划需求；刺激失效且资源仍可满足时，当前活动生命周期逻辑按原计划重新预留并恢复，`completesAt` 顺延暂停时长，记录 `npc.process_resumed`。资源被更高优先级过程合法抢占时使用同一挂起/恢复生命周期，但暂停原因记录为 `resource_preempted`，事件同时引用抢占者和新过程；仲裁先只读计算完整资源方案，只有全部缺口都能由符合策略的过程释放时才一次提交。若资源无法满足或目标已失效，则请求在写入前拒绝，原过程继续运行，不能留下“暂停了一部分参与者”的中间状态。这样既保持单次提交原子性，也允许捕鱼、维修、搬运、等待交易和移动持续多个 tick。
+事务只覆盖一次状态转换，不跨越整个长过程。长过程采用“启动事务 → 资源预留与 `ProcessExecution` → 时间推进/中断检查 → 完成或失败事务”的边界。线性行为树的每个 simulation tick 都只由 Runtime 推进到当前时间应到达的叶子；条件和元动作在自己的短事务中校验/提交，并产生 `npc.behavior_leaf_completed` 及 operator 事件。叶子提交后即成为世界事实，即使后续叶子失败或过程被打断也不回滚；失败事件保存失败节点和 `behavior_step`。选择器、带动态分支的树或无法保存分支游标的配方继续在完成边界以一棵树的原子事务执行。各资源叶子按 operator 消费本过程拥有的预留，完成时释放剩余预留并写入终态；被高显著性外驱打断时进入 `ActivityStatus::Suspended`，同一事务释放预留并记录 `npc.process_suspended`，保留目标、进度和计划需求；刺激失效且资源仍可满足时，当前活动生命周期逻辑按原计划重新预留并恢复，`completesAt` 顺延暂停时长，记录 `npc.process_resumed`。资源被更高优先级过程合法抢占时使用同一挂起/恢复生命周期，但暂停原因记录为 `resource_preempted`，事件同时引用抢占者和新过程；仲裁先只读计算完整资源方案，只有全部缺口都能由符合策略的过程释放时才一次提交。若资源无法满足或目标已失效，则请求在写入前拒绝，原过程继续运行，不能留下“暂停了一部分参与者”的中间状态。这样既保持单次提交原子性，也允许捕鱼、维修、搬运、等待交易和移动持续多个 tick。
 
 这里的回滚有四个明确边界：校验失败发生在写入前，直接拒绝且不改变事实；复合 `BehaviorRecipe` 在校验通过后若某个后续元动作失败，嵌套事务只撤销本次短效果提交里已经暂存的前置效果，不撤销 BT、Goal、FSM 或世界时间；长过程失败不倒退世界时间，而是释放预留、取消过程或执行声明式补偿，活动转为 `Failed` 后由 Goal/Drive 在下一次唤醒时重新规划；Evolution Overlay 回滚只恢复未来使用的内容/策略视图，已经发生的 WorldState 和 EventLog 永远保留。它们不能混称为把整个世界倒回上一个 tick。
 
@@ -561,7 +561,7 @@ Behavior DSL 只组合注册节点、条件和元动作，例如：
 }
 ```
 
- 当前实现不把这套 DSL 误称为通用编程语言，但它已经支持由 JSON 构造一棵受约束的行为树。内容包声明 `meta_actions`（故事动作 ID 到 Runtime 通用 operator 的绑定）、`conditions`（条件 ID 到只读谓词的绑定）和 `recipes`；加载器校验引用，`BehaviorRecipeRuntime` 在运行时编译 `Sequence`、`Selector`、`Interruptible`、`Timeout`、`Condition` 和 `Action` 节点。游戏代码不会为 Mira、Lorn、Eve 或某个故事动作创建专用 BT。`GoalSelector`/LLM 只选择候选 `recipe_id`，接受后由 Runtime 创建 `ProcessExecution` 并记录该 recipe；长过程等待由 ProcessExecution 管理，过程完成时才在事务中运行已编译配方的原子效果。Recipe 可以声明参数 JSON Schema，节点通过 `{"bind":"parameter_name"}` 引用运行时输入；因此 `goto`、交易对象、协作对象和调查目标都是能力参数，而不是写死在 operator 中的故事 ID。普通决策只能选择已批准计划并填写参数；LLM 要创建全新的 BT，必须通过 Level 1/2 的 `register_behavior_recipe` 提案，经过引用验证和 Runtime 预检后才会进入候选目录。新增行为只需新增 JSON 配方、参数契约和已登记的通用 operator；只有新增底层事实变换原语才需要扩展 Runtime。
+ 当前实现不把这套 DSL 误称为通用编程语言，但它已经支持由 JSON 构造一棵受约束的行为树。内容包声明 `meta_actions`（故事动作 ID 到 Runtime 通用 operator 的绑定）、`conditions`（条件 ID 到只读谓词的绑定）和 `recipes`；加载器校验引用，`BehaviorRecipeRuntime` 在运行时编译 `Sequence`、`Selector`、`Interruptible`、`Timeout`、`Condition` 和 `Action` 节点。游戏代码不会为 Mira、Lorn、Eve 或某个故事动作创建专用 BT。`GoalSelector`/LLM 只选择候选 `recipe_id`，接受后由 Runtime 创建 `ProcessExecution` 并记录该 recipe；长过程等待由 ProcessExecution 管理，线性配方按持久化 `behavior_step` 在各个 tick 执行叶子，选择器等动态分支仍走完成边界的原子树执行。Recipe 可以声明参数 JSON Schema，节点通过 `{"bind":"parameter_name"}` 引用运行时输入；因此 `goto`、交易对象、协作对象和调查目标都是能力参数，而不是写死在 operator 中的故事 ID。普通决策只能选择已批准计划并填写参数；LLM 要创建全新的 BT，必须通过 Level 1/2 的 `register_behavior_recipe` 提案，经过引用验证和 Runtime 预检后才会进入候选目录。新增行为只需新增 JSON 配方、参数契约和已登记的通用 operator；只有新增底层事实变换原语才需要扩展 Runtime。
 
 演化操作是类型化的，例如 `create_entity_archetype`、`overlay_strategy`、`overlay_schedule`、`register_behavior_recipe`、`add_relationship` 和 `schedule_event`；不是任意 JSON Patch。新增 C++ Component、System、权限、调度、事件格式、存档迁移或可执行代码必须由开发者发布。
 
@@ -690,7 +690,7 @@ Snapshot 包含 `save_schema_version`、`simulation_version`、`content_version/
 
 1. 玩家不输入时，时间、日程、需求衰减、已接受过程和远端生活继续推进。
 2. 需要主体作出新判断时，Runtime 生成裁剪后的 `DecisionContext`，默认 LLM 选择内容允许的计划或只生成对白；模型返回的参数经过 Schema、权限、可见性、拓扑、资源和 Revision 校验。
-3. 计划接受后只启动一个 `ProcessExecution`；每次 Tick 推进当前 BT，不重复调用 LLM。完成、失败、显著打断或配置的重评估边界才再次唤醒模型。
+3. 计划接受后只启动一个 `ProcessExecution`；每次 Tick 由 Runtime 推进当前 BT，线性树按 `behavior_step` 执行到当前应到达的叶子并提交事实，不重复调用 LLM。完成、失败、显著打断或配置的重评估边界才再次唤醒模型。
 4. 每个事实变化均通过统一事务提交并产生事件；事件包含来源、版本和因果关联，下一轮上下文能解释变化。
 5. 关闭模型服务时，已经批准的规则和活动仍可恢复，错误是可审计且失败关闭的，不会用关键词、固定目标或 Mock 冒充 LLM 决策。
 6. 同一 Runtime 更换 Content Pack 后，不能出现角色名、世界名或故事动作相关的 C++ 分支。

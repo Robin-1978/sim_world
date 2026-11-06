@@ -111,6 +111,7 @@ Json processJson(const ProcessExecution& process) {
                 {"recipe_id", process.recipeId}, {"plan_id", process.planId},
                 {"trigger", process.trigger}, {"started_at", process.startedAt.minute},
                 {"completes_at", process.completesAt.minute}, {"suspended_at", process.suspendedAt.minute},
+                {"paused_minutes", process.pausedMinutes},
                 {"progress", process.progress},
                 {"status", toString(process.status)}, {"interruption_reason", process.interruptionReason},
                 {"behavior_node_id", process.behaviorNodeId}, {"behavior_step", process.behaviorStep},
@@ -137,6 +138,7 @@ ProcessExecution processFromJson(const Json& json) {
     process.startedAt = GameTime{jsonValue<std::int64_t>(json, "started_at", 0)};
     process.completesAt = GameTime{jsonValue<std::int64_t>(json, "completes_at", 0)};
     process.suspendedAt = GameTime{jsonValue<std::int64_t>(json, "suspended_at", -1)};
+    process.pausedMinutes = jsonValue<std::int64_t>(json, "paused_minutes", 0);
     process.progress = jsonValue<double>(json, "progress", 0.0);
     process.status = processStatusFromString(jsonValue<std::string>(json, "status", "running"));
     process.interruptionReason = jsonValue<std::string>(json, "interruption_reason", "");

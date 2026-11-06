@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <numeric>
+#include <tuple>
 
 namespace tide_marks {
 
@@ -93,16 +94,22 @@ void NpcSimulationSystem::tickProcesses(const std::set<std::string>& dueNpcIds) 
     // Completion may run a nested recipe savepoint. A failed recipe restores
     // WorldState and invalidates references/iterators into the NPC map, so
     // collect durable work items before invoking code that may roll back.
-    std::vector<std::pair<std::string, ProcessExecution>> due;
+    std::vector<std::pair<std::string, NpcState>> active;
     for (const auto& [npcId, npc] : world_.state_.npcs) {
         if (!dueNpcIds.contains(npcId)) continue;
         if (npc.activity.status != ActivityStatus::Active ||
             !npc.activity.process || npc.activity.process->status != ProcessStatus::Running) {
             continue;
         }
+        active.emplace_back(npcId, npc);
+    }
+    std::vector<std::tuple<std::string, ProcessExecution, bool>> due;
+    for (const auto& [npcId, npc] : active) {
         auto process = *npc.activity.process;
         const auto duration = std::max<std::int64_t>(1, process.completesAt.minute - process.startedAt.minute);
-        process.progress = std::clamp(static_cast<double>(world_.state_.now.minute - process.startedAt.minute) /
+        const auto activeElapsed = std::max<std::int64_t>(
+            0, world_.state_.now.minute - process.startedAt.minute - process.pausedMinutes);
+        process.progress = std::clamp(static_cast<double>(activeElapsed) /
                                           static_cast<double>(duration),
                                       0.0, 1.0);
         double interruptSalience = 0.0;
@@ -118,11 +125,95 @@ void NpcSimulationSystem::tickProcesses(const std::set<std::string>& dueNpcIds) 
                            "new_high_salience_stimulus");
             continue;
         }
-        if (world_.state_.now.minute < process.completesAt.minute) continue;
-        due.emplace_back(npcId, process);
+        const auto* recipe = world_.recipeForAction(process.recipeId.empty() ? process.actionId : process.recipeId);
+        const auto leaves = recipe == nullptr ? std::vector<const BehaviorNodeContent*>{}
+                                              : BehaviorRecipeRuntime::orderedLeaves(recipe->root);
+        const bool executeRemainingRecipe = leaves.empty();
+        // A linear recipe is a durable sequence of leaf commits.  The
+        // progress fraction determines how many stages are due at this
+        // simulation boundary; a large jump may catch up several stages in
+        // order, while an interruption preserves the already committed step.
+        if (recipe != nullptr && !leaves.empty() && world_.state_.now.minute >= process.startedAt.minute) {
+            const auto elapsed = std::max<std::int64_t>(
+                0, world_.state_.now.minute - process.startedAt.minute - process.pausedMinutes);
+            const auto processDuration = std::max<std::int64_t>(1, process.completesAt.minute - process.startedAt.minute);
+            const auto dueLeaves = std::min<std::size_t>(
+                leaves.size(), static_cast<std::size_t>((elapsed * static_cast<std::int64_t>(leaves.size())) /
+                                                        processDuration));
+            for (std::size_t step = process.behaviorStep; step < dueLeaves; ++step) {
+                const auto* leaf = leaves[step];
+                const bool applied = world_.applyBehaviorLeaf(npcId, process.actionId, *leaf,
+                                                               &process.reservedResources, &process.parameters);
+                if (!applied) {
+                    process.status = ProcessStatus::Failed;
+                    process.behaviorStatus = "failure";
+                    releaseReservations(process);
+                    world_.addEvent("npc.process_failed", npcId, process.actionId,
+                             "A behavior leaf failed after earlier committed leaves remained effective",
+                             Json{{"process_id", process.id}, {"action_id", process.actionId},
+                                  {"failed_node_id", leaf->id}, {"behavior_step", step},
+                                  {"progress", process.progress}, {"status", toString(process.status)}});
+                    finalizeInnovationAdoption(npcId, process, false);
+                    auto found = world_.state_.npcs.find(npcId);
+                    if (found != world_.state_.npcs.end() && found->second.activity.process &&
+                        found->second.activity.process->id == process.id) {
+                        found->second.activity.process = process;
+                        setActivityStatus(found->second.activity, ActivityStatus::Failed);
+                        applyNpcSignal(found->second, NpcSignal::FinishProcess);
+                        found->second.activity = NpcActivity{};
+                        ++found->second.stateVersion;
+                    }
+                    break;
+                }
+                process.behaviorStep = step + 1;
+                process.behaviorNodeId = leaf->id;
+                process.behaviorStatus = "running";
+                // A reserved input is consumed by its leaf, so only the
+                // unconsumed remainder remains recoverable on suspension or
+                // cancellation.  Keep the durable process ledger aligned
+                // with ResourceState::reserved rather than reserving the
+                // already-consumed quantity again on resume.
+                if (leaf->type == "meta_action") {
+                    const auto definition = world_.content_.metaActions.find(leaf->name);
+                    if (definition != world_.content_.metaActions.end() &&
+                        definition->second.operation == "resource.consume") {
+                        const auto resource = leaf->args.value(
+                            "resource", definition->second.defaultArgs.value("resource", ""));
+                        const auto amount = leaf->args.value(
+                            "amount", definition->second.defaultArgs.value("amount", 0));
+                        if (amount > 0) {
+                            if (auto reserved = process.reservedResources.find(resource);
+                                reserved != process.reservedResources.end()) {
+                                reserved->second = std::max(0, reserved->second - amount);
+                            }
+                            if (auto required = process.requiredResources.find(resource);
+                                required != process.requiredResources.end()) {
+                                required->second = std::max(0, required->second - amount);
+                            }
+                        }
+                    }
+                }
+                world_.addEvent("npc.behavior_leaf_completed", npcId, process.actionId,
+                         "A behavior-tree leaf committed its effects",
+                         Json{{"process_id", process.id}, {"action_id", process.actionId},
+                              {"node_id", leaf->id}, {"behavior_step", process.behaviorStep},
+                              {"leaf_type", leaf->type}, {"progress", process.progress}});
+                if (leaf->type == "meta_action") world_.recordActionExperience(npcId, process.actionId);
+            }
+            if (process.status == ProcessStatus::Failed) continue;
+        }
+        if (world_.state_.now.minute < process.completesAt.minute) {
+            auto found = world_.state_.npcs.find(npcId);
+            if (found != world_.state_.npcs.end() && found->second.activity.process &&
+                found->second.activity.process->id == process.id) {
+                found->second.activity.process = process;
+            }
+            continue;
+        }
+        due.emplace_back(npcId, process, executeRemainingRecipe);
     }
-    for (const auto& [npcId, process] : due) {
-        completeProcess(npcId, process);
+    for (const auto& [npcId, process, executeRemainingRecipe] : due) {
+        completeProcess(npcId, process, executeRemainingRecipe);
     }
 }
 
@@ -153,7 +244,9 @@ void NpcSimulationSystem::resumeSuspendedProcesses(const std::set<std::string>& 
         }
         const std::string previousReason = process.interruptionReason;
         if (process.suspendedAt.minute >= 0) {
-            process.completesAt.minute += world_.state_.now.minute - process.suspendedAt.minute;
+            const auto paused = std::max<std::int64_t>(0, world_.state_.now.minute - process.suspendedAt.minute);
+            process.pausedMinutes += paused;
+            process.completesAt.minute += paused;
         }
         process.suspendedAt = GameTime{-1};
         process.interruptionReason.clear();
@@ -342,11 +435,15 @@ void NpcSimulationSystem::finalizeInnovationAdoption(const std::string& npcId,
                          {"observed_metrics", observed}, {"metric_evaluation", evaluation}});
 }
 
-void NpcSimulationSystem::completeProcess(const std::string& npcId, ProcessExecution process) {
+void NpcSimulationSystem::completeProcess(const std::string& npcId, ProcessExecution process,
+                                           bool executeRemainingRecipe) {
     if (!world_.state_.npcs.contains(npcId)) return;
-    const bool applied = world_.applyActionEffects(
-        npcId, process.recipeId.empty() ? process.actionId : process.recipeId,
-        &process.reservedResources, &process.parameters);
+    bool applied = true;
+    if (executeRemainingRecipe) {
+        applied = world_.applyActionEffects(
+            npcId, process.recipeId.empty() ? process.actionId : process.recipeId,
+            &process.reservedResources, &process.parameters);
+    }
     process.progress = 1.0;
     process.status = applied ? ProcessStatus::Completed : ProcessStatus::Failed;
     process.behaviorStatus = applied ? "success" : "failure";

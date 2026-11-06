@@ -158,6 +158,7 @@ struct ProcessExecution {
     GameTime startedAt;
     GameTime completesAt;
     GameTime suspendedAt{-1};
+    std::int64_t pausedMinutes{0};
     double progress{0.0};
     ProcessStatus status{ProcessStatus::Running};
     std::string behaviorNodeId;

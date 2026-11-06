@@ -106,7 +106,7 @@
 
 1. 将 Provider 结构化响应固定为 `IntentProposal`：候选动作、意图、理由、预期结果、引用 Stimulus、权衡、预期满足、置信度、上下文 Revision。
 2. 校验模型返回的上下文版本、候选白名单、资源、权限、关系和幂等键。
-3. ~~让一次有效决策启动持久化为 `ProcessExecution`，过程中不重复调用 LLM~~ 已完成：候选行为声明时长、可中断策略和显著性阈值；完成/中断才提交对应效果。`NpcActivity` 现在是唯一活动槽和生命周期状态源，Goal/Process/FSM/BT 不再各自维护生命周期。
+3. ~~让一次有效决策启动持久化为 `ProcessExecution`，过程中不重复调用 LLM~~ 已完成：候选行为声明时长、可中断策略和显著性阈值；线性配方按 `behavior_step` 在每个 tick 提交到当前阶段的叶子，之前已提交的效果在打断或后续失败后保留；动态分支仍在完成边界原子执行。`NpcActivity` 现在是唯一活动槽和生命周期状态源，Goal/Process/FSM/BT 不再各自维护生命周期。
 4. 已提交行动统一形成 WorldEvent，并驱动资源、需求、记忆和下一轮外部刺激；关系、合同、知识/经验、安全和生产 operator 已在 通过同一事务边界接入。
 5. ~~把真实 Provider 的自主审议接入异步 TurnQueue~~ 已在 完成；当前同步路径只用于玩家交互和受控推进，后台自驱使用独立工作线程并在主线程边界提交。
 6. ~~对模型关闭、模型迟到、过期提案、未知动作、重复提案、过程恢复和中断释放预留增加回归测试~~ 已覆盖；对话和自驱 Provider 失败时都失败关闭且不提交事实，测试通过显式 Mock Provider 保持可重复。
@@ -127,7 +127,7 @@
 1. ~~冻结 Entity/Agent、Resource、ProductionProcess、ConsumptionNeed、Exchange/Contract、Communication、Institution/Rule 和 Event 的属性契约~~ 已完成 基础字段和 JSON 边界；已为交易、组织、安全、知识/经验和生产补齐最小可执行字段，抵押、价格和复杂制度条款仍是独立内容模型。
 2. ~~让内容加载器校验单位、所有权、容量、输入/输出、时间窗口、权限和引用~~ 已完成资源、拓扑、需求、行为配方、合同参与方、库存容量、生产输入/输出和引用校验；质量轴与复杂价格语义不会在没有事实模型时伪造。
 3. ~~完成 元动作注册表：资源消耗/产出/预留、需求满足、关系调整和连接状态~~ 已完成；已扩展为 `resource.transfer`、`movement.traverse/arrive`、冲突/安全、承诺、交换合同、知识/经验、生产和组织指标等注册 operator，全部通过内容绑定而不是 NPC 特例。
-4. ~~把小村庄真实的配给、修船、档案整理和承诺行为组合为 BehaviorRecipe；不再为每个 NPC 添加 C++ 特例。~~ 已完成：`data/behaviors/village.json` 定义 meta actions、conditions 和 recipes，Runtime 编译 Sequence/Selector/Condition/Action/Timeout/Interruptible 节点；ActionCandidate 只引用配方，ProcessExecution 在完成时执行同一配方。
+4. ~~把小村庄真实的配给、修船、档案整理和承诺行为组合为 BehaviorRecipe；不再为每个 NPC 添加 C++ 特例。~~ 已完成：`data/behaviors/village.json` 定义 meta actions、conditions 和 recipes，Runtime 编译 Sequence/Selector/Condition/Action/Timeout/Interruptible 节点；ActionCandidate 只引用配方，线性 ProcessExecution 按 `behavior_step` 逐叶子执行并持久化，动态分支在完成边界执行同一配方的原子回退。
 5. ~~为元动作、复合行为、事务失败和回滚补自动化测试~~ 已完成。新增商店、利率或政策规则前，必须先完成对应的 事实模型。
 
 ## 后续工作包

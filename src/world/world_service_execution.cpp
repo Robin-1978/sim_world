@@ -117,6 +117,17 @@ bool WorldService::applyActionEffects(const std::string& npcId, const std::strin
     return BehaviorExecutionSystem(*this).applyActionEffects(npcId, actionId, reservedResources, parameters);
 }
 
+bool WorldService::applyBehaviorLeaf(const std::string& npcId, const std::string& actionId,
+                                     const BehaviorNodeContent& node,
+                                     const std::map<std::string, int>* reservedResources,
+                                     const Json* parameters) {
+    return BehaviorExecutionSystem(*this).applyBehaviorLeaf(npcId, actionId, node, reservedResources, parameters);
+}
+
+void WorldService::recordActionExperience(const std::string& npcId, const std::string& actionId) {
+    BehaviorExecutionSystem(*this).recordActionExperience(npcId, actionId);
+}
+
 void WorldService::applyNeedRelief(const std::string& npcId, const std::string& actionId) {
     BehaviorExecutionSystem(*this).applyNeedRelief(npcId, actionId);
 }

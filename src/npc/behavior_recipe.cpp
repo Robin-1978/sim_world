@@ -43,6 +43,26 @@ struct CompiledTree {
     std::map<std::string, const BehaviorNodeContent*> nodes;
 };
 
+bool collectLinearLeaves(const BehaviorNodeContent& node,
+                         std::vector<const BehaviorNodeContent*>& leaves) {
+    if (node.type == "condition" || node.type == "meta_action") {
+        leaves.push_back(&node);
+        return true;
+    }
+    if (node.type == "interruptible" || node.type == "timeout") {
+        return node.children.size() == 1 && collectLinearLeaves(node.children.front(), leaves);
+    }
+    if (node.type == "sequence") {
+        if (node.children.empty()) return false;
+        for (const auto& child : node.children) {
+            if (!collectLinearLeaves(child, leaves)) return false;
+        }
+        return true;
+    }
+    // Selectors need the runtime's branch status to know which child is next.
+    return false;
+}
+
 std::unique_ptr<BehaviorNode> compileNode(const BehaviorNodeContent& node, CompiledTree& tree) {
     if (node.id.empty()) throw std::runtime_error("behavior node has no id");
     if (!tree.nodes.emplace(node.id, &node).second) {
@@ -110,6 +130,13 @@ BehaviorRecipeRunResult BehaviorRecipeRuntime::run(const BehaviorRecipeContent& 
     };
     const auto status = tree.root->tick(context);
     return BehaviorRecipeRunResult{status, status == NodeStatus::Success ? "" : failedNode};
+}
+
+std::vector<const BehaviorNodeContent*> BehaviorRecipeRuntime::orderedLeaves(
+    const BehaviorNodeContent& root) {
+    std::vector<const BehaviorNodeContent*> leaves;
+    if (!collectLinearLeaves(root, leaves)) leaves.clear();
+    return leaves;
 }
 
 bool BehaviorRecipeRuntime::canStart(const BehaviorRecipeContent& recipe,

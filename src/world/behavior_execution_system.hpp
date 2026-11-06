@@ -29,6 +29,11 @@ public:
     [[nodiscard]] bool applyActionEffects(const std::string& npcId, const std::string& actionId,
                                           const std::map<std::string, int>* reservedResources,
                                           const Json* parameters = nullptr);
+    [[nodiscard]] bool applyBehaviorLeaf(const std::string& npcId, const std::string& actionId,
+                                          const BehaviorNodeContent& node,
+                                          const std::map<std::string, int>* reservedResources,
+                                          const Json* parameters = nullptr);
+    void recordActionExperience(const std::string& npcId, const std::string& actionId);
     void applyNeedRelief(const std::string& npcId, const std::string& actionId);
 
 private:

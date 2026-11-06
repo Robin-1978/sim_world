@@ -79,11 +79,16 @@ public:
     using ActionHandler = std::function<bool(const BehaviorNodeContent&)>;
 
     // Compiles the recipe into a fresh tree for one evaluation. Long-running
-    // waits belong to ProcessExecution; this method evaluates the recipe's
-    // atomic effects at the process boundary.
+    // waits belong to ProcessExecution; linear recipes can instead be
+    // advanced durably one leaf at a time by orderedLeaves().
     [[nodiscard]] static BehaviorRecipeRunResult run(const BehaviorRecipeContent& recipe,
                                                       ConditionHandler condition,
                                                       ActionHandler action);
+    // Returns the deterministic leaf order for a linear recipe. A selector
+    // cannot be advanced leaf-by-leaf without retaining branch state, so it
+    // returns an empty vector and remains on the atomic completion path.
+    [[nodiscard]] static std::vector<const BehaviorNodeContent*> orderedLeaves(
+        const BehaviorNodeContent& root);
     // Checks only the conditions that must hold before the first action leaf
     // can start. It is a read-only projection helper; Runtime still evaluates
     // the full tree again at process completion.

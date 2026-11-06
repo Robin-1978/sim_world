@@ -53,7 +53,7 @@ void WorldService::cancelProcess(const std::string& npcId, ProcessExecution& pro
 }
 
 void WorldService::completeProcess(const std::string& npcId, ProcessExecution process) {
-    NpcSimulationSystem(*this).completeProcess(npcId, std::move(process));
+    NpcSimulationSystem(*this).completeProcess(npcId, std::move(process), true);
 }
 
 void WorldService::processAutonomousTurns(const std::set<std::string>& dueNpcIds) {
