@@ -303,7 +303,7 @@ Level 1 是主体行为演化：LLM 在现有 Runtime 能力内泛化一个主�
 
 创新不属于普通 Tick，也不应变成每个行动都触发的“再问一次模型”。Runtime 把每日边界的 Level 1 请求解释为 `daily_reflection`，并使用独立的 `ReflectionResult` schema：主体回顾 `ReflectionCursor` 之后的新事件、持久化的 `unresolved_issues` 和当前状态，可选地产生四类结果——Belief/Knowledge 更新、Experience/Memory 总结、策略或 Goal 调整、Innovation Hypothesis。ReflectionResult 不是事实，也不是 EvolutionProposal：Cognition 更新必须经 `CognitionSystem` 做来源、权限和置信度校验；Goal 调整只能通过现有 `NpcActivity` 生命周期入口；Strategy 调整写入主体策略事实；只有 `innovation_hypotheses` 进入 `EvolutionManager` 的 Level 1 私有提案链。没有足够证据时，反思只更新认知或策略，不得为了满足调用次数而生成创新。
 
-创新分支是反思结果中的可选部分，不能阻塞认知游标：如果模型提交的假设没有持久未解决问题、没有在本次证据窗口中引用同一过程至少两次 `npc.process_failed`，或其声明式配方/测试计划未通过 Runtime 校验，Runtime 会记录 `innovation.hypothesis_rejected`，丢弃该可选分支，同时仍在同一事务中提交合法的 Belief、Experience、Memory、Strategy、Goal 和新的 `ReflectionCursor`。只有核心反思字段（主体、来源事件、权限和边界）无效时，整条 ReflectionResult 才进入有界修正或拒绝。
+创新分支是反思结果中的可选部分，不能阻塞认知游标：如果模型提交的假设没有持久未解决问题、没有引用同一过程至少两次已提交的 `npc.process_failed`（失败可以跨越多个反思窗口），或其声明式配方/测试计划未通过 Runtime 校验，Runtime 会记录 `innovation.hypothesis_rejected`，丢弃该可选分支，同时仍在同一事务中提交合法的 Belief、Experience、Memory、Strategy、Goal 和新的 `ReflectionCursor`。当 Runtime 观察到同一主体的重复失败时，会保存有界的 `process_failed:<action_id>` 未解决问题键，并把最近的失败序列作为 `failure_candidates` 投影给后续反思；这只是确定性证据索引，模型仍必须引用两条真实失败并通过完整治理校验。只有核心反思字段（主体、来源事件、权限和边界）无效时，整条 ReflectionResult 才进入有界修正或拒绝。
 
 每日反思是幂等的日边界事务。`ReflectionCursor.last_event_sequence` 只在结果和审计事件提交后前移，输入窗口按游标增量聚合，并始终附带未解决问题；同一 NPC 同一天重复调度返回 `reflection_already_processed`。Runtime 先校验全部结构化结果，再以同一事务提交认知事件、Goal/Strategy 投影、创新假设事件和新的游标，因此模型重试或进程恢复不会重复消费证据。创新假设、Overlay 激活和 NPC Adoption 仍分别保留自己的生命周期。
 

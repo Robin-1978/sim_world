@@ -358,16 +358,26 @@ Json WorldEvolutionSystem::reflectionContext(const WorldService& world,
         }
         pendingHypotheses.push_back(std::move(summary));
     }
-    Json failureCandidates = Json::array();
+    // Failure evidence is cumulative. A daily cursor bounds ordinary
+    // cognition updates, but a persistent problem may span several reflection
+    // windows; dropping yesterday's failure would make the innovation gate
+    // impossible to satisfy in a long-running world. Keep only a small,
+    // deterministic tail in the model projection and let Runtime validate the
+    // cited committed sequences again at commit time.
+    std::vector<Json> failureRecords;
     for (const auto& event : world.state_.events) {
-        if (event.sequence <= npc.reflectionCursor.lastEventSequence ||
-            event.type != "npc.process_failed" || event.actor != targetNpcId) {
-            continue;
-        }
-        failureCandidates.push_back(Json{{"sequence", event.sequence},
-                                         {"action_id", event.data.value("action_id", event.target)},
-                                         {"process_id", event.data.value("process_id", "")}});
-        if (failureCandidates.size() >= 8) break;
+        if (event.type != "npc.process_failed" || event.actor != targetNpcId) continue;
+        failureRecords.push_back(Json{{"sequence", event.sequence},
+                                      {"action_id", event.data.value("action_id", event.target)},
+                                      {"process_id", event.data.value("process_id", "")}});
+    }
+    constexpr std::size_t kMaxFailureCandidates = 8;
+    const auto firstFailure = failureRecords.size() > kMaxFailureCandidates
+                                  ? failureRecords.size() - kMaxFailureCandidates
+                                  : 0;
+    Json failureCandidates = Json::array();
+    for (std::size_t index = firstFailure; index < failureRecords.size(); ++index) {
+        failureCandidates.push_back(failureRecords.at(index));
     }
     return Json{{"schema_version", 1}, {"trigger", "daily_reflection"},
                 {"target_npc", targetNpcId}, {"base_world_revision", world.state_.revision},
@@ -791,6 +801,23 @@ CommandResult WorldEvolutionSystem::commitReflection(const EvolutionRequest& req
     if (!hypotheses.is_array() || hypotheses.size() > 2) {
         return world_.reject("invalid_reflection_innovation", "Innovation hypotheses are optional and bounded.");
     }
+    // Count committed failures across reflection windows. A repeated failure
+    // deterministically seeds a durable issue key; the LLM still has to cite
+    // two matching failure events and propose a valid private recipe before a
+    // hypothesis can be persisted.
+    std::map<std::string, std::vector<std::uint64_t>> failureSequences;
+    for (const auto& event : world_.state_.events) {
+        if (event.sequence > boundarySequence || event.type != "npc.process_failed" ||
+            event.actor != request.targetNpcId) {
+            continue;
+        }
+        const auto actionId = event.data.value("action_id", event.target);
+        if (!actionId.empty()) failureSequences[actionId].push_back(event.sequence);
+    }
+    for (const auto& [actionId, sequences] : failureSequences) {
+        if (sequences.size() < 2 || issueSet.size() >= 16) continue;
+        issueSet.insert("process_failed:" + actionId);
+    }
     Json innovationRejection = Json::object();
     if (!hypotheses.empty()) {
         // A reflection may suggest innovation only after a durable problem
@@ -798,20 +825,10 @@ CommandResult WorldEvolutionSystem::commitReflection(const EvolutionRequest& req
         // authored process.  This is a deterministic admission gate: the
         // model may describe a hypothesis, but it cannot manufacture the
         // evidence needed to create one.
-        std::map<std::string, std::size_t> failureCounts;
-        for (const auto& event : world_.state_.events) {
-            if (event.sequence <= npc.reflectionCursor.lastEventSequence ||
-                event.sequence > boundarySequence || !evidence.contains(event.sequence) ||
-                event.type != "npc.process_failed" || event.actor != request.targetNpcId) {
-                continue;
-            }
-            const auto actionId = event.data.value("action_id", event.target);
-            if (!actionId.empty()) ++failureCounts[actionId];
-        }
         const bool repeatedFailure = std::any_of(
-            failureCounts.begin(), failureCounts.end(),
-            [](const auto& item) { return item.second >= 2; });
-        if (npc.unresolvedIssues.empty() || !repeatedFailure) {
+            failureSequences.begin(), failureSequences.end(),
+            [](const auto& item) { return item.second.size() >= 2; });
+        if (issueSet.empty() || !repeatedFailure) {
             innovationRejection = Json{
                 {"code", "innovation_evidence_insufficient"},
                 {"message", "An innovation hypothesis requires a persisted unresolved issue and two cited failures of the same process."}};
