@@ -782,9 +782,12 @@ ProviderResponse LlamaCppProvider::proposeEvolution(const Json& context,
                                                                       "advance_minutes", "resource_total"})}}}}}};
     innovationPlan["properties"]["baseline"] = Json{{"type", "string"}, {"minLength", 1}, {"maxLength", 512}};
     innovationPlan["properties"]["scenario"] = Json{{"type", "string"}, {"minLength", 1}, {"maxLength", 512}};
-    innovationPlan["properties"]["expected_metrics"] = Json{{"type", "object"}, {"minProperties", 1}, {"maxProperties", 6}, {"additionalProperties", Json{{"type", "number"}}}};
+    // OpenCode Go's beam-free schema dialect does not accept min/maxProperties
+    // on free-form metric maps. Runtime still enforces non-empty, bounded
+    // maps after the tool call, so omit only the unsupported wire keywords.
+    innovationPlan["properties"]["expected_metrics"] = Json{{"type", "object"}, {"additionalProperties", Json{{"type", "number"}}}};
     innovationPlan["properties"]["constraints"] = Json{{"type", "array"}, {"minItems", 1}, {"maxItems", 6}, {"items", Json{{"type", "string"}, {"minLength", 1}, {"maxLength", 512}}}};
-    innovationPlan["properties"]["resource_budget"] = Json{{"type", "object"}, {"minProperties", 1}, {"maxProperties", 8}, {"additionalProperties", Json{{"type", "number"}, {"minimum", 0}, {"maximum", 1000000}}}};
+    innovationPlan["properties"]["resource_budget"] = Json{{"type", "object"}, {"additionalProperties", Json{{"type", "number"}, {"minimum", 0}, {"maximum", 1000000}}}};
     innovationPlan["properties"]["success_criteria"] = Json{{"type", "string"}, {"minLength", 1}, {"maxLength", 512}};
     innovationPlan["properties"]["failure_criteria"] = Json{{"type", "string"}, {"minLength", 1}, {"maxLength", 512}};
     Json innovationSpec = Json::object();
@@ -987,7 +990,8 @@ ProviderResponse LlamaCppProvider::proposeReflection(const Json& context,
         "If evidence is insufficient, return empty updates and preserve unresolved issues. "
         "If validation_feedback is present, repair only the reported field error and keep all other empty/default fields. "
         "schema_version is the integer 1; never copy response_schema_version or any runtime_metadata value into the tool result. "
-        "Knowledge scope must be one of direct, witness, testimony, or inference; use inference for a derived belief.";
+        "Knowledge scope must be one of direct, witness, testimony, or inference; use inference for a derived belief. "
+        "For innovation hypotheses, novelty_basis must be exactly new_combination, new_capability, or new_archetype; behavior tree node type must be meta_action, condition, sequence, selector, interruptible, or timeout, never action.";
     Json beliefItem{{"type", "object"}, {"additionalProperties", false},
                           {"required", Json::array({"subject", "predicate", "value", "source_sequence", "confidence"})},
                           {"properties", Json{{"subject", Json{{"type", "string"}, {"minLength", 1}, {"maxLength", 128}}},
@@ -1105,9 +1109,9 @@ ProviderResponse LlamaCppProvider::proposeReflection(const Json& context,
     testPlan["properties"]["metrics"] = Json{{"type", "array"}, {"minItems", 1}, {"maxItems", 6}, {"items", Json{{"type", "string"}, {"enum", Json::array({"events_added", "final_revision", "npc_count", "knowledge_count", "experience_count", "advance_minutes", "resource_total"})}}}};
     testPlan["properties"]["baseline"] = Json{{"type", "string"}, {"minLength", 1}, {"maxLength", 512}};
     testPlan["properties"]["scenario"] = Json{{"type", "string"}, {"minLength", 1}, {"maxLength", 512}};
-    testPlan["properties"]["expected_metrics"] = Json{{"type", "object"}, {"minProperties", 1}, {"maxProperties", 6}};
+    testPlan["properties"]["expected_metrics"] = Json{{"type", "object"}};
     testPlan["properties"]["constraints"] = Json{{"type", "array"}, {"minItems", 1}, {"maxItems", 6}, {"items", Json{{"type", "string"}, {"minLength", 1}, {"maxLength", 512}}}};
-    testPlan["properties"]["resource_budget"] = Json{{"type", "object"}, {"minProperties", 1}, {"maxProperties", 8}};
+    testPlan["properties"]["resource_budget"] = Json{{"type", "object"}};
     testPlan["properties"]["success_criteria"] = Json{{"type", "string"}, {"minLength", 1}, {"maxLength", 512}};
     testPlan["properties"]["failure_criteria"] = Json{{"type", "string"}, {"minLength", 1}, {"maxLength", 512}};
 

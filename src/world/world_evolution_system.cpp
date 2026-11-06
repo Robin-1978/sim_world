@@ -5,6 +5,8 @@
 #include "world/world_service.hpp"
 
 #include <algorithm>
+#include <cmath>
+#include <limits>
 #include <map>
 
 namespace tide_marks {
@@ -962,16 +964,40 @@ CommandResult WorldEvolutionSystem::commitReflection(const EvolutionRequest& req
     std::set<std::uint64_t> evidence;
     Json acceptedEvidence = Json::array();
     Json rejectedUpdates = Json::array();
+    const auto readSequence = [](const Json& value, std::uint64_t& sequence) {
+        if (value.is_number_unsigned()) {
+            sequence = value.get<std::uint64_t>();
+            return true;
+        }
+        if (value.is_number_integer()) {
+            const auto signedValue = value.get<std::int64_t>();
+            if (signedValue < 0) return false;
+            sequence = static_cast<std::uint64_t>(signedValue);
+            return true;
+        }
+        // Some OpenAI-compatible JSON serializers print an integer-valued
+        // sequence as 359.0. Accept that lossless wire representation and
+        // canonicalize it before it reaches CognitionSystem/EvolutionManager.
+        if (value.is_number_float()) {
+            const auto floating = value.get<double>();
+            if (std::isfinite(floating) && floating >= 0.0 && std::floor(floating) == floating &&
+                floating <= static_cast<double>(std::numeric_limits<std::uint64_t>::max())) {
+                sequence = static_cast<std::uint64_t>(floating);
+                return true;
+            }
+        }
+        return false;
+    };
     const auto evidenceJson = result.value("evidence_event_sequences", Json::array());
     if (!evidenceJson.is_array() || evidenceJson.size() > 32) {
         rejectedUpdates.push_back(Json{{"kind", "evidence"}, {"code", "invalid_reflection_evidence"}});
     }
     if (evidenceJson.is_array()) for (const auto& item : evidenceJson) {
-        if (!item.is_number_unsigned()) {
+        std::uint64_t sequence = 0;
+        if (!readSequence(item, sequence)) {
             rejectedUpdates.push_back(Json{{"kind", "evidence"}, {"code", "invalid_reflection_evidence"}});
             continue;
         }
-        const auto sequence = item.get<std::uint64_t>();
         if (sequence <= npc.reflectionCursor.lastEventSequence || sequence > boundarySequence ||
             !evidence.insert(sequence).second) {
             rejectedUpdates.push_back(Json{{"kind", "evidence"}, {"sequence", sequence},
@@ -1020,45 +1046,54 @@ CommandResult WorldEvolutionSystem::commitReflection(const EvolutionRequest& req
     const bool memoriesArray = boundedArray(memories, "memories");
     if (beliefsArray) for (std::size_t index = 0; index < beliefs.size(); ++index) {
         const auto& item = beliefs.at(index);
+        std::uint64_t sourceSequence = 0;
         if (!boundedText(item, "subject", 128) || !boundedText(item, "predicate", 128) ||
             !boundedText(item, "value", 512) || !item.contains("source_sequence") ||
-            !item.at("source_sequence").is_number_unsigned() || !item.contains("confidence") ||
+            !readSequence(item.at("source_sequence"), sourceSequence) || !item.contains("confidence") ||
             !item.at("confidence").is_number() || item.at("confidence").get<double>() < 0.0 ||
             item.at("confidence").get<double>() > 1.0 ||
-            !hasSource(item.at("source_sequence").get<std::uint64_t>())) {
+            !hasSource(sourceSequence)) {
             rejectedUpdates.push_back(Json{{"kind", "belief"}, {"index", index},
                                            {"code", "invalid_reflection_cognition"}});
             continue;
         }
-        validBeliefs.push_back(item);
+        auto normalized = item;
+        normalized["source_sequence"] = sourceSequence;
+        validBeliefs.push_back(std::move(normalized));
     }
     if (experiencesArray) for (std::size_t index = 0; index < experiences.size(); ++index) {
         const auto& item = experiences.at(index);
+        std::uint64_t sourceSequence = 0;
         if (!boundedText(item, "domain", 128) || !boundedText(item, "trigger", 256) ||
             !boundedText(item, "action", 128) || !boundedText(item, "outcome", 512) ||
-            !item.contains("source_sequence") || !item.at("source_sequence").is_number_unsigned() ||
+            !item.contains("source_sequence") ||
             !item.contains("confidence") || !item.at("confidence").is_number() ||
             item.at("confidence").get<double>() < 0.0 || item.at("confidence").get<double>() > 1.0 ||
-            !hasSource(item.at("source_sequence").get<std::uint64_t>())) {
+            !readSequence(item.at("source_sequence"), sourceSequence) || !hasSource(sourceSequence)) {
             rejectedUpdates.push_back(Json{{"kind", "experience"}, {"index", index},
                                            {"code", "invalid_reflection_cognition"}});
             continue;
         }
-        validExperiences.push_back(item);
+        auto normalized = item;
+        normalized["source_sequence"] = sourceSequence;
+        validExperiences.push_back(std::move(normalized));
     }
     if (memoriesArray) for (std::size_t index = 0; index < memories.size(); ++index) {
         const auto& item = memories.at(index);
+        std::uint64_t sourceSequence = 0;
         if (!boundedText(item, "text", 512) || !item.contains("source_sequence") ||
-            !item.at("source_sequence").is_number_unsigned() ||
+            !readSequence(item.at("source_sequence"), sourceSequence) ||
             (item.contains("confidence") && (!item.at("confidence").is_number() ||
                                               item.at("confidence").get<double>() < 0.0 ||
                                               item.at("confidence").get<double>() > 1.0)) ||
-            !hasSource(item.at("source_sequence").get<std::uint64_t>())) {
+            !hasSource(sourceSequence)) {
             rejectedUpdates.push_back(Json{{"kind", "memory"}, {"index", index},
                                            {"code", "invalid_reflection_cognition"}});
             continue;
         }
-        validMemories.push_back(item);
+        auto normalized = item;
+        normalized["source_sequence"] = sourceSequence;
+        validMemories.push_back(std::move(normalized));
     }
     const auto strategy = result.value("strategy_adjustment", Json::object());
     Json validStrategy = strategy;

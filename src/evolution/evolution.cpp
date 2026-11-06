@@ -4,6 +4,7 @@
 #include "world/world_state_json.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <fstream>
 #include <limits>
 #include <set>
@@ -24,10 +25,23 @@ std::vector<std::uint64_t> requiredEventSequences(const Json& value, const char*
     }
     std::vector<std::uint64_t> sequences;
     for (const auto& item : value.at(key)) {
-        if (!item.is_number_unsigned() || item.get<std::uint64_t>() == 0) {
+        std::uint64_t sequence = 0;
+        if (item.is_number_unsigned()) {
+            sequence = item.get<std::uint64_t>();
+        } else if (item.is_number_integer()) {
+            const auto signedValue = item.get<std::int64_t>();
+            if (signedValue > 0) sequence = static_cast<std::uint64_t>(signedValue);
+        } else if (item.is_number_float()) {
+            const auto floating = item.get<double>();
+            if (std::isfinite(floating) && floating > 0.0 && std::floor(floating) == floating &&
+                floating <= static_cast<double>(std::numeric_limits<std::uint64_t>::max())) {
+                sequence = static_cast<std::uint64_t>(floating);
+            }
+        }
+        if (sequence == 0) {
             throw std::runtime_error(std::string("evolution proposal ") + key + " must contain event sequences");
         }
-        sequences.push_back(item.get<std::uint64_t>());
+        sequences.push_back(sequence);
     }
     return sequences;
 }
