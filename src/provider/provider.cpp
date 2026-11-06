@@ -234,6 +234,14 @@ ProviderJsonResult requestProviderJson(const LlamaCppConfig& config, const Json&
     // cache_prompt is a llama.cpp extension. OpenAI-compatible gateways may
     // reject unknown top-level request fields, so only send it to llama.cpp.
     if (config.providerType == "llama_cpp") requestWithCache["cache_prompt"] = true;
+    if (const char* debugRequest = std::getenv("TIDE_MARKS_DEBUG_PROVIDER_REQUEST");
+        debugRequest != nullptr && *debugRequest != '\0' && std::string(debugRequest) != "0") {
+        // This explicit local inspection switch dumps the exact payload sent
+        // to the OpenAI-compatible endpoint. Authorization is created later
+        // in a separate owner-only temporary header file, so it is never part
+        // of this request dump.
+        std::cerr << "provider_request stage=" << stage << " payload=" << requestWithCache.dump() << "\n";
+    }
     const auto temp = std::filesystem::temp_directory_path() /
                       ("tide_marks_llm_" + stage + "_" +
                        std::to_string(static_cast<long long>(std::rand())) + ".json");
