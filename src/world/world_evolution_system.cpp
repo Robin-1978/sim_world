@@ -764,6 +764,11 @@ std::size_t WorldEvolutionSystem::pumpAsyncProposals() {
                                        {"proposal", EvolutionManager::toJson(proposal)},
                                        {"approval_actor", "runtime_governor"}});
                             if (!approval.valid) continue;
+                            // The approval audit is a committed Runtime fact
+                            // and advances the revision. Rebase the private
+                            // overlay before its final preflight, exactly as
+                            // the shared Level 2 lane does below.
+                            proposal.baseWorldRevision = world_.state_.revision;
                             const auto activationPreflight = preflightOverlay(proposal, world_);
                             if (!activationPreflight.passed) {
                                 audit("evolution.activation_rejected",

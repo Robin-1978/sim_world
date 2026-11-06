@@ -3311,6 +3311,66 @@ void automatic_evolution_uses_async_llm_and_runtime_admission() {
            "a valid Level 2 proposal is autonomously admitted and activated without a human or full sandbox");
 }
 
+void automatic_level_one_innovation_is_admitted_and_adopted() {
+    auto content = ContentPackLoader::load(ContentPackLoader::defaultRoot());
+    content.evolutionPolicy.enabled = true;
+    content.evolutionPolicy.level1IntervalDays = 1;
+    content.evolutionPolicy.level2IntervalDays = 0;
+    content.evolutionPolicy.maxProposalAgeMinutes = 180;
+    content.npcDeliberation.enabled = false;
+
+    // Seed two committed failures in the snapshot so the deterministic
+    // admission gate has the same durable evidence it requires from a real
+    // long-running process. They are ordinary event-log records: no NPC or
+    // provider is allowed to write them directly at runtime.
+    auto seed = WorldService::fromContent(content, std::make_unique<MockProvider>());
+    auto snapshot = seed.snapshotJson();
+    const auto baseEvent = snapshot.at("events").back();
+    const auto revision = snapshot.at("world_revision").get<std::uint64_t>();
+    for (std::uint64_t sequence = 2; sequence <= 3; ++sequence) {
+        auto failure = baseEvent;
+        failure["schema_version"] = 4;
+        failure["sequence"] = sequence;
+        failure["event_id"] = "event:" + std::to_string(sequence);
+        failure["correlation_id"] = "correlation:2";
+        failure["causation_sequence"] = sequence == 2 ? 0 : 2;
+        failure["world_revision"] = revision;
+        failure["type"] = "npc.process_failed";
+        failure["actor"] = "mira";
+        failure["target"] = "repair_ferry";
+        failure["detail"] = "A deterministic repeated process failure for innovation admission.";
+        failure["data"] = Json{{"action_id", "repair_ferry"}, {"process_id", "failed:" + std::to_string(sequence)}};
+        snapshot["events"].push_back(std::move(failure));
+    }
+    snapshot["event_sequence"] = snapshot.at("events").size();
+
+    auto provider = std::make_unique<ReflectionProvider>();
+    auto* providerRaw = provider.get();
+    providerRaw->emitInnovation = true;
+    auto service = WorldService::fromContentSnapshot(content, snapshot, std::move(provider));
+    service.advanceMinutes(kMinutesPerDay);
+    service.waitForAsyncTurns(1000);
+
+    const auto& events = service.state().events;
+    const auto hasEvent = [&events](const std::string& type, const std::string& actor = {}) {
+        return std::any_of(events.begin(), events.end(), [&type, &actor](const auto& event) {
+            return event.type == type && (actor.empty() || event.actor == actor);
+        });
+    };
+    expect(providerRaw->reflectionContexts.size() == 3,
+           "Level 1 innovation admission still performs one bounded reflection per NPC");
+    expect(hasEvent("innovation.hypothesis_created") && hasEvent("evolution.approved", "world") &&
+               hasEvent("evolution.overlay_activated", "runtime_governor"),
+           "Runtime automatically admits and activates a valid private Level 1 innovation");
+    const auto& mira = service.state().npcs.at("mira");
+    expect(mira.innovationAdoptions.size() == 1 &&
+               (mira.innovationAdoptions.front().status == InnovationAdoptionStatus::Executing ||
+                mira.innovationAdoptions.front().status == InnovationAdoptionStatus::Completed),
+           "an activated private innovation enters the NPC adoption lifecycle");
+    expect(mira.innovationAdoptions.front().status != InnovationAdoptionStatus::ResourceBlocked,
+           "a valid private innovation is not stranded behind an artificial approval gate");
+}
+
 void level_two_evolution_waits_for_new_public_problem_evidence() {
     auto provider = std::make_unique<EvolutionProposalProvider>();
     auto* providerRaw = provider.get();
@@ -3727,6 +3787,8 @@ int main() {
         level_one_evolution_is_scoped_to_target_npc);
     run("automatic_evolution_uses_async_llm_and_runtime_admission",
         automatic_evolution_uses_async_llm_and_runtime_admission);
+    run("automatic_level_one_innovation_is_admitted_and_adopted",
+        automatic_level_one_innovation_is_admitted_and_adopted);
     run("level_two_evolution_waits_for_new_public_problem_evidence",
         level_two_evolution_waits_for_new_public_problem_evidence);
     run("level_two_reflection_can_commit_no_change", level_two_reflection_can_commit_no_change);
