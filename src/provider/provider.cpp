@@ -226,9 +226,36 @@ ProviderJsonResult requestProviderJson(const LlamaCppConfig& config, const Json&
             const char* fullDebugEnv = std::getenv("TIDE_MARKS_DEBUG_PROVIDER_FULL");
             const bool fullDebug = fullDebugEnv != nullptr && *fullDebugEnv != '\0' &&
                                    std::string(fullDebugEnv) != "0";
+            // Report prompt shape without dumping prompt data.  This lets a
+            // long run distinguish a genuinely large dynamic world tail from
+            // a provider that simply ignores prefix caching.  The byte counts
+            // are diagnostics only; cached_tokens from usage remains the
+            // authoritative hit evidence.
+            std::size_t systemBytes = 0;
+            std::size_t stableBytes = 0;
+            std::size_t dynamicBytes = 0;
+            std::size_t continuationBytes = 0;
+            const auto messages = requestWithCache.value("messages", Json::array());
+            if (messages.is_array()) {
+                for (std::size_t index = 0; index < messages.size(); ++index) {
+                    const auto& message = messages.at(index);
+                    const auto content = message.value("content", Json());
+                    const auto bytes = content.is_string() ? content.get<std::string>().size() : content.dump().size();
+                    if (index == 0) systemBytes = bytes;
+                    else if (index == 1) stableBytes = bytes;
+                    else if (index == 2) dynamicBytes = bytes;
+                    else continuationBytes += bytes;
+                }
+            }
+            const auto toolBytes = requestWithCache.value("tools", Json::array()).dump().size();
             std::cerr << "provider_debug stage=" << stage
                       << " finish_reason=" << jsonStringOr(choice, "finish_reason")
                       << " usage=" << outer.value("usage", Json::object()).dump()
+                      << " prompt_shape={\"system_bytes\":" << systemBytes
+                      << ",\"stable_bytes\":" << stableBytes
+                      << ",\"dynamic_bytes\":" << dynamicBytes
+                      << ",\"continuation_bytes\":" << continuationBytes
+                      << ",\"tool_schema_bytes\":" << toolBytes << "}"
                       << " content=" << clipDebug(jsonStringOr(debugMessage, "content"), fullDebug ? 16384 : 1024)
                       << " tool_calls=" << summarizeDebugToolCalls(debugMessage.value("tool_calls", Json::array()), fullDebug)
                       << "\n";
