@@ -375,8 +375,24 @@ public:
             proposal["operations"] = Json::array({operation});
             proposal["rationale"] = "The observed social evidence supports a bounded strategy change.";
         } else {
-            Json operation{{"operation", "create_entity_archetype"}, {"id", "llm.market_stall"},
-                           {"kind", "facility"}};
+            Json operation;
+            if (emitSharedRecipe) {
+                operation = Json{{"operation", "register_behavior_recipe"},
+                                 {"id", "llm_shared_routine"},
+                                 {"plan_id", "llm_shared_routine"},
+                                 {"description", "Pause briefly to recover and record a stable result."},
+                                 {"duration_minutes", 15}, {"interruptible", true},
+                                 {"interrupt_salience_threshold", 1.0},
+                                 {"reservation_mode", "none"}, {"priority", 1},
+                                 {"preemption_policy", "none"}, {"parameters", Json::object()},
+                                 {"available_to", Json::array({"eve", "lorn", "mira"})},
+                                 {"root", Json{{"type", "meta_action"}, {"id", "root"},
+                                                  {"name", "relieve_need"},
+                                                  {"args", Json{{"action", "rest"}}}}}};
+            } else {
+                operation = Json{{"operation", "create_entity_archetype"}, {"id", "llm.market_stall"},
+                                 {"kind", "facility"}};
+            }
             proposal = Json::object();
             proposal["id"] = "llm.archetype";
             proposal["kind"] = "declarative_capability";
@@ -414,6 +430,7 @@ public:
     std::vector<std::string> observedTargets;
     std::vector<std::string> observedReflectionTargets;
     bool returnNoChange{false};
+    bool emitSharedRecipe{false};
 };
 
 class ReflectionProvider final : public IProvider {
@@ -3384,6 +3401,38 @@ void automatic_evolution_uses_async_llm_and_runtime_admission() {
            "a valid Level 2 proposal is autonomously admitted and activated without a human or full sandbox");
 }
 
+void automatic_level_two_recipe_enters_shared_action_catalog() {
+    auto provider = std::make_unique<EvolutionProposalProvider>();
+    auto* providerRaw = provider.get();
+    providerRaw->emitSharedRecipe = true;
+    auto content = ContentPackLoader::load(ContentPackLoader::defaultRoot());
+    content.evolutionPolicy.enabled = true;
+    content.evolutionPolicy.level1IntervalDays = 0;
+    content.evolutionPolicy.level2IntervalDays = 1;
+    content.npcDeliberation.enabled = false;
+    auto service = WorldService::fromContent(content, std::move(provider));
+    service.advanceMinutes(kMinutesPerDay - (service.state().now.minute % kMinutesPerDay));
+    service.waitForAsyncTurns(1000);
+    expect(providerRaw->observedLevel == "level2" &&
+               std::any_of(service.state().events.begin(), service.state().events.end(),
+                           [](const auto& event) {
+                               return event.type == "evolution.overlay_activated" &&
+                                      event.actor == "runtime_governor";
+                           }),
+           "Runtime automatically activates a valid shared behavior recipe proposal");
+    const auto miraPlans = service.decisionContext("mira").planCatalog;
+    const auto evePlans = service.decisionContext("eve").planCatalog;
+    expect(std::any_of(miraPlans.begin(), miraPlans.end(), [](const auto& plan) {
+               return plan.value("action_id", "") == "llm_shared_routine" &&
+                      plan.value("available_now", false) &&
+                      plan.value("description", "").find("recover") != std::string::npos;
+           }) &&
+               std::any_of(evePlans.begin(), evePlans.end(), [](const auto& plan) {
+                   return plan.value("action_id", "") == "llm_shared_routine";
+               }),
+           "an activated Level 2 recipe enters every declared NPC's catalog with its semantic result");
+}
+
 void automatic_level_one_innovation_is_admitted_and_adopted() {
     auto content = ContentPackLoader::load(ContentPackLoader::defaultRoot());
     content.evolutionPolicy.enabled = true;
@@ -4051,6 +4100,8 @@ int main() {
         level_one_evolution_is_scoped_to_target_npc);
     run("automatic_evolution_uses_async_llm_and_runtime_admission",
         automatic_evolution_uses_async_llm_and_runtime_admission);
+    run("automatic_level_two_recipe_enters_shared_action_catalog",
+        automatic_level_two_recipe_enters_shared_action_catalog);
     run("automatic_level_one_innovation_is_admitted_and_adopted",
         automatic_level_one_innovation_is_admitted_and_adopted);
     run("level_two_evolution_waits_for_new_public_problem_evidence",
