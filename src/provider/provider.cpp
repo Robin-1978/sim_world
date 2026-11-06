@@ -929,6 +929,7 @@ ProviderResponse LlamaCppProvider::proposeReflection(const Json& context,
         "whose available_to contains only target_npc. Do not claim that a proposal was applied or that an experiment succeeded. "
         "Keep this reflection small: at most two belief updates, two experience updates, and two memory updates. "
         "innovation_hypotheses is optional: when a persistent problem is present and failure_candidates contains at least two entries with the same action_id, return at most one small private hypothesis and cite both matching failure sequence values in evidence_event_sequences; otherwise return []. Ordinary successes, need relief and day-boundary events are not innovation evidence. Reuse registered meta actions, keep available_to exactly target_npc, and include a bounded test plan with Runtime metrics. "
+        "For a register_behavior_recipe hypothesis, parameters is a JSON Schema, not runtime values: use {type:'object', properties:{}, required:[], additionalProperties:false} when no bindings are needed. The root must be a complete behavior tree; prefer one registered meta_action leaf with args:{}, max_ticks:0, children:[] for a small private recipe. Never emit an empty sequence or selector, and composite nodes must contain at least one child. "
         "When pending_innovation_hypotheses is empty, return innovation_actions=[]; lifecycle actions may reference only persisted hypotheses. "
         "resolved_issues may contain only exact strings from unresolved_issues; when that list is empty, return resolved_issues=[]. "
         "When current_state.activity has no active goal, keep goal_adjustment={} and never request status=cancelled. "
@@ -1008,6 +1009,11 @@ ProviderResponse LlamaCppProvider::proposeReflection(const Json& context,
     recipeRoot["properties"]["args"] = Json{{"type", "object"}};
     recipeRoot["properties"]["max_ticks"] = Json{{"type", "integer"}, {"minimum", 0}};
     recipeRoot["properties"]["children"] = Json{{"type", "array"}, {"items", Json{{"type", "object"}}}};
+    recipeRoot["allOf"] = Json::array({
+        Json{{"if", Json{{"properties", Json{{"type", Json{{"enum", Json::array({"sequence", "selector", "interruptible", "timeout"})}}}}}}},
+             {"then", Json{{"properties", Json{{"children", Json{{"minItems", 1}}}}}}}},
+        Json{{"if", Json{{"properties", Json{{"type", Json{{"enum", Json::array({"condition", "meta_action"})}}}}}}},
+             {"then", Json{{"properties", Json{{"children", Json{{"maxItems", 0}}}}}}}}});
 
     Json recipeOperation = Json::object();
     recipeOperation["type"] = "object";
@@ -1025,7 +1031,15 @@ ProviderResponse LlamaCppProvider::proposeReflection(const Json& context,
     recipeOperation["properties"]["reservation_mode"] = Json{{"enum", Json::array({"none", "input_resources"})}};
     recipeOperation["properties"]["priority"] = Json{{"type", "integer"}, {"minimum", 0}};
     recipeOperation["properties"]["preemption_policy"] = Json{{"enum", Json::array({"none", "lower_priority"})}};
-    recipeOperation["properties"]["parameters"] = Json{{"type", "object"}};
+    recipeOperation["properties"]["parameters"] = Json{
+        {"type", "object"},
+        {"required", Json::array({"type", "properties", "required", "additionalProperties"})},
+        {"properties", Json{{"type", Json{{"const", "object"}}},
+                              {"properties", Json{{"type", "object"}}},
+                              {"required", Json{{"type", "array"}, {"items", Json{{"type", "string"}}}}},
+                              {"additionalProperties", Json{{"type", "boolean"}}}}},
+        {"additionalProperties", false},
+        {"description", "A bounded JSON Schema for recipe input bindings; use an empty properties object when no bindings are needed."}};
     recipeOperation["properties"]["available_to"] = Json{{"type", "array"}, {"minItems", 1}, {"maxItems", 1},
                                                             {"uniqueItems", true},
                                                             {"items", Json{{"type", "string"}, {"minLength", 1}, {"maxLength", 64}}}};
