@@ -251,6 +251,8 @@ v11 在修复 Level 1 私有创新激活的 Revision 重绑定缺口、并收紧
 
 本阶段还修正了四个 Prompt 投影问题：资源硬约束现在只由候选计划声明的实际 reservation 产生，并显示所需、可用和缺口；Memory/Knowledge/Experience 按有界显著性排序并携带来源字段与可引用 ref；作者行为目录向模型提供短 description/expected result，而不是要求模型猜 action key；对话提交增加 Runtime 私有信息泄露检查。它们都保持事实、权限和需求变化由 C++ 掌握，不把 Prompt 文案当作事实模型。
 
+一次本地 OpenAI-compatible 捕获器检查了真实 HTTP payload（不调用模型、不含密钥）：话语理解、决策、Reflection 和演化请求都保持 `messages=[system, user(<CATALOG>), user(<TASK>/<STATE>/...)]`，工具定义在顶层 `tools`，首轮 `tool_choice` 指向唯一主工具，模型输入没有内部主体/过程/Revision ID；决策目录显示“Offer one ration…”等短语义描述，认知区段显示 `memory_1` 等来源 ref。该捕获只验证协议形状，不能作为模型质量、缓存命中或演化效果证据。
+
 7 日运行的逐事件摘要已经写入 [`7d-village-evolution-summary.md`](evidence/7d-village-evolution-summary.md)。结论必须拆开表述：Qwen v11 的 `repair_ferry_v2` 是一个由 Runtime Governor 自动批准并激活的 Level 2 `create_entity_archetype` Overlay；它没有在该 7 日窗口形成 NPC Adoption，因此只证明了“提案→验证→批准→激活”，没有证明“共享新行为被采用且效果改善”。beam-free v14 没有 Overlay 激活，但确实提交了 20 次 Reflection，并把 Lorn 的策略从 `routine` 调整为 `repair_ferry_focus` 再到 `offer_crossing_focus`；其四个 Level 1 假设均被 Runtime 以 operation scope、测试 horizon 或未知元动作拒绝。三 NPC 的真实世界发生、认知更新和创新治理不能合并成一个“成功率”。
 
 本次上下文边界修正也已落地：决策 stable prefix 现在只包含 `protocol`、speech-act catalog 和去除当前 utility 的 authored plan catalog；每 Tick 变化的 constraints、NPC 身份/策略、需求、关系、世界快照、活动和玩家输入都在 dynamic tail。这样不会为了缓存删除必要事实，也避免把动态 `character` 和 `constraints` 误放在可复用前缀中。下一次 beam-free 有凭据的长跑必须重新测量 `cached_tokens`，并另外记录 dynamic tail 大小；20.54% 的历史结果仍是事实基线，不能因为消息被拆成两段就宣称命中提升。

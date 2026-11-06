@@ -1448,7 +1448,7 @@ ProviderResponse LlamaCppProvider::decide(const DecisionContext& context, const 
                                             {"description", "One or two first-person sentences for the player."}};
     responseProperties["evidence_refs"] = Json{{"type", "array"}, {"maxItems", 8},
                                                  {"items", Json{{"type", "string"}, {"maxLength", 32}}},
-                                                 {"description", "Evidence references such as evidence_1."}};
+                                                 {"description", "Cite refs shown in context, such as evidence_1 or memory_1."}};
     responseProperties["expected_relief"] = Json{{"type", "object"},
                                                    {"additionalProperties", Json{{"type", "number"},
                                                                                    {"minimum", 0.0},
