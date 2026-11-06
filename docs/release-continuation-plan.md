@@ -260,6 +260,32 @@ v11 在修复 Level 1 私有创新激活的 Revision 重绑定缺口、并收紧
 
 本次上下文边界修正也已落地：决策 stable prefix 现在只包含 `protocol`、speech-act catalog 和去除当前 utility 的 authored plan catalog；每 Tick 变化的 constraints、NPC 身份/策略、需求、关系、世界快照、活动和玩家输入都在 dynamic tail。这样不会为了缓存删除必要事实，也避免把动态 `character` 和 `constraints` 误放在可复用前缀中。下一次 beam-free 有凭据的长跑必须重新测量 `cached_tokens`，并另外记录 dynamic tail 大小；20.54% 的历史结果仍是事实基线，不能因为消息被拆成两段就宣称命中提升。
 
+### 最新上下文评审的处置与长跑验收边界
+
+对最新外部评审逐项核对后，当前实现与评审的关系如下：
+
+| 评审点 | 代码/测试状态 | 仍需的证据 |
+|---|---|---|
+| Active Goal 与 Current Process 分离 | 已实现：决策投影分别给出 `active_goal`、`active_process`；空闲时明确为 `none`，运行中的 BT 另给 `behavior_step`；内部 ID 和版本不会进入模型文本 | 长跑中确认过程完成后下一次决策仍能看到新的活动/目标，而不是重复启动旧过程 |
+| 作者 Catalog 与当前 Eligible Plans 分离 | 已实现：被资源或前置条件阻塞的计划保留在 Catalog，只进入 `unavailable_plans`；可选集合由 Runtime 计算 | 长跑统计模型是否只选择 eligible 计划，以及阻塞原因是否没有造成重复重试 |
+| 资源约束归因 | 已实现：只有候选计划声明了实际 reservation 且账本不足时才产生硬约束，提示包含资源名、需求、可用量和缺口 | 检查真实请求没有无关的 `cooperation/reputation` 噪音 |
+| Memory/Knowledge/Experience | 已实现：按置信度、确认状态和近因排序，有界投影；每条带 `memory_N`/`knowledge_N`/`experience_N`、来源和置信度，Knowledge 还保留 `confirmed/source_sequence/scope` | 长跑确认反思和决策引用的是窗口内真实证据，非法序列仍被 Runtime 拒绝 |
+| Plan 语义 | 已实现：稳定 Catalog 给出短 description、通用 expected result、时长、可打断性、预留和参数名；完整 BT 仍留在 Runtime | 观察新 Overlay 的描述是否足以让模型选择它，并由事件证明实际执行 |
+| 私有信息边界 | 已实现：决策只给目标主体的私有偏好/认知；对话提交有确定性泄露检查，Level 1/2 的可见范围由 Runtime 校验 | 长跑中确认私有目标没有进入对白、共享提案或其他主体的上下文 |
+| Schema 动态枚举与版本 | 保持现状是有意设计：工具 schema 稳定以复用前缀，候选 key、参数、资源、Revision 由 Runtime 二次校验；不把动态枚举误当权限边界 | 统计 `unknown_action_id`、参数错误、过期和 repair 次数，而不是放宽校验 |
+
+因此，评审中建议的九段上下文重构不作为当前工作包；现有固定 `system`、`CATALOG`、动态 `TASK/STATE/COGNITION/STIMULI/EVIDENCE/OPTIONS` 和顶层 `tools` 已满足同一协议骨架。长跑的完成判据必须把四条链分别计数：`ReflectionCursor → cognition/strategy`、`hypothesis → Runtime approval → Overlay`、`Overlay → Adoption/Process`、`horizon metrics → later reflection`。仅有 provider tool call、proposal-ready 或 Overlay active 都不能宣称三 NPC 的自主演化闭环完成。
+
+当前 v16 本地 Qwen 长跑使用新逐叶子 Runtime 和同一固定协议：
+
+```text
+TIDE_MARKS_DEBUG_PROVIDER=1 ./build/tide_marks_headless --days 14 \
+  --profile data/intelligence-profile.json --provider profile \
+  --wait-llm-ms 60000 --replay /tmp/tide_marks-qwen-14d-v16.jsonl --dump-events
+```
+
+它结束后只在同时满足以下条件时更新为“真实闭环证据”：推进到第 15 天 06:00、`llm-drain pending=0`、源 Snapshot 与 Replay 一致；三名主体都有连续 ReflectionCursor 和合法过程事件；至少一条 Level 1 私有候选完成 `hypothesis → accepted → overlay_activated → adoption_started → adoption_completed/failed`；至少一条 Level 2 共享行为进入声明的候选目录并被选择、逐叶子执行到 horizon；后续 Reflection 读取 Runtime 计算的指标并做出保留、调整、放弃或 `no_change`。若缺少其中任一条，证据文件必须明确写成“协议/激活闭环已完成，效果或 Adoption 仍待验证”，不得用测试 Provider 或人工批准结果补齐。
+
 ## 恢复工作入口
 
 会话恢复时依次阅读本文件的“当前检查点”和“已完成能力记录”，再阅读 [design.md](design.md) 的“事实、意图与演化边界”“世界与社会的内在驱力模型”“NPC Runtime 与 World Intelligence”“Runtime 核心契约”。然后查看 `git status --short`，运行自动化验证命令，先修复当前工作包失败项，再继续下一项；不要为了通过测试删除功能或放宽断言。
