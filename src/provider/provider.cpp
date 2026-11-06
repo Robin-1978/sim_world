@@ -40,11 +40,18 @@ std::string summarizeDebugToolCalls(const Json& toolCalls, const bool full) {
         }
         const auto function = call.value("function", Json::object());
         const auto arguments = jsonStringOr(function, "arguments");
+        std::string compactArguments = arguments;
+        try {
+            compactArguments = compactJsonNumbers(Json::parse(arguments)).dump();
+        } catch (const std::exception&) {
+            // Keep the bounded raw prefix when a provider returned malformed
+            // arguments; validation will report the actual parse failure.
+        }
         summary.push_back(Json{{"id", jsonStringOr(call, "id")},
                                {"type", jsonStringOr(call, "type")},
                                {"name", jsonStringOr(function, "name")},
-                               {"argument_bytes", arguments.size()},
-                               {"arguments", clipDebug(arguments, 768)}});
+                               {"argument_bytes", compactArguments.size()},
+                               {"arguments", clipDebug(compactArguments, 768)}});
     }
     return summary.dump();
 }
