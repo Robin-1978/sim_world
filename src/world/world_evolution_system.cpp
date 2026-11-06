@@ -205,7 +205,8 @@ std::uint64_t lastLevel2EvaluationSequence(const WorldState& state) {
             continue;
         }
         if (event.type == "evolution.proposal_ready" || event.type == "evolution.proposal_rejected" ||
-            event.type == "evolution.proposal_failed" || event.type == "evolution.proposal_expired") {
+            event.type == "evolution.proposal_failed" || event.type == "evolution.proposal_expired" ||
+            event.type == "evolution.no_change") {
             sequence = std::max(sequence, event.sequence);
         }
     }
