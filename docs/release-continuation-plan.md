@@ -1,7 +1,7 @@
 # 《潮痕》持续推进计划
 
 > 本文件只记录实施状态、工作包、验证和下一步；架构与模型以 [design.md](design.md) 为唯一来源。
-> 最后更新：2026-11-06
+> 最后更新：2026-11-07
 > 目标摘要见 [`goal.md`](goal.md)。恢复工作时先读目标摘要，再按本文件的检查点和工作包继续。
 
 ## 当前目标
@@ -24,6 +24,7 @@
 | 内驱/需求模型 | 需求域是内容定义的标签，村庄默认四域、Glass Orchard 使用 stewardship/ecological；`DriveEvaluation` 统一 urgency、effective weight、预期满足、证据置信度和效用贡献，同一行动满足多个需求时逐项求和；内容定义的 `private_traits`/`trait_effects` 已进入有界非线性偏好计算，显式满足配方和有界预期适应已实现，安全事实已支持冲突/威胁/防守/撤离/修复并通过 Stimulus 投射 | `src/npc/drive_system.*`, `src/npc/goal_selector.*`, `DecisionContext.privateTraits`, `NeedContent`, `NeedState`, `need.*` events, `tests/fixtures/glass-orchard-pack` |
 | 外驱/结构上下文 | 已实现结构化 Stimulus/Constraint、到期、习惯化和快照；结构演化治理、沙箱和版本化激活均已接入 | `DecisionContext.stimuli`, `constraints`, `WorldService::projectStimuli`, `src/evolution/evolution.*` |
 | LLM 解释与权衡 | 同步对话/自驱提案、channel 策略、Qwen 结构化输出、两阶段话语理解、失败关闭和异步 TurnQueue 已完成；`DecisionContextProjector` 按主体可见性和内容声明预算拆成 `worldSnapshot/selfState/planCatalog`，候选计划暴露 BT 摘要与参数 Schema；意图参数或声明字段校验失败最多反馈修正一次，演化使用强制 function call 且校验错误最多反馈修正两次；`runtime_metadata` 单独承载实例/内容/提示/Revision 审计身份，不污染 NPC 世界事实投影 | `src/provider/decision_context_projector.*`, `IntentProposal.parameters`, `DecisionContext.runtimeMetadata`, `IProvider`, `TurnQueue`, `decision_channels`, `WorldService::converse/deliberate/pumpAsyncTurns` |
+| 模型交互投影与工具契约 | 已完成第一阶段：Provider 把模型输入拆为稳定 `CATALOG` 前缀和动态 `TASK/STATE/EVIDENCE/OPTIONS` 分区；人物、地点和连接使用内容显示名称/类型/标签，内部 ID 只在 Runtime 解析和审计层；动态候选不再生成 schema enum，function/tool schema 按用途固定；修正请求保留第一轮 assistant tool call，以结构化 observation 追加错误并只返回最小 patch；系统提示使用第二人称任务要求，不向模型暴露 Provider/Revision、目标主体 ID 或工程层级术语。下一步是补齐名称解析测试、完整请求脱敏 dump 和真实 beam-free 长跑缓存/退化指标 | `src/provider/provider.cpp`, `src/provider/decision_context_projector.cpp`, `docs/design.md` 的“LLM 交互契约与模型可读投影” |
 | 长过程执行 | 数据驱动时长、单一活动槽、配方声明的输入预留、完成/挂起/恢复事件和 Snapshot 恢复均已实现；挂起释放预留，刺激清除且资源可用时按原计划恢复并顺延完成时间；配置允许的高优先级过程可抢占低优先级预留，整组仲裁原子提交；Goal、Process、FSM、BT 是同一活动的四个投影 | `ProcessExecution.priority/preemptionPolicy`, `NpcActivity`, `reservation_mode`, `WorldService::planResourcePreemption`, `src/npc/state_machine.*` |
 | 通用资源与实例活动 | 通用资源数量、可选输入预留、声明式抢占、实体库存、资源转移、生产、原子交易、承诺和定时 Activity 已实现；Activity 可组合已注册 operator 并在嵌套事务中失败补偿 | `ResourceContent`, `ResourceState(amount,reserved)`, `WorldState.inventories`, `GameInstanceContent.inventoryInitial`, `reservation_mode`, `priority`, `preemption_policy`, `tradeResources`, `ActivityContent`；承诺关系增量与重谈时长已由 `promise_policy` 驱动 |
 | 社会关系与组织 | 已实现 NPC/玩家/组织四轴关系、声明式社会组成员与指标、交易和快照恢复；港区与 Glass Orchard 分别使用自己的组织、阵营和制度事实，没有 Runtime 特例 | `NpcState.relationships`, `WorldState.socialGroups`, `SocialGroupContent`, `relationship.adjust`, `trade.execute`, `tests/fixtures/port-pack`, `tests/fixtures/glass-orchard-pack` |

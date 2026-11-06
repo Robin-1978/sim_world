@@ -39,6 +39,19 @@ Json quantityMapJson(const std::map<std::string, int>& quantities) {
     return result;
 }
 
+const SpatialContent* spatialFor(const WorldContentPack& content, const std::string& locationId) {
+    const auto found = std::find_if(content.spatialEntities.begin(), content.spatialEntities.end(),
+                                    [&locationId](const auto& item) { return item.id == locationId; });
+    return found == content.spatialEntities.end() ? nullptr : &*found;
+}
+
+Json locationView(const WorldContentPack& content, const std::string& locationId) {
+    const auto* spatial = spatialFor(content, locationId);
+    if (spatial == nullptr) return Json{{"name", locationId}, {"type", "place"}, {"tags", Json::array()}};
+    return Json{{"name", spatial->spatial.displayName}, {"type", spatial->kind},
+                {"tags", spatial->spatial.tags}};
+}
+
 Json behaviorNodeProjection(const BehaviorNodeContent& node, int depth = 0) {
     Json result{{"type", node.type}, {"id", node.id}};
     if (!node.name.empty()) result["name"] = node.name;
@@ -419,6 +432,7 @@ DecisionContext DecisionContextProjector::build(const WorldState& state,
 
     context.worldSnapshot = Json{{"time", state.now.toString()},
                                  {"observer_location", npc.location},
+                                 {"observer_location_view", locationView(content, npc.location)},
                                  {"public_resources", Json::object()},
                                  {"visible_entities", Json::array()},
                                  {"visible_links", Json::array()},
@@ -436,8 +450,11 @@ DecisionContext DecisionContextProjector::build(const WorldState& state,
     for (const auto& [peerId, peer] : state.npcs) {
         if (peerId == npcId || peer.location != npc.location) continue;
         if (visibleEntityCount++ >= content.decisionContextPolicy.maxVisibleEntities) break;
+        const auto* peerAuthored = authoredNpc(content, peerId);
         context.worldSnapshot["visible_entities"].push_back(
-            Json{{"id", peerId}, {"kind", "npc"}, {"location", peer.location}, {"mode", peer.mode}});
+            Json{{"id", peerId}, {"name", peerAuthored == nullptr ? peerId : peerAuthored->definition.name},
+                 {"kind", "person"}, {"location", peer.location},
+                 {"location_view", locationView(content, peer.location)}, {"mode", peer.mode}});
     }
     std::size_t visibleLinkCount = 0;
     for (const auto& link : content.links) {
@@ -447,8 +464,11 @@ DecisionContext DecisionContextProjector::build(const WorldState& state,
         if (visibleLinkCount++ >= content.decisionContextPolicy.maxVisibleLinks) break;
         const auto runtime = state.links.find(link.id);
         const RuntimeLinkState linkState = runtime == state.links.end() ? RuntimeLinkState{} : runtime->second;
+        Json endpointViews = Json::array();
+        for (const auto& endpoint : link.link.endpoints) endpointViews.push_back(locationView(content, endpoint));
         context.worldSnapshot["visible_links"].push_back(
             Json{{"id", link.id}, {"endpoints", link.link.endpoints},
+                 {"endpoint_views", endpointViews}, {"type", link.kind}, {"tags", link.link.tags},
                  {"traversable", linkState.traversable}, {"locked", linkState.locked}});
     }
     for (const auto& stimulus : context.stimuli) {
@@ -464,6 +484,7 @@ DecisionContext DecisionContextProjector::build(const WorldState& state,
                                          : inventory->second;
     context.selfState = Json{{"id", npcId}, {"name", authoredDefinition.name},
                              {"role", authoredDefinition.role}, {"location", npc.location},
+                             {"location_view", locationView(content, npc.location)},
                              {"mode", npc.mode}, {"strategy", npc.strategy},
                              {"goal_stage", npc.goalStage}, {"state_version", npc.stateVersion},
                              {"needs", Json::object()}, {"relationships", Json::object()},
@@ -480,8 +501,10 @@ DecisionContext DecisionContextProjector::build(const WorldState& state,
     std::size_t selfRelationshipCount = 0;
     for (const auto& [peerId, relation] : npc.relationships) {
         if (selfRelationshipCount++ >= content.decisionContextPolicy.maxRelationships) break;
+        const auto* peerAuthored = authoredNpc(content, peerId);
         context.selfState["relationships"][peerId] =
-            Json{{"trust", relation.trust}, {"respect", relation.respect},
+            Json{{"name", peerAuthored == nullptr ? peerId : peerAuthored->definition.name},
+                 {"trust", relation.trust}, {"respect", relation.respect},
                  {"fear", relation.fear}, {"owed", relation.owed}};
     }
     for (const auto& candidate : context.candidates) {

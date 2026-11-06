@@ -344,7 +344,9 @@ Json WorldEvolutionSystem::proposalContext(const WorldService& world,
         // coarse public context, but their memories, knowledge, experiences,
         // stimuli and relationship graph never cross the target's projection.
         if (evolutionLevel == "level1" && id != scopedTarget) {
-            npcs[id] = Json{{"location", npc.location}, {"mode", npc.mode}};
+            const auto* authored = world.authoredNpc(id);
+            npcs[id] = Json{{"name", authored == nullptr ? id : authored->definition.name},
+                            {"location", npc.location}, {"mode", npc.mode}};
             continue;
         }
         Json needs = Json::object();
@@ -370,7 +372,9 @@ Json WorldEvolutionSystem::proposalContext(const WorldService& world,
         Json reflectionCursor{{"last_event_sequence", npc.reflectionCursor.lastEventSequence},
                               {"last_reflection_day", npc.reflectionCursor.lastReflectionDay},
                               {"reflection_revision", npc.reflectionCursor.reflectionRevision}};
-        npcs[id] = Json{{"location", npc.location}, {"mode", npc.mode}, {"strategy", npc.strategy},
+        const auto* authored = world.authoredNpc(id);
+        npcs[id] = Json{{"name", authored == nullptr ? id : authored->definition.name},
+                        {"location", npc.location}, {"mode", npc.mode}, {"strategy", npc.strategy},
                         {"goal_stage", npc.goalStage}, {"activity", activity},
                         {"needs", needs}, {"active_process", npc.activity.process.has_value()},
                         {"memory_count", npc.memories.size()}, {"knowledge_count", npc.knowledge.size()},
@@ -379,10 +383,10 @@ Json WorldEvolutionSystem::proposalContext(const WorldService& world,
                         {"relationships", relationshipEvidence(npc)}, {"stimuli", stimulusEvidence(npc)},
                         {"reflection_cursor", reflectionCursor}, {"unresolved_issues", npc.unresolvedIssues}};
         if (evolutionLevel == "level1" && id == scopedTarget) {
-            const auto* authored = world.authoredNpc(id);
-            if (authored != nullptr) {
+            const auto* targetAuthored = world.authoredNpc(id);
+            if (targetAuthored != nullptr) {
                 Json traits = Json::object();
-                for (const auto& [trait, value] : authored->definition.privateTraits) traits[trait] = value;
+                for (const auto& [trait, value] : targetAuthored->definition.privateTraits) traits[trait] = value;
                 npcs[id]["private_traits"] = std::move(traits);
             }
         }

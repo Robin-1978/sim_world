@@ -567,6 +567,28 @@ Behavior DSL 只组合注册节点、条件和元动作，例如：
 
 创新提案在同一 `EvolutionProposal` 外壳中增加 `kind=innovation` 和 `innovation` 信封，但不增加事实写入捷径。信封至少包含 `hypothesis`、`novelty_basis`、关联 `operation_ids`、`expected_benefits`、`risks` 和 `test_plan`；Level 1 的 operation 只能是 `available_to=[target_npc]` 的私有 `register_behavior_recipe`，Level 2 才能涉及共享 recipe 或 entity archetype。`test_plan` 明确声明 `baseline`、`scenario`、`expected_metrics`、不可恶化的 `constraints`、`resource_budget`、`success_criteria` 和 `failure_criteria`，以及 Runtime 能计算的有限指标（例如事件数、资源总量、知识/经验计数）；指标由 Runtime 计算，LLM 只能解释结果，不能自评“创新成功”。假设的接受、Overlay 的批准/激活和 NPC 的采用分别记录，失败实施不会回滚或篡改已批准内容。
 
+### LLM 交互契约与模型可读投影
+
+LLM 是对结构化上下文的解释器和候选方案生成器，不是事实存储、过程时钟或代码执行器。Runtime 先按当前可见性、权限、游标和预算检索少量证据，再生成面向模型的可读投影；模型返回候选工具调用，Runtime 对引用、参数、资源、拓扑、权限、Revision 和事务边界做最终判断。模型输出永远不能直接写入 `WorldState`，也不能宣称某个过程已经执行或成功。
+
+模型投影使用稳定顺序的自然语言分区，而不是把 Runtime 快照作为一坨 JSON 发送。每个请求按用途使用固定的 `<CATALOG>`、`<TASK>`、`<STATE>`、`<EVIDENCE>`、`<OPTIONS>` 区段：
+
+1. `CATALOG` 只包含内容包声明的行为标签、计划说明、参数含义、地点名称/类型/标签和话语行为说明；它是可复用的稳定前缀。
+2. `TASK` 用第二人称直接说明当前要完成的任务、时间、触发原因和输出边界；不写“某个 NPC 正在……”之类的工程角色描述。
+3. `STATE` 只投影本次主体有权知道的当前活动、需求、资源、位置和可见关系。
+4. `EVIDENCE` 只包含经过 Runtime 检索的近期事件、记忆、知识、经验、预测误差和未解决问题；每条可用于认知更新的证据带来源序号。
+5. `OPTIONS` 只列当前可执行的已登记计划及其参数要求和 Runtime 计算的预期结果。候选集合变化属于消息上下文，不修改工具 schema。
+
+Runtime 内部 ID 只留在事实层、事件层和工具执行层。模型看到的是内容数据库映射的显示名称：人物使用 `name`，地点使用 `name`、`type` 和 `tags`，连接使用两个端点的地点名称及通行状态，导航参数使用地点名称或稳定内容 key。提交前由 Runtime 根据当前可见名称目录解析回内部 ID，并再次检查歧义、可见性和拓扑。模型不接收其他主体的内部 ID、`target_npc`、Provider/Revision 元数据或“Level 1/Level 2”等工程术语；目标主体由调用上下文注入，而不是让模型填写。
+
+每个用途只有一份固定 function/tool schema。工具名、必填字段、枚举和嵌套结构不会随 NPC、地点、日期或 Content Pack 候选集合改变；动态候选放在 `CATALOG`/`OPTIONS`。工具 description 说明何时调用、调用的边界和每个参数的含义，不能把大段动态状态塞进 schema。`choose_action`、`daily_reflection`、个人变更和共享变更分别使用自己的稳定契约；Runtime 负责把当前主体和范围注入结果，模型不重复输出这些审计字段。
+
+修正采用同一会话内的 ReAct 式观察续接：首次返回的 assistant tool call 原样保留，Runtime 追加结构化 `tool` observation（错误码、字段路径、允许范围和当前候选），第二轮只要求返回一个最小 patch 工具调用。修正不得重建或改写之前的静态目录和工具定义；Runtime 将 patch 合并到第一轮候选后重新做完整校验，超过有界次数即失败关闭。成功的工具结果也作为 observation 追加并进入下一次反思/评估，而不是让模型假设执行成功。该协议同时满足可回放性、错误可解释性和 llama.cpp/OpenAI-compatible prefix cache 的稳定性。
+
+上下文组织采用“静态前缀、动态尾部”：系统任务、工具定义和内容目录先固定，当前时间、需求、证据和可执行候选后置。字段顺序、数字格式和空集合表示保持稳定；显示数值在投影层做有限精度归一化，Runtime 事实仍保存原始精度。缓存命中率是观测指标，不是正确性的替代品；任何命中都不能绕过当次 Runtime 校验。
+
+反思和创新遵循 `观察/检索 → 反思 → 可选假设 → 有界提案 → Runtime 执行窗口 → 确定性指标 → 后续反思`。每天的反思可以只更新认知、策略或目标，也可以继续、保留或放弃已有假设；没有持续问题、重复失败、预测误差或可测收益时必须返回 `no_change`。创新提案只有在现有计划无法解释结果时才产生，提案被准入不等于被采用，Overlay 激活也不等于执行成功。这样把 Generative Agents 的记忆/反思、Voyager 的技能收录和本项目的事实治理连接起来，同时避免“每个 Tick 为了创新而创新”。
+
 内容定义必须描述对象的语义属性，而不只是给动作起名字。资源定义与运行时持有量分开；生产过程定义与一次执行分开。资源定义至少声明单位、是否可分割、质量轴、替代组、容量和衰减规则；持有量至少记录所有者、位置、数量、已预留量、可用量、来源和到期时间。
 
 ```json
@@ -682,8 +704,11 @@ Snapshot 包含 `save_schema_version`、`simulation_version`、`content_version/
 - Baumeister & Leary, *The need to belong: Desire for interpersonal attachments as a fundamental human motivation*, 1995, DOI: 10.1037/0033-2909.117.3.497。
 - Cacioppo & Petty, *The need for cognition*, 1982；Kruglanski & Webster, *Motivated closing of the mind: “Seizing” and “freezing”*, 1996。用于认知需求、信息闭合和证据不足时的动机语义；不把它们直接当作普遍通用的人类常数。
 - Park et al., *Generative Agents: Interactive Simulacra of Human Behavior*, 2023, DOI: 10.1145/3586183.3606763。
+- Wang et al., *Voyager: An Open-Ended Embodied Agent with Large Language Models*, 2023, arXiv:2305.16291。用于自动课程、可复用技能库、环境反馈、执行错误和成功后收录；本项目只借鉴闭环，不允许技能绕过 Runtime 事实校验。
 - Wang et al., *A survey on large language model based autonomous agents*, 2024, DOI: 10.1007/s11704-024-40231-1。
 - *Understanding the planning of LLM agents: A survey*, 2024, DOI: 10.48550/arXiv.2402.02716。
+- OpenAI, *Function calling* 文档（developers.openai.com/api/docs/guides/function-calling）；Anthropic, *Tool use* 文档（docs.anthropic.com/en/docs/agents-and-tools/tool-use/implement-tool-use）。用于固定工具定义、清晰 description、assistant tool call 与 tool observation 的消息顺序和 Runtime 最终校验；不把动态候选写入 schema。
+- ggml-org, *llama.cpp server README*（github.com/ggml-org/llama.cpp/tree/master/tools/server）。用于 OpenAI-compatible tool 请求、`cache_prompt`/前缀复用和模型 chat template 参数；缓存只改善成本与延迟，不改变事实权限。
 - Grimm et al., *The ODD Protocol for Describing Agent-Based and Other Simulation Models*, JASSS 23(2):7, 2020, DOI: 10.18564/jasss.4259。用于检查模型目的、实体、状态变量、过程、调度、交互、随机性和可复现描述。
 - Ostrom, *A General Framework for Analyzing Sustainability of Social-Ecological Systems*, Science 325(5939), 2009, DOI: 10.1126/science.1172133。用于把 resource system、resource unit、actor、governance、interaction 和 outcome 分开，避免把库存、制度与主体认知揉成一个资源数字。
 - Lancaster, *A New Approach to Consumer Theory*, Journal of Political Economy 74(2), 1966, DOI: 10.1086/259131。用于把消费建模为资源属性向需求满足/效用的转换，而不是“买一个物品就加满意值”。
