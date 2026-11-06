@@ -3453,7 +3453,11 @@ void daily_reflection_skips_invalid_optional_fields() {
 }
 
 void intelligence_profile_configures_decision_budgets() {
-    const auto profile = loadIntelligenceProfile(defaultIntelligenceProfilePath());
+    // Tests must use the repository fixture rather than a developer's
+    // ~/.sim_world override.  Product entry points intentionally prefer the
+    // user profile, while deterministic tests must remain independent of it.
+    const auto profile = loadIntelligenceProfile(
+        (std::filesystem::path(ContentPackLoader::defaultRoot()) / "intelligence-profile.json").string());
     const auto& decision = profile.purposes.at("decision");
     const auto& policies = decision.policies;
     expect(profile.id == "village-qwen35-4b-v2", "village runs from an explicit intelligence profile");
@@ -3469,7 +3473,7 @@ void intelligence_profile_configures_decision_budgets() {
            "utterance understanding has its own bounded reasoning policy");
     expect(policies.at("autonomous_reappraisal").enableThinking &&
                policies.at("autonomous_reappraisal").reasoningBudgetTokens == 128 &&
-               policies.at("autonomous_reappraisal").maxTokens == 1024,
+               policies.at("autonomous_reappraisal").maxTokens == 1536,
            "autonomous reappraisal uses its bounded thinking policy");
     expect(policies.size() == 3 && policies.contains("player_dialogue") &&
                policies.contains("utterance_understanding") && policies.contains("autonomous_reappraisal"),
