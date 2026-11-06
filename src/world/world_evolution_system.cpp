@@ -677,9 +677,10 @@ std::size_t WorldEvolutionSystem::pumpAsyncProposals() {
             } else if (!queued.response.ok) {
                 if (queued.request.attempt < 2 && world_.provider_->capabilities().structuredRepair &&
                     retryableProviderFailure(queued.response.error)) {
-                    const Json feedback{{"attempt", queued.request.attempt + 1},
-                                        {"code", queued.response.error},
-                                        {"message", "The previous structured function call was truncated or invalid. Return fewer items, shorter text, and one complete JSON tool call matching the schema."}};
+                    Json feedback = queued.request.validationFeedback;
+                    feedback["attempt"] = queued.request.attempt + 1;
+                    feedback["code"] = queued.response.error;
+                    feedback["message"] = "The previous structured function call was truncated or invalid. Return fewer items, shorter text, and one complete JSON tool call matching the schema.";
                     auto repair = queued.request;
                     ++repair.attempt;
                     repair.requestId += ":repair:" + std::to_string(repair.attempt);
@@ -829,9 +830,10 @@ std::size_t WorldEvolutionSystem::pumpAsyncProposals() {
         if (!queued.response.ok) {
             if (queued.request.attempt < 2 && world_.provider_->capabilities().structuredRepair &&
                 retryableProviderFailure(queued.response.error)) {
-                const Json feedback{{"attempt", queued.request.attempt + 1},
-                                    {"code", queued.response.error},
-                                    {"message", "The previous structured function call was truncated or invalid. Return one small complete proposal tool call matching the schema."}};
+                Json feedback = queued.request.validationFeedback;
+                feedback["attempt"] = queued.request.attempt + 1;
+                feedback["code"] = queued.response.error;
+                feedback["message"] = "The previous structured function call was truncated or invalid. Return one small complete proposal tool call matching the schema.";
                 auto repair = queued.request;
                 ++repair.attempt;
                 repair.requestId += ":repair:" + std::to_string(repair.attempt);
