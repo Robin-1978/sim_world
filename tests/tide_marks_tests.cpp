@@ -3082,6 +3082,7 @@ void evolved_behavior_recipe_is_bound_to_declared_npcs() {
         service.state().revision,
         Json::array({Json{{"operation", "register_behavior_recipe"}, {"id", "observe_records"},
                          {"available_to", Json::array({"eve"})}, {"plan_id", "observe_records"},
+                         {"description", "Review a relevant record and record what was learned."},
                          {"duration_minutes", 10}, {"interruptible", true},
                          {"root", Json{{"type", "meta_action"}, {"id", "observe"},
                                        {"name", "relieve_need"}, {"args", Json{{"action", "share_record"}}}}}}})};
@@ -3096,7 +3097,8 @@ void evolved_behavior_recipe_is_bound_to_declared_npcs() {
     const auto evePlans = service.decisionContext("eve").planCatalog;
     const auto miraPlans = service.decisionContext("mira").planCatalog;
     expect(std::any_of(evePlans.begin(), evePlans.end(), [](const auto& plan) {
-               return plan.value("action_id", "") == "observe_records";
+               return plan.value("action_id", "") == "observe_records" &&
+                      plan.value("description", "").find("Review a relevant record") != std::string::npos;
            }) &&
                std::none_of(miraPlans.begin(), miraPlans.end(), [](const auto& plan) {
                    return plan.value("action_id", "") == "observe_records";

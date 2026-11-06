@@ -71,6 +71,7 @@
 - 承诺的关系轴增量和重谈延长时长来自 `promise_policy`，修改内容即可改变结果。
 - 行为树由 `recipes` 自动构造；Mira、Lorn、Eve 与故事动作没有专用 C++ BT。
 - NPC 普通决策选择完整的已登记 BT 计划，不直接选择元动作；新 BT 只能由 Level 1/2 的 `register_behavior_recipe` 提案创建，必须经过节点/operator 引用校验和 Runtime Governor 自动预检/批准。
+- 行为配方支持内容声明的短 `description`，会随稳定计划目录投影给模型；Overlay 新增的配方也必须携带可观察结果描述，避免模型只凭 `plan_id` 猜语义。描述不赋予执行权限，完整 BT 和实际效果仍由 Runtime 校验与执行。
 - 行为参数由内容声明 JSON Schema；动态 `goto` 目标通过 `{"bind":"parameter_name"}` 绑定，Runtime 校验实体生命周期、权限和拓扑后才执行，并把已接受参数保存到 `ProcessExecution`。
 - Level 1/Level 2 的真实 Qwen function-call 回归均已通过；Level 1 返回策略 Overlay，Level 2 返回声明式内容/能力提案。Provider 校验失败最多触发两次带 `code/message/path` 的修正请求，超过次数失败关闭；bounded overlay 由 Runtime Governor 自动批准，不等待人工审批。
 - 对话与自驱由 `decision_channels` 声明；通道属性、话语权限、事件/记忆投影和 Provider 策略不再依赖 trigger 字符串分支。

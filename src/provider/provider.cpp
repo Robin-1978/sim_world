@@ -1199,7 +1199,7 @@ ProviderResponse LlamaCppProvider::decide(const DecisionContext& context, const 
         if (!plan.is_object()) continue;
         Json readable{{"action_id", plan.value("action_id", "")},
                       {"name", plan.value("recipe_id", plan.value("action_id", ""))},
-                      {"description", plan.value("label", "")},
+                      {"description", plan.value("description", plan.value("label", ""))},
                       {"expected_result", "Complete the authored behavior and apply its declared effects."},
                       {"duration_minutes", plan.value("duration_minutes", 0)},
                       {"interruptible", plan.value("interruptible", true)},
@@ -1597,7 +1597,7 @@ ProviderResponse LlamaCppProvider::proposeEvolution(const Json& context,
         "If proposal_kind is no_change, return an empty operations array and cite the evidence that was evaluated; Runtime will record the no-change result without creating an overlay. If proposal_kind is innovation, include innovation with hypothesis, novelty_basis, operation_ids, "
         "expected_benefits, risks and test_plan {horizon_minutes, metrics, baseline, scenario, expected_metrics, constraints, resource_budget, success_criteria, failure_criteria}. Innovation is an optional daily-reflection "
         "result, not a per-tick request. A private recipe must keep available_to exactly at self; a shared proposal may "
-        "promote a hypothesis into a shared recipe or archetype. Use only metric ids events_added, final_revision, "
+        "promote a hypothesis into a shared recipe or archetype. A behavior recipe must include a short description of the observable result; prefer one registered meta_action leaf over a speculative composite tree. Use only metric ids events_added, final_revision, "
         "npc_count, knowledge_count, experience_count, advance_minutes, or resource_total.";
     Json modelContext = context;
     modelContext.erase("evolution_system_prompt");
@@ -1950,6 +1950,7 @@ ProviderResponse LlamaCppProvider::proposeReflection(const Json& context,
     recipeOperation["properties"]["operation"] = Json{{"const", "register_behavior_recipe"}};
     recipeOperation["properties"]["id"] = Json{{"type", "string"}, {"minLength", 1}};
     recipeOperation["properties"]["plan_id"] = Json{{"type", "string"}, {"minLength", 1}};
+    recipeOperation["properties"]["description"] = Json{{"type", "string"}, {"minLength", 1}, {"maxLength", 240}};
     recipeOperation["properties"]["duration_minutes"] = Json{{"type", "integer"}, {"minimum", 0}};
     recipeOperation["properties"]["interruptible"] = Json{{"type", "boolean"}};
     recipeOperation["properties"]["interrupt_salience_threshold"] = Json{{"type", "number"}, {"minimum", 0.0}, {"maximum", 1.0}};

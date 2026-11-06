@@ -28,6 +28,7 @@
           "kind": {"type": "string"},
           "available_to": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
           "plan_id": {"type": "string", "minLength": 1},
+          "description": {"type": "string", "minLength": 1, "maxLength": 240},
           "duration_minutes": {"type": "integer", "minimum": 0},
           "interruptible": {"type": "boolean"},
           "interrupt_salience_threshold": {"type": "number", "minimum": 0, "maximum": 1},

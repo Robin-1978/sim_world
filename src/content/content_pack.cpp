@@ -181,6 +181,7 @@ void parseBehaviorPack(WorldContentPack& pack, const Json& document, const std::
         BehaviorRecipeContent recipe;
         recipe.id = id;
         recipe.planId = item.value("plan_id", id);
+        recipe.description = item.value("description", recipe.planId);
         recipe.durationMinutes = item.value("duration_minutes", 0);
         recipe.interruptible = item.value("interruptible", true);
         recipe.interruptSalienceThreshold = item.value("interrupt_salience_threshold", 1.0);

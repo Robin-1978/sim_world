@@ -432,7 +432,9 @@ DecisionContext DecisionContextProjector::build(const WorldState& state,
         ActionCandidate candidate;
         candidate.actionId = recipe.id;
         candidate.planId = recipe.planId;
-        candidate.label = recipe.planId.empty() ? recipe.id : recipe.planId;
+        candidate.label = recipe.description.empty()
+                              ? (recipe.planId.empty() ? recipe.id : recipe.planId)
+                              : recipe.description;
         candidate.durationMinutes = recipe.durationMinutes;
         candidate.interruptible = recipe.interruptible;
         candidate.interruptSalienceThreshold = recipe.interruptSalienceThreshold;
@@ -599,6 +601,7 @@ DecisionContext DecisionContextProjector::build(const WorldState& state,
     for (const auto& candidate : context.candidates) {
         Json plan{{"action_id", candidate.actionId}, {"plan_id", candidate.planId},
                   {"recipe_id", candidate.recipeId}, {"label", candidate.label},
+                  {"description", candidate.label},
                   {"duration_minutes", candidate.durationMinutes},
                   {"interruptible", candidate.interruptible}, {"priority", candidate.priority},
                   {"preemption_policy", candidate.preemptionPolicy},

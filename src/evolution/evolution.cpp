@@ -429,6 +429,7 @@ EvolutionValidation applyOperations(WorldContentPack& content, const EvolutionPr
             BehaviorRecipeContent recipe;
             recipe.id = id;
             recipe.planId = operation.value("plan_id", id);
+            recipe.description = operation.value("description", recipe.planId);
             recipe.parameterSchema = operation.value("parameters", Json::object());
             const auto parameterValidation = validateParameterSchema(recipe.parameterSchema);
             if (!parameterValidation.valid) return parameterValidation;
@@ -807,7 +808,7 @@ EvolutionValidation EvolutionManager::validate(const EvolutionProposal& proposal
             fields.insert("npc_id");
             fields.insert("slots");
         } else if (type == "register_behavior_recipe") {
-            for (const auto& field : {"plan_id", "duration_minutes", "interruptible",
+            for (const auto& field : {"plan_id", "description", "duration_minutes", "interruptible",
                                       "interrupt_salience_threshold", "reservation_mode", "priority",
                                       "preemption_policy", "reservations", "parameters", "available_to", "root"}) fields.insert(field);
         }
@@ -861,6 +862,7 @@ EvolutionValidation EvolutionManager::validate(const EvolutionProposal& proposal
                 BehaviorRecipeContent recipe;
                 recipe.id = operation.at("id").get<std::string>();
                 recipe.planId = operation.value("plan_id", recipe.id);
+                recipe.description = operation.value("description", recipe.planId);
                 recipe.parameterSchema = operation.value("parameters", Json::object());
                 recipe.reservationMode = operation.value("reservation_mode", "none");
                 const auto reservations = operation.value("reservations", Json::object());

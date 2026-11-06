@@ -44,6 +44,9 @@ struct BehaviorNodeContent {
 struct BehaviorRecipeContent {
     std::string id;
     std::string planId;
+    // A short content-authored explanation shown in decision catalogs. It is
+    // descriptive only; Runtime still executes the registered BT below.
+    std::string description;
     int durationMinutes{0};
     bool interruptible{true};
     double interruptSalienceThreshold{1.0};
