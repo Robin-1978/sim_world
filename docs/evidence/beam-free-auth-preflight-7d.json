@@ -1,0 +1,29 @@
+{
+  "run_id": "beam-free-auth-preflight-7d-2026-11-06",
+  "date": "2026-11-06",
+  "command": "TIDE_MARKS_DEBUG_PROVIDER=1 ./build/tide_marks_headless --days 7 --profile /home/robin/.sim_world/config/intelligence-profile.json --provider profile --wait-llm-ms 5000 --replay /tmp/tide_marks-beam-free-current.jsonl --dump-events",
+  "provider_id": "opecode_go_beam_free",
+  "model": "beam-free",
+  "credential_state": "missing_in_codex_process",
+  "credential_value_recorded": false,
+  "runtime_result": {
+    "days_requested": 7,
+    "final_time": "day 8 06:00",
+    "final_revision": 10188,
+    "llm_drain_consumed": 104,
+    "llm_pending": 0,
+    "day_boundary_events": 7,
+    "autonomous_intent_rejected": 84,
+    "reflection_failed": 21,
+    "reflection_committed": 0,
+    "overlay_activated": 0,
+    "innovation_adoption_started": 0,
+    "provider_auth_missing_events": 107
+  },
+  "interpretation": "This run verifies long-horizon deterministic Runtime progress and fail-closed provider authentication. It is not evidence of beam-free decision quality, prompt-cache hit rate, reflection quality, or autonomous evolution because the configured credential was absent from the Codex process.",
+  "replay": {
+    "path": "/tmp/tide_marks-beam-free-current.jsonl",
+    "written": true,
+    "credential_free": true
+  }
+}

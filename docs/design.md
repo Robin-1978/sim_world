@@ -307,7 +307,7 @@ Level 1 是主体行为演化：Runtime 先把一个主体的需求压力、失�
 
 反思的停止条件是“问题已由现有机制解决”或“没有足够新证据”。Runtime 比较反思前后的确定性指标：需求缺口、失败次数、过程完成率、资源消耗、关系/群体指标和 Adoption 结果。指标没有恶化时，Level 1 Reflection 可以返回空的可选更新，Level 2 World Reflection 可以通过 `proposal_kind=no_change` 明确结束本轮；Runtime 只记录 `evolution.no_change`，不会为了产生 `strategy.reflected` 或新 Proposal 而制造版本。已有 Overlay 的效果由 Runtime 延迟到测试 horizon 结束后测量，LLM 只能解释结果和选择保留、细化、放弃或回滚。这样“修改”是问题修复或验证过的调参，“创新”是现有机制不足时的最小候选，而不是日历驱动的创意产出。
 
-每日反思是幂等的日边界事务。`ReflectionCursor.last_event_sequence` 只在结果和审计事件提交后前移，输入窗口按游标增量聚合，并始终附带未解决问题；同一 NPC 同一天重复调度返回 `reflection_already_processed`。Runtime 先校验全部结构化结果，再以同一事务提交认知事件、Goal/Strategy 投影、创新假设事件和新的游标，因此模型重试或进程恢复不会重复消费证据。创新假设、Overlay 激活和 NPC Adoption 仍分别保留自己的生命周期；Runtime Governor 可以在预检通过后自动把私有假设推进到 `accepted`，但这只授予运行资格，不能代替执行效果。
+每日反思是幂等的日边界事务。`ReflectionCursor.last_event_sequence` 只在结果和审计事件提交后前移，输入窗口按游标增量聚合，并始终附带未解决问题；同一 NPC 同一天重复调度返回 `reflection_already_processed`。Runtime 先校验全部结构化结果，再以同一事务提交认知事件、Goal/Strategy 投影、创新假设事件和新的游标，因此模型重试或进程恢复不会重复消费证据。同步 `requestDailyReflection`/`commitDailyReflection` 与异步队列使用同一条 bounded patch continuation：确定性幂等、主体、过期和认证错误先结束，只有 `invalid_reflection_*` 结构错误才在原候选后追加 `repair_daily_reflection`。创新假设、Overlay 激活和 NPC Adoption 仍分别保留自己的生命周期；Runtime Governor 可以在预检通过后自动把私有假设推进到 `accepted`，但这只授予运行资格，不能代替执行效果。
 
 配置中的 `reflection` 与 `npc_evolution` 是两个不同的 Provider purpose：`reflection` 是自动日边界的 `ReflectionResult` 入口，负责把新证据整理为认知、策略、Goal 和可选的私有创新假设；`npc_evolution` 是显式/治理调度的 Level 1 `EvolutionProposal` 入口，负责把主体证据转换为待验证的私有 Strategy、Schedule 或 Behavior Overlay。自动反思不会隐式调用 `npc_evolution`，也不会因为反思没有创新就补发一次演化请求；反思产生的合法私有假设由 Runtime Governor 直接进入轻量预检和激活，明确的 Level 1 请求也走同一条路径。两者可以使用同一个实际模型和不同预算，但 schema、幂等键、重试反馈和持久化生命周期不能混用。
 
