@@ -949,7 +949,13 @@ CommandResult WorldEvolutionSystem::commitReflection(const EvolutionRequest& req
         return world_.reject("invalid_reflection", "The provider returned no structured reflection result.");
     }
     const auto& result = response.reflectionResult;
-    if (result.value("schema_version", 1) != 1 || result.value("npc_id", request.targetNpcId) != request.targetNpcId) {
+    // Provider output is untrusted JSON.  Check the identity fields before
+    // converting them; a compatible gateway may ignore a non-strict tool
+    // schema and return numeric-looking strings.  Such output must become a
+    // bounded validation rejection, never an uncaught nlohmann conversion.
+    if (!result.contains("schema_version") || !result.at("schema_version").is_number_integer() ||
+        result.at("schema_version").get<int>() != 1 || !result.contains("npc_id") ||
+        !result.at("npc_id").is_string() || result.at("npc_id").get<std::string>() != request.targetNpcId) {
         return world_.reject("invalid_reflection_identity", "Reflection identity or schema version is invalid.");
     }
     const std::uint64_t boundarySequence = world_.state_.events.empty() ? 0 : world_.state_.events.back().sequence;

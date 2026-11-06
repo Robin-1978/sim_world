@@ -459,6 +459,7 @@ public:
                 {"source_sequence", source + 99999},
                 {"text", "This memory cites an event outside the captured evidence window."}}});
         }
+        if (emitMalformedIdentity) result["schema_version"] = "1";
         ProviderResponse response;
         response.ok = true;
         response.reflectionResult = std::move(result);
@@ -472,6 +473,7 @@ public:
     std::vector<Json> reflectionContexts;
     bool emitInnovation{false};
     bool emitInvalidUpdate{false};
+    bool emitMalformedIdentity{false};
     bool keepStrategy{false};
 };
 
@@ -3512,6 +3514,30 @@ void daily_reflection_skips_invalid_optional_fields() {
            "a bad optional cognition field cannot stall the daily reflection cursor");
 }
 
+void daily_reflection_rejects_malformed_identity_without_throwing() {
+    auto provider = std::make_unique<ReflectionProvider>();
+    auto* providerRaw = provider.get();
+    providerRaw->emitMalformedIdentity = true;
+    auto content = ContentPackLoader::load(ContentPackLoader::defaultRoot());
+    content.evolutionPolicy.enabled = true;
+    content.evolutionPolicy.level1IntervalDays = 1;
+    content.evolutionPolicy.level2IntervalDays = 0;
+    content.npcDeliberation.enabled = false;
+    auto service = WorldService::fromContent(content, std::move(provider));
+    service.advanceMinutes(kMinutesPerDay - (service.state().now.minute % kMinutesPerDay));
+    service.waitForAsyncTurns(1000);
+    expect(providerRaw->reflectionContexts.size() == 9,
+           "malformed reflection identity uses only the bounded repair attempts");
+    expect(std::any_of(service.state().events.begin(), service.state().events.end(),
+                       [](const auto& event) {
+                           return event.type == "reflection.rejected" &&
+                                  event.data.value("code", "") == "invalid_reflection_identity";
+                       }),
+           "malformed provider identity is recorded as a validation rejection instead of terminating the runtime");
+    expect(service.state().npcs.at("mira").reflectionCursor.lastReflectionDay < service.state().now.day(),
+           "a rejected reflection does not advance its durable cursor");
+}
+
 void intelligence_profile_configures_decision_budgets() {
     // Tests must use the repository fixture rather than a developer's
     // ~/.sim_world override.  Product entry points intentionally prefer the
@@ -3804,6 +3830,8 @@ int main() {
         daily_reflection_requires_failure_evidence_for_innovation);
     run("daily_reflection_skips_invalid_optional_fields",
         daily_reflection_skips_invalid_optional_fields);
+    run("daily_reflection_rejects_malformed_identity_without_throwing",
+        daily_reflection_rejects_malformed_identity_without_throwing);
     run("intelligence_profile_configures_decision_budgets", intelligence_profile_configures_decision_budgets);
     run("intelligence_profile_decouples_models_from_api_keys",
         intelligence_profile_decouples_models_from_api_keys);

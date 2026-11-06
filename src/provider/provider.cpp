@@ -1147,10 +1147,11 @@ ProviderResponse LlamaCppProvider::proposeReflection(const Json& context,
                                      {"function", Json{{"name", "daily_reflection"},
                                                         {"description", "Return one bounded daily reflection result."},
                                                         {"parameters", schema},
-                                                        // Runtime performs the complete nested validation. Keeping this tool
-                                                        // non-strict lets older llama.cpp builds accept the open proposal
-                                                        // envelope used for optional innovation hypotheses.
-                                                        {"strict", false}}}}})},
+                                                        // Runtime performs the complete nested validation.  Compatible
+                                                        // gateways additionally get strict scalar/array types so they do
+                                                        // not turn identity integers into strings.  Older local llama.cpp
+                                                        // builds keep the permissive tool envelope for this optional path.
+                                                        {"strict", endpointConfig.providerType == "openai_compatible"}}}}})},
         {"tool_choice", "required"}};
     appendValidationContinuation(request["messages"], validationFeedback,
                                  "daily_reflection", "previous_result");
