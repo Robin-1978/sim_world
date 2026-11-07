@@ -37,6 +37,7 @@ Json probeProviderStages(WorldService& service, const std::string& stage,
     const auto runDecision = [&]() {
         for (const auto& authored : service.content().npcs) {
             const auto& npcId = authored.definition.id;
+            if (!probeTarget.empty() && npcId != probeTarget) continue;
             const auto turn = service.deliberate(npcId, probeTrigger, "probe:decision:" + npcId);
             addResult(Json{{"kind", "decision"}, {"npc_id", npcId}, {"accepted", turn.accepted},
                            {"action_id", turn.actionId}, {"error", turn.error},
