@@ -1860,6 +1860,11 @@ ProviderResponse LlamaCppProvider::proposeReflection(const Json& context,
         "Cite only supplied event sequences; keep cognition updates small. "
         "Do not apply, approve or claim success for any proposal. "
         "Innovation is optional: propose at most one private hypothesis only when the Runtime gate and repeated-failure evidence allow it; otherwise return an empty list. "
+        "When innovation_gate.eligible is true, emit exactly one small register_behavior_recipe operation. "
+        "Its root must be a single meta_action leaf with children=[]; root.name must be copied exactly from innovation_gate.allowed_leaf_nodes. "
+        "A failed plan such as action_id repair_ferry is not itself a meta-action name: use the registered leaf relieve_need and put {action: repair_ferry} in root.args when that leaf is listed. "
+        "Keep the recipe parameters as the empty JSON Schema {type:object, properties:{}, required:[], additionalProperties:false}; keep plan metadata outside parameters. "
+        "Only use innovation_actions for proposal IDs already listed in INNOVATION.pending; otherwise return an empty list. "
         "Use the literal token self for private scope. Runtime performs all identity, permission, schema and lifecycle checks.";
     Json beliefItem{{"type", "object"}, {"additionalProperties", false},
                           {"required", Json::array({"subject", "predicate", "value", "source_sequence", "confidence"})},
