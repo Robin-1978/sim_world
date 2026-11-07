@@ -312,7 +312,7 @@ v19 使用上述提示修正前后的构建完成了 14 个模拟日，从第 1 
 
 ### v20 对照与 v21 验证计划
 
-v20 使用提交 `815673e` 的旧可执行文件运行，不能代表随后提交的 Level 2 actor scope、共享 recipe 引导和本地输出预算。它只作为对照，必须从日志中分开记录 `finish_reason=length`、`innovation.hypothesis_created`、Runtime Governor 的批准/激活和 Adoption 事件。提交 `91d3f3b` 将仓库内本地 Qwen profile 的 Reflection 上限调到 4096、Level 1 proposal 调到 3072、Level 2 proposal 调到 4096；提交 `07c33a0` 又按传输适配了工具选择：llama.cpp 使用字符串 `required` 和单工具请求，OpenAI-compatible 网关保留函数名对象。下一轮 v21 必须用最新构建完成至少 14 日真实 Qwen 长跑，并同时检查：三主体 ReflectionCursor 前移、Level 1 私有 hypothesis 的 Runtime 自动批准/激活/采用、Level 2 共享 recipe 是否进入候选目录并被选择执行、逐叶事件与 Replay 一致，以及后续 Reflection 是否读取 Runtime 计算的 adoption metrics。缺少任何一条都只能报告部分闭环。
+v20 使用提交 `815673e` 的旧可执行文件运行，不能代表随后提交的 Level 2 actor scope、共享 recipe 引导和本地输出预算。它只作为对照，必须从日志中分开记录 `finish_reason=length`、`innovation.hypothesis_created`、Runtime Governor 的批准/激活和 Adoption 事件。提交 `91d3f3b` 将仓库内本地 Qwen profile 的 Reflection 上限调到 4096、Level 1 proposal 调到 3072、Level 2 proposal 调到 4096；提交 `07c33a0` 又按传输适配了工具选择：llama.cpp 使用字符串 `required` 和单工具请求，OpenAI-compatible 网关保留函数名对象；提交 `7fdb9cf` 对明确无绑定的嵌套空参数 Schema 做有界归一化。下一轮 v21 必须用最新构建完成至少 14 日真实 Qwen 长跑，并同时检查：三主体 ReflectionCursor 前移、Level 1 私有 hypothesis 的 Runtime 自动批准/激活/采用、Level 2 共享 recipe 是否进入候选目录并被选择执行、逐叶事件与 Replay 一致，以及后续 Reflection 是否读取 Runtime 计算的 adoption metrics。缺少任何一条都只能报告部分闭环。
 
 ## 恢复工作入口
 

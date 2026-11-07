@@ -714,6 +714,8 @@ Snapshot 包含 `save_schema_version`、`simulation_version`、`content_version/
 
 工具选择是传输适配的一部分，不是 Runtime 权限边界：本地 llama.cpp 接口使用字符串 `tool_choice="required"`，并在首轮只发送主工具、修正轮只发送 patch 工具；OpenAI-compatible 网关（例如 beam-free）继续使用按函数名指定的对象格式。两种传输都由同一套固定 schema、assistant tool call/observation continuation 和 Runtime 二次校验约束，不能因为网关接受了工具调用就直接提交事实。
 
+声明式配方的空参数 Schema 也有一个有界机械归一化：当模型把 `type/properties/required/additionalProperties` 错嵌到 `properties`，且没有实际绑定名时，Provider 只恢复为 `{type:object, properties:{}, required:[], additionalProperties:false}`；它不补参数值、不补叶节点、不补证据，随后仍完整经过 `EvolutionManager` 和行为树引用校验。包含真实属性的 Schema 不走这条归一化路径。
+
 ## 11. 研究依据与边界
 
 - Tay & Diener, *Needs and subjective well-being around the world*, 2011, DOI: 10.1037/a0023779。
