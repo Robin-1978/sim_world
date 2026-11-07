@@ -8,6 +8,7 @@
 #include <fstream>
 #include <iostream>
 #include <memory>
+#include <set>
 #include <string>
 
 using namespace tide_marks;
@@ -18,11 +19,89 @@ void usage(const char* program) {
     std::cout << "Usage: " << program
               << " [--content-root PATH] [--days N] [--profile PATH]"
                  " [--provider mock|profile|llama_cpp] [--replay PATH] [--dump-events]"
+                 " [--input-replay PATH] [--probe decision|reflection|level1|level2|all]"
+                 " [--probe-target NPC_ID]"
                  " [--database PATH]"
                  " [--anomalies] [--experiment PATH] [--evolve level1|level2]"
                  " [--governance-auto]"
                  " [--wait-llm-ms N] [--durable-checkpoint PATH]"
                  " [--checkpoint-every-minutes N|--checkpoint-daily]\n";
+}
+
+Json probeProviderStages(WorldService& service, const std::string& stage,
+                         const std::string& probeTarget) {
+    Json report{{"provider", service.providerName()}, {"stage", stage}, {"results", Json::array()}};
+    const auto addResult = [&report](Json value) { report["results"].push_back(std::move(value)); };
+    const auto runDecision = [&]() {
+        for (const auto& authored : service.content().npcs) {
+            const auto& npcId = authored.definition.id;
+            const auto turn = service.deliberate(npcId, "probe", "probe:decision:" + npcId);
+            addResult(Json{{"kind", "decision"}, {"npc_id", npcId}, {"accepted", turn.accepted},
+                           {"action_id", turn.actionId}, {"error", turn.error},
+                           {"dialogue_bytes", turn.dialogue.size()}});
+        }
+    };
+    const auto runReflection = [&]() {
+        for (const auto& authored : service.content().npcs) {
+            const auto& npcId = authored.definition.id;
+            const auto response = service.requestDailyReflection(npcId);
+            Json result{{"kind", "reflection"}, {"npc_id", npcId}, {"provider_ok", response.ok},
+                        {"error", response.error}};
+            if (response.ok && response.reflectionResult.is_object()) {
+                const auto& reflection = response.reflectionResult;
+                const auto cognition = reflection.value("cognition_updates", Json::object());
+                result["belief_count"] = cognition.value("belief_updates", Json::array()).size();
+                result["experience_count"] = cognition.value("experience_updates", Json::array()).size();
+                result["memory_count"] = cognition.value("memory_updates", Json::array()).size();
+                result["innovation_count"] = reflection.value("innovation_hypotheses", Json::array()).size();
+                result["evidence_count"] = reflection.value("evidence_event_sequences", Json::array()).size();
+                const auto committed = service.commitDailyReflection(npcId, response);
+                result["committed"] = committed.accepted;
+                result["commit_code"] = committed.code;
+            } else {
+                result["committed"] = false;
+                result["commit_code"] = "provider_failed";
+            }
+            addResult(std::move(result));
+        }
+    };
+    const auto runEvolution = [&](const std::string& level) {
+        std::string target;
+        if (level == "level1") {
+            target = probeTarget;
+            if (target.empty() && !service.content().npcs.empty()) {
+                target = service.content().npcs.front().definition.id;
+            }
+        }
+        const auto response = service.requestEvolutionProposal(level, "probe:" + level,
+                                                                Json::object(), target);
+        Json result{{"kind", level}, {"provider_ok", response.ok}, {"error", response.error}};
+        if (response.ok && response.evolutionProposal.is_object()) {
+            const auto& proposal = response.evolutionProposal;
+            result["proposal_id"] = proposal.value("id", "");
+            result["proposal_kind"] = proposal.value("proposal_kind", "");
+            result["operation_count"] = proposal.value("operations", Json::array()).size();
+            try {
+                auto normalized = EvolutionManager::normalizeProviderProposal(
+                    proposal, service, level, service.providerName());
+                const auto validation = EvolutionManager::validate(
+                    normalized, service.content(), service.state());
+                result["runtime_valid"] = validation.valid;
+                result["runtime_code"] = validation.code;
+                result["runtime_message"] = validation.message;
+            } catch (const std::exception& error) {
+                result["runtime_valid"] = false;
+                result["runtime_code"] = "probe_normalization_error";
+                result["runtime_message"] = error.what();
+            }
+        }
+        addResult(std::move(result));
+    };
+    if (stage == "decision" || stage == "all") runDecision();
+    if (stage == "reflection" || stage == "all") runReflection();
+    if (stage == "level1" || stage == "all") runEvolution("level1");
+    if (stage == "level2" || stage == "all") runEvolution("level2");
+    return report;
 }
 
 }  // namespace
@@ -98,6 +177,9 @@ int main(int argc, char** argv) {
     std::int64_t waitLlmMilliseconds = 0;
     std::string durableCheckpointPath;
     std::string databasePath;
+    std::string inputReplayPath;
+    std::string probeStage;
+    std::string probeTarget;
     std::int64_t checkpointIntervalMinutes = 0;
     bool checkpointDaily = false;
     bool dumpEvents = false;
@@ -123,6 +205,12 @@ int main(int argc, char** argv) {
             days = std::max(0, std::atoi(argv[++i]));
         } else if (argument == "--replay" && i + 1 < argc) {
             replayPath = argv[++i];
+        } else if (argument == "--input-replay" && i + 1 < argc) {
+            inputReplayPath = argv[++i];
+        } else if (argument == "--probe" && i + 1 < argc) {
+            probeStage = argv[++i];
+        } else if (argument == "--probe-target" && i + 1 < argc) {
+            probeTarget = argv[++i];
         } else if (argument == "--provider" && i + 1 < argc) {
             providerName = argv[++i];
         } else if (argument == "--profile" && i + 1 < argc) {
@@ -150,6 +238,10 @@ int main(int argc, char** argv) {
         provider = makeProviderFromProfile(profile, providerName);
     }
     WorldService service = [&]() {
+        if (!inputReplayPath.empty()) {
+            if (!databasePath.empty()) throw std::runtime_error("--input-replay and --database are mutually exclusive");
+            return WorldService::replay(inputReplayPath, contentRoot, std::move(provider));
+        }
         if (databasePath.empty()) return WorldService::load(contentRoot, std::move(provider));
         const bool initialized = std::filesystem::exists(databasePath) &&
                                   std::filesystem::file_size(databasePath) > 0;
@@ -180,6 +272,16 @@ int main(int argc, char** argv) {
                                : service.content().worldId;
     std::cout << "《潮痕》 " << worldName << " | provider=" << service.providerName() << '\n';
     std::cout << summarize(service.state()) << '\n';
+
+    if (!probeStage.empty()) {
+        static const std::set<std::string> validStages{"decision", "reflection", "level1", "level2", "all"};
+        if (!validStages.contains(probeStage)) {
+            std::cerr << "unknown --probe stage: " << probeStage << '\n';
+            return 2;
+        }
+        std::cout << "probe: " << probeProviderStages(service, probeStage, probeTarget).dump() << '\n';
+        return 0;
+    }
 
     if (!evolutionLevel.empty()) {
         const auto proposal = EvolutionManager::propose(service, evolutionLevel, "headless_explicit_request");
