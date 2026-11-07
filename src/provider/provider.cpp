@@ -1220,7 +1220,8 @@ ProviderResponse LlamaCppProvider::decide(const DecisionContext& context, const 
             availableActionIds.push_back(plan.value("action_id", ""));
         } else {
             unavailablePlans.push_back(Json{{"plan_key", plan.value("action_id", "")},
-                                            {"reason", plan.value("unavailable_reason", "not currently eligible")}});
+                                            {"reason", plan.value("unavailable_reason", "not currently eligible")},
+                                            {"required_resources", plan.value("reservations", Json::object())}});
         }
     }
     Json stimuli = Json::array();

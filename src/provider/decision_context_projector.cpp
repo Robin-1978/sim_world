@@ -399,6 +399,8 @@ DecisionContext DecisionContextProjector::build(const WorldState& state,
             {"intent", npc.activity.goal->intent},
             {"plan_key", npc.activity.goal->target},
             {"reason", npc.activity.goal->reason},
+            {"status", toString(npc.activity.goal->status)},
+            {"priority", npc.activity.goal->priority},
             {"deadline", npc.activity.goal->deadline.toString()}};
         context.currentActivity["goal_id"] = npc.activity.goal->id;
         context.currentActivity["intent"] = npc.activity.goal->intent;
