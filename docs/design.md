@@ -712,6 +712,8 @@ Snapshot 包含 `save_schema_version`、`simulation_version`、`content_version/
 
 结构化输出的 `max_tokens` 必须覆盖有限推理和一个完整工具参数对象，但更大的上限不能替代 Schema、证据和事务校验。当前本地 Qwen profile 为 Reflection 4096、Level 1 proposal 3072、Level 2 proposal 4096；决策使用较小的专用预算。Reflection 的创新分支限制为最多一个私有 `register_behavior_recipe`、一个已注册 `meta_action` 叶节点和空输入 Schema；超出边界的内容仍由 Runtime 拒绝或进入有界 patch。长跑记录 `finish_reason=length`、工具参数大小、修正轮次和最终提交结果，不能把“没有截断”当作创新成功。
 
+工具选择是传输适配的一部分，不是 Runtime 权限边界：本地 llama.cpp 接口使用字符串 `tool_choice="required"`，并在首轮只发送主工具、修正轮只发送 patch 工具；OpenAI-compatible 网关（例如 beam-free）继续使用按函数名指定的对象格式。两种传输都由同一套固定 schema、assistant tool call/observation continuation 和 Runtime 二次校验约束，不能因为网关接受了工具调用就直接提交事实。
+
 ## 11. 研究依据与边界
 
 - Tay & Diener, *Needs and subjective well-being around the world*, 2011, DOI: 10.1037/a0023779。
