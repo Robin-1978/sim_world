@@ -1415,6 +1415,7 @@ ProviderResponse LlamaCppProvider::decide(const DecisionContext& context, const 
         "- If world action is not allowed, action_id must be empty.\n"
         "- If an active process is already running and no interruption is requested, return an empty action_id.\n"
         "- Cite only evidence refs shown in the context. Expected relief is authored prediction; Runtime alone changes needs.\n"
+        "- Parameters must contain only names listed for the selected plan in CATALOG. If that plan lists no parameters, return an empty object; never invent time, location, duration, search or metadata fields.\n"
         "- For an idle information request, answer exactly: I am not in an active process right now; I am at <location>.\n"
         "- Keep dialogue to one or two first-person sentences. Do not reveal private preferences or generate an inner monologue.\n"
         "</rules>\n"
@@ -1455,7 +1456,7 @@ ProviderResponse LlamaCppProvider::decide(const DecisionContext& context, const 
                                                                                    {"minimum", 0.0},
                                                                                    {"maximum", 1.0}}},
                                                    {"description", "Bounded relief by listed need key."}};
-    responseProperties["parameters"] = Json{{"type", "object"}, {"additionalProperties", true},
+    responseProperties["parameters"] = Json{{"type", "object"}, {"maxProperties", 4}, {"additionalProperties", true},
                                               {"description", "Inputs for the selected plan only."}};
     const Json responseSchema{{"type", "object"}, {"additionalProperties", false},
                               {"required", requiredFields}, {"properties", std::move(responseProperties)}};
