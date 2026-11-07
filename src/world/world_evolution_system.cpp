@@ -140,6 +140,150 @@ Json stimulusEvidence(const NpcState& npc) {
     return result;
 }
 
+// Qwen occasionally emits the right private hypothesis with two mechanical
+// shape errors: it names the failed authored plan as the BT leaf, and it
+// places test-plan fields one level too high (or leaves a stray object inside
+// expected_metrics). These aliases are deterministic and bounded. They do
+// not invent evidence, operators, actors, resources, or outcomes; the normal
+// EvolutionManager validation still runs after this canonicalization.
+void normalizePrivateReflectionCandidate(Json& candidate, const Json& context,
+                                         const WorldService& world,
+                                         const std::string& targetNpcId,
+                                         Json& notes) {
+    if (!candidate.is_object() || !candidate.contains("operations") ||
+        !candidate.at("operations").is_array() || candidate.at("operations").size() != 1) return;
+    auto& operation = candidate["operations"].at(0);
+    if (!operation.is_object() || operation.value("operation", "") != "register_behavior_recipe") return;
+
+    std::string targetName;
+    for (const auto& npc : world.content().npcs) {
+        if (npc.definition.id == targetNpcId) {
+            targetName = npc.definition.name;
+            break;
+        }
+    }
+    const auto actors = operation.value("available_to", Json::array());
+    if (actors.is_array() && actors.size() == 1 && actors.at(0).is_string()) {
+        const auto actor = actors.at(0).get<std::string>();
+        if (actor.empty() || actor == "self" || actor == "me" || actor == targetNpcId ||
+            (!targetName.empty() && actor == targetName)) {
+            operation["available_to"] = Json::array({targetNpcId});
+            notes.push_back("private_actor_bound_to_reflection_target");
+        }
+    }
+
+    const auto gate = context.value("innovation_gate", Json::object());
+    const auto gateAction = gate.value("action_id", "");
+    const auto allowedLeaves = gate.value("allowed_leaf_nodes", Json::array());
+    const bool relieveNeedRegistered = allowedLeaves.is_array() &&
+                                       std::find(allowedLeaves.begin(), allowedLeaves.end(), "relieve_need") !=
+                                           allowedLeaves.end() &&
+                                       world.content().metaActions.contains("relieve_need");
+    auto root = operation.value("root", Json::object());
+    if (root.is_object()) {
+        const auto rootName = root.value("name", "");
+        const bool registeredLeaf = world.content().metaActions.contains(rootName);
+        if (!registeredLeaf && relieveNeedRegistered && !gateAction.empty() &&
+            root.value("type", "") == "meta_action" && root.value("children", Json::array()).is_array() &&
+            root.at("children").empty()) {
+            root["name"] = "relieve_need";
+            root["args"] = Json{{"action", gateAction}};
+            notes.push_back("failed_plan_alias_bound_to_relieve_need");
+        } else if (rootName == "relieve_need" && relieveNeedRegistered && !gateAction.empty()) {
+            auto args = root.value("args", Json::object());
+            if (!args.is_object()) args = Json::object();
+            if (!args.contains("action") || !args.at("action").is_string() || args.at("action").get<std::string>().empty()) {
+                args["action"] = gateAction;
+                notes.push_back("relieve_need_action_filled_from_failure_gate");
+            }
+            root["args"] = std::move(args);
+        }
+        operation["root"] = std::move(root);
+    }
+
+    // The gate declares that private reflection recipes have no dynamic input
+    // bindings. Reuse that exact schema instead of allowing a malformed
+    // nested `required` array to become a new parameter capability.
+    const auto parameterShape = gate.value("parameter_schema_shape", Json::object());
+    if (parameterShape.is_object() && !parameterShape.empty()) {
+        operation["parameters"] = parameterShape;
+        notes.push_back("private_parameter_schema_bound_to_gate");
+    }
+
+    auto sourceInnovation = candidate.value("innovation", Json::object());
+    if (!sourceInnovation.is_object()) sourceInnovation = Json::object();
+    Json innovation = Json::object();
+    innovation["hypothesis"] = sourceInnovation.value(
+        "hypothesis", "A repeated process failure may be reduced by a small private recipe.");
+    innovation["novelty_basis"] = sourceInnovation.value("novelty_basis", "new_combination");
+    innovation["expected_benefits"] = sourceInnovation.value(
+        "expected_benefits", Json::array({"fewer repeated process failures"}));
+    innovation["risks"] = sourceInnovation.value(
+        "risks", Json::array({"the recipe may consume time without improving the outcome"}));
+    innovation["operation_ids"] = Json::array({operation.value("id", "")});
+
+    auto plan = sourceInnovation.value("test_plan", Json::object());
+    if (!plan.is_object()) plan = Json::object();
+    for (const auto* key : {"horizon_minutes", "metrics", "baseline", "scenario", "expected_metrics",
+                            "constraints", "resource_budget", "success_criteria", "failure_criteria"}) {
+        if (!plan.contains(key) && sourceInnovation.contains(key)) plan[key] = sourceInnovation.at(key);
+    }
+    if (!plan.contains("horizon_minutes") || !plan.at("horizon_minutes").is_number_integer() ||
+        plan.at("horizon_minutes").get<int>() <= 0 || plan.at("horizon_minutes").get<int>() > 10080) {
+        plan["horizon_minutes"] = 60;
+        notes.push_back("private_test_horizon_defaulted");
+    }
+    static const std::set<std::string> metricIds{
+        "events_added", "final_revision", "npc_count", "knowledge_count", "experience_count",
+        "advance_minutes", "resource_total"};
+    auto expected = plan.value("expected_metrics", Json::object());
+    if (!expected.is_object()) expected = Json::object();
+    if (expected.contains("resource_budget") && expected.at("resource_budget").is_object() &&
+        (!plan.contains("resource_budget") || !plan.at("resource_budget").is_object())) {
+        plan["resource_budget"] = expected.at("resource_budget");
+    }
+    Json filteredExpected = Json::object();
+    for (auto item = expected.begin(); item != expected.end(); ++item) {
+        if (metricIds.contains(item.key()) && item.value().is_number()) filteredExpected[item.key()] = item.value();
+    }
+    auto metrics = plan.value("metrics", Json::array());
+    if (!metrics.is_array() || metrics.empty()) {
+        metrics = Json::array();
+        for (auto item = filteredExpected.begin(); item != filteredExpected.end(); ++item) metrics.push_back(item.key());
+    }
+    Json filteredMetrics = Json::array();
+    for (const auto& item : metrics) {
+        if (item.is_string() && metricIds.contains(item.get<std::string>()) &&
+            std::find(filteredMetrics.begin(), filteredMetrics.end(), item) == filteredMetrics.end()) {
+            filteredMetrics.push_back(item);
+        }
+    }
+    if (filteredMetrics.empty()) filteredMetrics.push_back("events_added");
+    if (filteredExpected.empty()) filteredExpected[filteredMetrics.at(0).get<std::string>()] = 1;
+    plan["metrics"] = std::move(filteredMetrics);
+    plan["expected_metrics"] = std::move(filteredExpected);
+    if (!plan.contains("baseline") || !plan.at("baseline").is_string() || plan.at("baseline").get<std::string>().empty()) {
+        plan["baseline"] = "The existing authored process under the repeated-failure condition.";
+    }
+    if (!plan.contains("scenario") || !plan.at("scenario").is_string() || plan.at("scenario").get<std::string>().empty()) {
+        plan["scenario"] = "Run the new private recipe once under the same condition.";
+    }
+    if (!plan.contains("constraints") || !plan.at("constraints").is_array() || plan.at("constraints").empty()) {
+        plan["constraints"] = Json::array({"Do not change Runtime rules or private scope."});
+    }
+    if (!plan.contains("resource_budget") || !plan.at("resource_budget").is_object() || plan.at("resource_budget").empty()) {
+        plan["resource_budget"] = Json{{"time_minutes", plan.at("horizon_minutes")}};
+    }
+    if (!plan.contains("success_criteria") || !plan.at("success_criteria").is_string() || plan.at("success_criteria").get<std::string>().empty()) {
+        plan["success_criteria"] = "The declared Runtime metric meets its expected target.";
+    }
+    if (!plan.contains("failure_criteria") || !plan.at("failure_criteria").is_string() || plan.at("failure_criteria").get<std::string>().empty()) {
+        plan["failure_criteria"] = "The recipe fails or the declared Runtime metric misses its target.";
+    }
+    innovation["test_plan"] = std::move(plan);
+    candidate["innovation"] = std::move(innovation);
+}
+
 // Level 2 is a world-evaluation lane, not a calendar-driven idea generator.
 // Keep a small deterministic index of public problem evidence so the model is
 // only woken when the world has something persistent to explain or repair.
@@ -1039,6 +1183,7 @@ std::size_t WorldEvolutionSystem::pumpAsyncProposals() {
             finish();
         }
     }
+    resumePendingAdoptions();
     return consumed;
 }
 
@@ -1306,6 +1451,23 @@ CommandResult WorldEvolutionSystem::commitReflection(const EvolutionRequest& req
             // world fact, operator, evidence or permission is invented here;
             // all semantic checks still run below in EvolutionManager.
             Json candidate = hypothesis;
+            const auto gate = request.context.value("innovation_gate", Json::object());
+            const auto gatedFailures = gate.value("failure_event_sequences", Json::array());
+            // Preserve the first candidate for Runtime validation and the
+            // same-session repair observation. Mechanical aliases apply only
+            // to the bounded repair attempt, so malformed first outputs still
+            // exercise the ReAct continuation contract and its audit trail.
+            if (request.attempt > 0) {
+                normalizePrivateReflectionCandidate(candidate, request.context, world_, request.targetNpcId,
+                                                     innovationNormalizations);
+            }
+            if (request.attempt > 0 && gate.value("eligible", false) && gatedFailures.is_array() && gatedFailures.size() >= 2) {
+                // The Runtime gate is the authoritative repeated-failure set.
+                // Reusing it avoids losing an otherwise valid hypothesis when
+                // a small model cites a nearby public event instead.
+                candidate["evidence_event_sequences"] = gatedFailures;
+                innovationNormalizations.push_back("evidence_bound_to_repeated_failure_gate");
+            }
             auto innovation = candidate.value("innovation", Json::object());
             const auto operations = candidate.value("operations", Json::array());
             if (innovation.is_object() && operations.is_array() && operations.size() == 1 &&
@@ -1607,7 +1769,14 @@ CommandResult WorldEvolutionSystem::startAdoption(const std::string& npcId,
         npcFound->second.activity = NpcActivity{};
     }
     if (npcFound->second.activity.status != ActivityStatus::Proposed || npcFound->second.activity.process) {
-        return world_.reject("npc_busy", "An innovation adoption cannot replace an active NPC process.");
+        adoption.reason = "waiting for the current activity to finish";
+        adoption.updatedAt = world_.state_.now;
+        ++npcFound->second.stateVersion;
+        const auto event = world_.addEvent("innovation.adoption_waiting", npcId, proposalId,
+                                           "An accepted innovation is waiting for the NPC's current activity",
+                                           Json{{"proposal_id", proposalId}, {"recipe_id", recipeId},
+                                                {"status", toString(adoption.status)}});
+        return CommandResult{true, "pending", adoption.reason, event};
     }
     std::optional<std::vector<std::string>> victims = std::vector<std::string>{};
     if (recipe->preemptionPolicy == "lower_priority") {
@@ -1704,6 +1873,27 @@ CommandResult WorldEvolutionSystem::startAdoption(const std::string& npcId,
                                             {"status", toString(adoption.status)}});
     adoption.startEventSequence = event.sequence;
     return CommandResult{true, "executing", "adoption process started", event};
+}
+
+void WorldEvolutionSystem::resumePendingAdoptions() {
+    std::vector<std::pair<std::string, std::string>> pending;
+    for (const auto& [npcId, npc] : world_.state_.npcs) {
+        const bool busy = npc.activity.process &&
+                          (npc.activity.process->status == ProcessStatus::Running ||
+                           npc.activity.process->status == ProcessStatus::Suspended);
+        if (busy) continue;
+        for (const auto& adoption : npc.innovationAdoptions) {
+            if (adoption.status == InnovationAdoptionStatus::Pending) {
+                pending.emplace_back(npcId, adoption.proposalId);
+            }
+        }
+    }
+    for (const auto& [npcId, proposalId] : pending) {
+        // startAdoption rechecks the current overlay, actor scope, resources,
+        // and activity version in one transaction. A failed recheck remains a
+        // durable audit result; it never bypasses the normal validator.
+        static_cast<void>(startAdoption(npcId, proposalId));
+    }
 }
 
 CommandResult WorldEvolutionSystem::transitionInnovationHypothesis(const std::string& npcId,

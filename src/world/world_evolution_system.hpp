@@ -44,6 +44,10 @@ public:
                                    const ProviderResponse& response,
                                    const std::string& provider);
     CommandResult startAdoption(const std::string& npcId, const std::string& proposalId);
+    // Retry an accepted private adoption after the NPC's current authored
+    // process reaches a terminal boundary.  The hypothesis and overlay stay
+    // persisted while the single activity slot is busy.
+    void resumePendingAdoptions();
     // An independent Runtime Governor may advance a persisted private
     // hypothesis before ordinary preflight -> approve -> activation. The
     // provider cannot call this entry point; the transition remains auditable.
