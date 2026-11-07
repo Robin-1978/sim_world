@@ -21,6 +21,7 @@ void usage(const char* program) {
                  " [--provider mock|profile|llama_cpp] [--replay PATH] [--dump-events]"
                  " [--input-replay PATH] [--probe decision|reflection|level1|level2|all]"
                  " [--probe-target NPC_ID]"
+                 " [--probe-trigger TRIGGER]"
                  " [--database PATH]"
                  " [--anomalies] [--experiment PATH] [--evolve level1|level2]"
                  " [--governance-auto]"
@@ -29,13 +30,14 @@ void usage(const char* program) {
 }
 
 Json probeProviderStages(WorldService& service, const std::string& stage,
-                         const std::string& probeTarget) {
+                         const std::string& probeTarget,
+                         const std::string& probeTrigger) {
     Json report{{"provider", service.providerName()}, {"stage", stage}, {"results", Json::array()}};
     const auto addResult = [&report](Json value) { report["results"].push_back(std::move(value)); };
     const auto runDecision = [&]() {
         for (const auto& authored : service.content().npcs) {
             const auto& npcId = authored.definition.id;
-            const auto turn = service.deliberate(npcId, "probe", "probe:decision:" + npcId);
+            const auto turn = service.deliberate(npcId, probeTrigger, "probe:decision:" + npcId);
             addResult(Json{{"kind", "decision"}, {"npc_id", npcId}, {"accepted", turn.accepted},
                            {"action_id", turn.actionId}, {"error", turn.error},
                            {"dialogue_bytes", turn.dialogue.size()}});
@@ -180,6 +182,7 @@ int main(int argc, char** argv) {
     std::string inputReplayPath;
     std::string probeStage;
     std::string probeTarget;
+    std::string probeTrigger = "high_salience_context";
     std::int64_t checkpointIntervalMinutes = 0;
     bool checkpointDaily = false;
     bool dumpEvents = false;
@@ -211,6 +214,8 @@ int main(int argc, char** argv) {
             probeStage = argv[++i];
         } else if (argument == "--probe-target" && i + 1 < argc) {
             probeTarget = argv[++i];
+        } else if (argument == "--probe-trigger" && i + 1 < argc) {
+            probeTrigger = argv[++i];
         } else if (argument == "--provider" && i + 1 < argc) {
             providerName = argv[++i];
         } else if (argument == "--profile" && i + 1 < argc) {
@@ -279,7 +284,7 @@ int main(int argc, char** argv) {
             std::cerr << "unknown --probe stage: " << probeStage << '\n';
             return 2;
         }
-        std::cout << "probe: " << probeProviderStages(service, probeStage, probeTarget).dump() << '\n';
+        std::cout << "probe: " << probeProviderStages(service, probeStage, probeTarget, probeTrigger).dump() << '\n';
         return 0;
     }
 
