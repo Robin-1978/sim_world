@@ -1761,6 +1761,13 @@ ProviderResponse LlamaCppProvider::proposeEvolution(const Json& context,
         {"available_to", Json{{"type", "array"}, {"minItems", 1},
                                 {"items", Json{{"type", "string"}, {"minLength", 1}}}}},
         {"root", node}};
+    if (evolutionLevel == "level2") {
+        const auto actorNames = modelContext.value("state", Json::object()).value(
+            "shared_recipe_actor_names", Json::array());
+        if (actorNames.is_array() && !actorNames.empty()) {
+            recipeOperation["properties"]["available_to"]["items"]["enum"] = actorNames;
+        }
+    }
 
     Json operationItems = Json::object();
     operationItems["oneOf"] = evolutionLevel == "level1"
@@ -1945,12 +1952,14 @@ ProviderResponse LlamaCppProvider::proposeReflection(const Json& context,
     // for a later, deliberate compound proposal.
     recipeRoot["properties"]["type"] = Json{{"const", "meta_action"}};
     recipeRoot["properties"]["id"] = Json{{"type", "string"}, {"minLength", 1}};
-    // The function schema is a stable per-purpose contract.  Current content
-    // IDs belong in the catalog/context projection; Runtime validates that a
-    // returned name is registered and permitted.  Embedding a per-content
-    // enum here would change the tool schema and break prefix reuse for every
-    // content revision or world instance.
     recipeRoot["properties"]["name"] = Json{{"type", "string"}, {"minLength", 1}};
+    const auto registeredMetaActions = context.value("content", Json::object()).value(
+        "registered_meta_actions", Json::array());
+    if (registeredMetaActions.is_array() && !registeredMetaActions.empty()) {
+        // This enum is stable for a content revision and prevents the local
+        // model from spending a full reflection on a fabricated leaf name.
+        recipeRoot["properties"]["name"]["enum"] = registeredMetaActions;
+    }
     recipeRoot["properties"]["args"] = Json{{"type", "object"}};
     recipeRoot["properties"]["max_ticks"] = Json{{"type", "integer"}, {"minimum", 0}};
     recipeRoot["properties"]["children"] = Json{{"type", "array"}, {"maxItems", 0}};
@@ -1982,7 +1991,8 @@ ProviderResponse LlamaCppProvider::proposeReflection(const Json& context,
         {"additionalProperties", false},
         {"description", "A bounded JSON Schema for recipe input bindings; use an empty properties object when no bindings are needed."}};
     recipeOperation["properties"]["available_to"] = Json{{"type", "array"}, {"minItems", 1}, {"maxItems", 1},
-                                                            {"items", Json{{"type", "string"}, {"minLength", 1}, {"maxLength", 64}}}};
+                                                            {"items", Json{{"type", "string"}, {"minLength", 1}, {"maxLength", 64},
+                                                                              {"enum", Json::array({"self"})}}}};
     recipeOperation["properties"]["root"] = std::move(recipeRoot);
 
     Json testPlan = Json::object();
