@@ -1426,8 +1426,10 @@ void decision_context_separates_authored_catalog_from_eligible_plans() {
         return plan.value("action_id", "") == "offer_ration";
     });
     expect(rationPlan != mira.planCatalog.end() &&
-               rationPlan->value("label", "").find("Offer one ration") != std::string::npos,
-           "the authored plan catalog includes a short semantic description");
+               rationPlan->value("label", "").find("Offer one ration") != std::string::npos &&
+               rationPlan->value("semantic_description", "").find("Offer one ration") != std::string::npos &&
+               !rationPlan->value("execution_outline", "").empty(),
+           "the authored plan catalog includes semantic and executable BT explanations");
 
     auto activeGoalSnapshot = service.snapshotJson();
     activeGoalSnapshot["npcs"]["mira"]["activity"] = Json{

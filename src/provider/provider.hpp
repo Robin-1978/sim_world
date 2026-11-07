@@ -81,6 +81,9 @@ struct DecisionContext {
     std::string trigger;
     std::string speechAct;
     bool worldActionAllowed{true};
+    // Autonomous channels wake when the Runtime is ready for a new process;
+    // conversation channels may legitimately return no action.
+    bool actionRequired{false};
     bool speechActClassificationRequired{false};
     // Versions are carried with an asynchronous request. They describe the
     // content and prompt contract used to produce the proposal, not mutable

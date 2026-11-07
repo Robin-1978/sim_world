@@ -61,6 +61,37 @@ Json behaviorNodeProjection(const BehaviorNodeContent& node, int depth = 0) {
     return result;
 }
 
+std::string behaviorNodeExplanation(const BehaviorNodeContent& node,
+                                    const WorldContentPack& content, int depth = 0) {
+    if (depth > 4) return "continue the authored behavior";
+    if (node.type == "sequence" || node.type == "selector") {
+        std::vector<std::string> children;
+        const auto limit = std::min<std::size_t>(node.children.size(), 8);
+        for (std::size_t index = 0; index < limit; ++index) {
+            children.push_back(behaviorNodeExplanation(node.children.at(index), content, depth + 1));
+        }
+        if (children.empty()) return node.type == "sequence" ? "complete the authored sequence"
+                                                                : "try an authored option";
+        return (node.type == "sequence" ? "then " : "or ") + join(children, node.type == "sequence" ? ", then " : ", or ");
+    }
+    if (node.type == "condition") {
+        const auto found = content.conditions.find(node.name);
+        if (found != content.conditions.end() && !found->second.operation.empty()) {
+            return "check the authored condition " + node.name + " (" + found->second.operation + ")";
+        }
+        return "check the authored condition " + node.name;
+    }
+    if (node.type == "meta_action") {
+        const auto found = content.metaActions.find(node.name);
+        if (found != content.metaActions.end() && !found->second.description.empty()) {
+            return found->second.description;
+        }
+        return "perform the authored operation " + node.name;
+    }
+    if (!node.name.empty()) return "run the authored " + node.name + " step";
+    return "run the authored behavior step";
+}
+
 const NpcContent* authoredNpc(const WorldContentPack& content, const std::string& npcId) {
     const auto found = std::find_if(content.npcs.begin(), content.npcs.end(),
                                     [&npcId](const auto& item) { return item.definition.id == npcId; });
@@ -620,6 +651,7 @@ DecisionContext DecisionContextProjector::build(const WorldState& state,
         Json plan{{"action_id", candidate.actionId}, {"plan_id", candidate.planId},
                   {"recipe_id", candidate.recipeId}, {"label", candidate.label},
                   {"description", candidate.label},
+                  {"semantic_description", candidate.label},
                   {"duration_minutes", candidate.durationMinutes},
                   {"interruptible", candidate.interruptible}, {"priority", candidate.priority},
                   {"preemption_policy", candidate.preemptionPolicy},
@@ -631,7 +663,10 @@ DecisionContext DecisionContextProjector::build(const WorldState& state,
                   {"unavailable_reason", candidate.unavailableReason}};
         const auto recipe = std::find_if(content.behaviorRecipes.begin(), content.behaviorRecipes.end(),
                                          [&candidate](const auto& item) { return item.id == candidate.recipeId; });
-        if (recipe != content.behaviorRecipes.end()) plan["behavior_tree"] = behaviorNodeProjection(recipe->root);
+        if (recipe != content.behaviorRecipes.end()) {
+            plan["behavior_tree"] = behaviorNodeProjection(recipe->root);
+            plan["execution_outline"] = behaviorNodeExplanation(recipe->root, content);
+        }
         context.planCatalog.push_back(std::move(plan));
     }
     return context;

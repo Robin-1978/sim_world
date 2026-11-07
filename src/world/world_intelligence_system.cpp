@@ -94,6 +94,8 @@ TurnRequest WorldIntelligenceSystem::makeTurnRequest(const std::string& npcId, c
     request.context.channel = channelId;
     request.context.providerPolicy = channel->second.providerPolicy;
     request.context.trigger = trigger;
+    request.context.actionRequired = !channel->second.conversation &&
+                                     channel->second.defaultWorldActionAllowed;
     request.context.promptVersion =
         "tide-marks-intent-v2:" + world_.content_.contentVersion + ":" + world_.content_.id;
     request.context.runtimeMetadata["channel_id"] = channelId;
@@ -163,7 +165,8 @@ DialogueTurn WorldIntelligenceSystem::executeTurn(const std::string& npcId, cons
                code == "invalid_action_parameter_type" || code == "unexpected_action_parameters" ||
                code == "invalid_action_parameters" || code == "invalid_action_parameter_value" ||
                code == "invalid_expected_relief" || code == "missing_dialogue" ||
-               code == "speech_act_disallows_world_action" || code == "private_disclosure";
+               code == "speech_act_disallows_world_action" || code == "private_disclosure" ||
+               code == "world_action_required";
     };
     if (!turnResult.accepted && response.ok && world_.provider_->capabilities().structuredRepair &&
         retryable(turnResult.error)) {
@@ -175,6 +178,8 @@ DialogueTurn WorldIntelligenceSystem::executeTurn(const std::string& npcId, cons
                                                  ? "Do not reveal private goals, boundaries, or private preferences; answer from observable facts in one or two sentences."
                                              : turnResult.error == "speech_act_disallows_world_action"
                                                  ? "The utterance was classified as information-only; set action_id to an empty string, world_action_requested to false, expected_relief to {}, and answer from observable context."
+                                                 : turnResult.error == "world_action_required"
+                                                     ? "This autonomous decision requires one eligible plan. Set action_id to one key from eligible_plan_keys; do not return an empty action_id."
                                                  : "Runtime rejected a structured proposal field; repair only the declared plan input or expected relief keys."},
                             {"previous_action_id", response.proposal.actionId},
                             {"previous_intent", response.proposal.intent},
