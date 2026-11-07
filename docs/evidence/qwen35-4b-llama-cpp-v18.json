@@ -1,0 +1,261 @@
+{
+  "run_id": "qwen35-4b-llama-cpp-v18",
+  "command": "TIDE_MARKS_DEBUG_PROVIDER=1 ./build/tide_marks_headless --days 14 --profile data/intelligence-profile.json --provider profile --wait-llm-ms 60000 --replay /tmp/tide_marks-qwen-14d-v18.jsonl --dump-events",
+  "provider": "local_qwen",
+  "model": "Huihui-Qwen3.5-4B-abliterated.Q4_K_M",
+  "days": 14,
+  "simulation_window": {
+    "start_minute": 360,
+    "end_minute": 20160,
+    "life_day_events": 14
+  },
+  "replay": {
+    "transaction_count": 1,
+    "base_revision": 1,
+    "final_revision": 20361,
+    "state_digest": "fnv1a64:b724a98ebae59402",
+    "source_and_replay_same_transaction": true
+  },
+  "events": {
+    "counts": {
+      "action.resource": 13,
+      "drive.adapted": 69,
+      "evolution.approved": 1,
+      "evolution.overlay_activated": 1,
+      "evolution.proposal_ready": 1,
+      "evolution.proposal_rejected": 4,
+      "experience.observed": 105,
+      "experience.recorded": 124,
+      "goal.cancelled": 1,
+      "goal.reflected": 1,
+      "innovation.hypothesis_rejected": 35,
+      "knowledge.asserted": 34,
+      "life.archive": 14,
+      "life.clue": 14,
+      "life.crossing": 14,
+      "life.day": 14,
+      "life.debt": 14,
+      "life.explain_ration": 14,
+      "life.ferry_decay": 14,
+      "life.protect_secret": 14,
+      "life.ration": 5,
+      "life.repair": 4,
+      "life.rest": 42,
+      "life.withhold": 14,
+      "memory.reflected": 18,
+      "need.critical": 12,
+      "need.deprived": 1008,
+      "need.relieved": 400,
+      "npc.behavior_leaf_completed": 116,
+      "npc.intent": 98,
+      "npc.intent_expired": 18,
+      "npc.intent_rejected": 35,
+      "npc.process_completed": 92,
+      "npc.process_failed": 4,
+      "npc.process_interrupted": 1,
+      "npc.schedule_applied": 99,
+      "reflection.committed": 35,
+      "reflection.failed": 1,
+      "reflection.rejected": 6,
+      "reflection.update_rejected": 32,
+      "stimulus.habituated": 30,
+      "structure.ferry_closed": 14,
+      "structure.ferry_opened": 14
+    },
+    "process_failures": [
+      {
+        "sequence": 397,
+        "actor": "lorn",
+        "action_id": "repair_ferry"
+      },
+      {
+        "sequence": 589,
+        "actor": "lorn",
+        "action_id": "repair_ferry"
+      },
+      {
+        "sequence": 769,
+        "actor": "mira",
+        "action_id": "offer_ration"
+      },
+      {
+        "sequence": 779,
+        "actor": "lorn",
+        "action_id": "repair_ferry"
+      }
+    ]
+  },
+  "provider_usage": {
+    "decision": {
+      "requests": 202,
+      "finish_reasons": {
+        "tool_calls": 200,
+        "length": 2
+      },
+      "prompt_tokens": 688773,
+      "completion_tokens": 58417,
+      "cached_tokens": 367135,
+      "cache_ratio": 0.533028,
+      "avg_dynamic_bytes": 5848.5
+    },
+    "evolution_level2": {
+      "requests": 9,
+      "finish_reasons": {
+        "tool_calls": 9
+      },
+      "prompt_tokens": 38336,
+      "completion_tokens": 4838,
+      "cached_tokens": 27884,
+      "cache_ratio": 0.727358,
+      "avg_dynamic_bytes": 4106.4
+    },
+    "reflection": {
+      "requests": 92,
+      "finish_reasons": {
+        "tool_calls": 86,
+        "length": 6
+      },
+      "prompt_tokens": 530538,
+      "completion_tokens": 101955,
+      "cached_tokens": 337707,
+      "cache_ratio": 0.636537,
+      "avg_dynamic_bytes": 7073.2
+    },
+    "understanding": {
+      "requests": 1,
+      "finish_reasons": {
+        "tool_calls": 1
+      },
+      "prompt_tokens": 875,
+      "completion_tokens": 244,
+      "cached_tokens": 0,
+      "cache_ratio": 0.0,
+      "avg_dynamic_bytes": 119.0
+    }
+  },
+  "evolution": {
+    "proposal_events": [
+      {
+        "sequence": 371,
+        "type": "evolution.proposal_rejected",
+        "id": "ferry_repair_station",
+        "level": "level2",
+        "code": "invalid_behavior_parameters",
+        "approval_actor": null,
+        "operation_types": [
+          "register_behavior_recipe"
+        ]
+      },
+      {
+        "sequence": 906,
+        "type": "evolution.proposal_ready",
+        "id": "repair_ferry_facility",
+        "level": "level2",
+        "code": null,
+        "approval_actor": null,
+        "operation_types": [
+          "create_entity_archetype"
+        ]
+      },
+      {
+        "sequence": 907,
+        "type": "evolution.approved",
+        "id": "repair_ferry_facility",
+        "level": "level2",
+        "code": "approved",
+        "approval_actor": "runtime_governor",
+        "operation_types": [
+          "create_entity_archetype"
+        ]
+      },
+      {
+        "sequence": 908,
+        "type": "evolution.overlay_activated",
+        "id": null,
+        "level": null,
+        "code": null,
+        "approval_actor": null,
+        "operation_types": []
+      },
+      {
+        "sequence": 1467,
+        "type": "evolution.proposal_rejected",
+        "id": "repair_ferry_facility",
+        "level": "level2",
+        "code": null,
+        "approval_actor": null,
+        "operation_types": [
+          "create_entity_archetype"
+        ]
+      },
+      {
+        "sequence": 1997,
+        "type": "evolution.proposal_rejected",
+        "id": "repair_ferry_facility",
+        "level": "level2",
+        "code": null,
+        "approval_actor": null,
+        "operation_types": [
+          "create_entity_archetype"
+        ]
+      },
+      {
+        "sequence": 2592,
+        "type": "evolution.proposal_rejected",
+        "id": "repair_ferry_facility_v2_root",
+        "level": "level2",
+        "code": "unknown_behavior_recipe_actor",
+        "approval_actor": null,
+        "operation_types": [
+          "register_behavior_recipe"
+        ]
+      }
+    ],
+    "hypothesis_created": 0,
+    "hypothesis_rejected": 35,
+    "adoption_started": 0,
+    "adoption_completed": 0,
+    "adoption_failed": 0
+  },
+  "final_state": {
+    "content_version": "village-p0.5+overlay:repair_ferry_facility",
+    "active_overlay_ids": [
+      "repair_ferry_facility"
+    ],
+    "npcs": {
+      "eve": {
+        "strategy": "routine",
+        "memory_count": 36,
+        "knowledge_count": 2,
+        "experience_count": 3,
+        "hypothesis_count": 0,
+        "adoption_count": 0
+      },
+      "lorn": {
+        "strategy": "routine",
+        "memory_count": 71,
+        "knowledge_count": 3,
+        "experience_count": 2,
+        "hypothesis_count": 0,
+        "adoption_count": 0
+      },
+      "mira": {
+        "strategy": "routine",
+        "memory_count": 54,
+        "knowledge_count": 2,
+        "experience_count": 4,
+        "hypothesis_count": 0,
+        "adoption_count": 0
+      }
+    }
+  },
+  "interpretation": "This is a 14-day real local-Qwen Runtime/Replay baseline. It proves daily reflection and Runtime-governed Level 2 entity-overlay activation, but it does not prove the complete self-evolution loop: no Level 1 hypothesis was accepted, no private adoption occurred, and no shared behavior recipe was selected and measured. The main remaining model failure was invalid optional recipe structure/meta-action names; the next run includes the registered-leaf reflection prompt fix.",
+  "gates": {
+    "runtime_progress": true,
+    "reflection_cursor_and_replay": true,
+    "level2_runtime_governance": true,
+    "level1_private_adoption": false,
+    "level2_shared_behavior_adoption": false,
+    "measured_effect_feedback": false
+  }
+}

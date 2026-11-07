@@ -9,6 +9,8 @@
 | 本地 Qwen 4B v11 | revision 10186；boat/records integrity 94/94 | 18 committed；13 个局部字段被跳过；2 次 provider 失败；1 次整条拒绝 | Level 2 `repair_ferry_v2` 通过 Runtime preflight → `runtime_governor` 自动批准 → Overlay active；Level 1 两次私有假设被拒 | decision 48.95%；reflection 54.59%；Level 2 32.29% |
 | beam-free v14 | revision 10175；boat/records integrity 91/94 | 20 committed；4 个局部字段被跳过；1 次 provider 失败 | 1 次 Level 2 `no_change`；1 次 Level 2 provider 失败；4 个 Level 1 假设被 Runtime 拒绝；没有 approved/active Overlay | decision 20.21%；reflection 23.29%；Level 2 0%；合计 20.54% |
 
+14 日 Qwen v18 已作为较长基线单独记录在 [`qwen35-4b-llama-cpp-v18.json`](qwen35-4b-llama-cpp-v18.json)：推进 14 个 `life.day`、最终 revision 20361，源 Replay 交易一致；98 个 Intent 中 92 个过程完成、4 个过程失败，35 次 Reflection 提交。它完成了 Level 2 `proposal_ready → approved(runtime_governor) → overlay_activated`，但激活的是共享实体原型；Level 1 没有被 Runtime 接受的私有 hypothesis，Adoption 为 0，也没有共享 Behavior Recipe 被选择、执行和测量。因此这是一份“长期 Runtime/治理稳定性已证实、完整自主演化效果未证实”的证据，不能写成闭环完成。
+
 无凭据的 `beam-free-auth-preflight-7d` 只证明 Runtime 在认证缺失时可以 fail-closed 地推进时间、需求衰减和已批准过程；它没有模型质量、缓存或演化证据，不能与上表混合。
 
 ## 七日内实际发生的行为
@@ -53,3 +55,4 @@ Qwen v11 的两次 Level 1 私有创新被拒：一次 `invalid_behavior_paramet
 - [qwen35-4b-llama-cpp-v11.json](qwen35-4b-llama-cpp-v11.json)
 - [beam-free-opencode-7d-v14.json](beam-free-opencode-7d-v14.json)
 - [beam-free-auth-preflight-7d.json](beam-free-auth-preflight-7d.json)
+- [qwen35-4b-llama-cpp-v18.json](qwen35-4b-llama-cpp-v18.json)

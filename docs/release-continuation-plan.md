@@ -286,6 +286,22 @@ TIDE_MARKS_DEBUG_PROVIDER=1 ./build/tide_marks_headless --days 14 \
 
 它结束后只在同时满足以下条件时更新为“真实闭环证据”：推进到第 15 天 06:00、`llm-drain pending=0`、源 Snapshot 与 Replay 一致；三名主体都有连续 ReflectionCursor 和合法过程事件；至少一条 Level 1 私有候选完成 `hypothesis → accepted → overlay_activated → adoption_started → adoption_completed/failed`；至少一条 Level 2 共享行为进入声明的候选目录并被选择、逐叶子执行到 horizon；后续 Reflection 读取 Runtime 计算的指标并做出保留、调整、放弃或 `no_change`。若缺少其中任一条，证据文件必须明确写成“协议/激活闭环已完成，效果或 Adoption 仍待验证”，不得用测试 Provider 或人工批准结果补齐。
 
+### v18 长跑核验与下一轮模型修正
+
+v18 使用 `32770d8` 之后、反思叶节点提示修正之前的本地 Qwen 构建，命令为：
+
+```text
+TIDE_MARKS_DEBUG_PROVIDER=1 ./build/tide_marks_headless --days 14 \
+  --profile data/intelligence-profile.json --provider profile \
+  --wait-llm-ms 60000 --replay /tmp/tide_marks-qwen-14d-v18.jsonl --dump-events
+```
+
+它从第 1 天 06:00 推进到第 15 天 06:00，14 个 `life.day`、最终 revision 20361，Replay 交易摘要与源状态一致；EventLog 有 `npc.intent=98`、`npc.process_completed=92`、`npc.process_failed=4`、`reflection.committed=35`、`reflection.rejected=6`、`evolution.proposal_ready=1`、`evolution.approved=1`、`evolution.overlay_activated=1`，没有 `innovation.hypothesis_created` 或 Adoption 事件。4 次失败中 3 次是 Lorn 的 `repair_ferry`，已经满足持续问题的 Runtime 证据门槛，但 Qwen 生成的私有配方仍引用未注册叶节点或空 operation，均被拒绝；这证明拒绝边界有效，也明确暴露了模型协议可执行性缺口。
+
+该轮 Level 2 激活的是 `repair_ferry_facility` 的 `create_entity_archetype`，不是共享 Behavior Recipe；后续同一提案的重复激活尝试由 `duplicate_archetype` 拒绝。Provider usage 为 decision 缓存约 53.30%、reflection 约 63.65%、Level 2 约 72.74%，但仍出现 2 次 decision 与 6 次 reflection `finish_reason=length`，所以缓存命中不能替代结构化结果完整性。完整分阶段统计和最终状态见 [`qwen35-4b-llama-cpp-v18.json`](evidence/qwen35-4b-llama-cpp-v18.json)。
+
+随后提交的反思提示修正要求：当 `innovation_gate.eligible=true` 时只生成一个 `register_behavior_recipe`，根节点必须从 `allowed_leaf_nodes` 原样选择；失败计划名（例如 `repair_ferry`）不能伪装成叶节点，应该使用已登记的 `relieve_need` 并把计划 key 放进 `args.action`；`parameters` 必须是空 JSON Schema，`innovation_actions` 只能引用待处理假设。新一轮 v19 采用该修正并重新跑 14 日，只有在同一组长期门槛全部满足后才更新“完整闭环”结论。
+
 ## 恢复工作入口
 
 会话恢复时依次阅读本文件的“当前检查点”和“已完成能力记录”，再阅读 [design.md](design.md) 的“事实、意图与演化边界”“世界与社会的内在驱力模型”“NPC Runtime 与 World Intelligence”“Runtime 核心契约”。然后查看 `git status --short`，运行自动化验证命令，先修复当前工作包失败项，再继续下一项；不要为了通过测试删除功能或放宽断言。
