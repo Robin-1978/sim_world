@@ -1733,6 +1733,14 @@ ProviderResponse LlamaCppProvider::proposeEvolution(const Json& context,
         {"args", Json{{"type", "object"}}},
         {"max_ticks", Json{{"type", "integer"}, {"minimum", 0}}},
         {"children", Json{{"type", "array"}, {"items", Json{{"type", "object"}}}}}};
+    const auto registeredMetaActions = modelContext.value("content", Json::object()).value(
+        "registered_meta_actions", Json::array());
+    if (registeredMetaActions.is_array() && !registeredMetaActions.empty()) {
+        // The village seed path prefers one leaf. This content-revision
+        // stable enum prevents a small model from confusing a failed plan key
+        // with a Runtime operator while preserving the generic node shape.
+        node["properties"]["name"]["enum"] = registeredMetaActions;
+    }
 
     Json recipeOperation = Json::object();
     recipeOperation["type"] = "object";
