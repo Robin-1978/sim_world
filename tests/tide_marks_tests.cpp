@@ -3961,7 +3961,12 @@ void intelligence_profile_configures_decision_budgets() {
     if (profile.purposes.contains("reflection")) {
         expect(profile.purposes.at("reflection").policies.at("proposal").reasoningBudgetTokens == 256,
                "the current profile gives daily reflection its own bounded reasoning policy");
+        expect(profile.purposes.at("reflection").policies.at("proposal").maxTokens == 4096,
+               "daily reflection has enough output budget for one complete bounded tool call");
     }
+    expect(profile.purposes.at("npc_evolution").policies.at("proposal").maxTokens == 3072 &&
+               profile.purposes.at("world_evolution").policies.at("proposal").maxTokens == 4096,
+           "evolution proposal budgets cover complete structured candidates without changing Runtime validation");
     const auto provider = makeProviderFromProfile(profile, "mock");
     expect(provider->name() == "mock", "the profile provider can be overridden for offline tests");
 }
