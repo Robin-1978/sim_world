@@ -1429,6 +1429,25 @@ void decision_context_separates_authored_catalog_from_eligible_plans() {
                rationPlan->value("label", "").find("Offer one ration") != std::string::npos,
            "the authored plan catalog includes a short semantic description");
 
+    auto activeGoalSnapshot = service.snapshotJson();
+    activeGoalSnapshot["npcs"]["mira"]["activity"] = Json{
+        {"status", "active"},
+        {"goal", Json{{"id", "goal-context-test"}, {"intent", "inspect the grain stores"},
+                       {"target", "reveal_clue"}, {"priority", 0.7}, {"status", "active"},
+                       {"created_at", 0}, {"deadline", 180}, {"reason", "persistent shortage"}}},
+        {"process", Json{{"id", "process-context-test"}, {"goal_id", "goal-context-test"},
+                          {"action_id", "reveal_clue"}, {"recipe_id", "reveal_clue"},
+                          {"plan_id", "reveal_clue"}, {"trigger", "test"}, {"started_at", 0},
+                          {"completes_at", 20}, {"progress", 0.5}, {"status", "running"},
+                          {"behavior_node_id", "reveal_clue"}, {"behavior_step", 1},
+                          {"behavior_status", "running"}, {"parameters", Json::object()}}}};
+    const auto activeGoalService = WorldService::fromSnapshot(activeGoalSnapshot);
+    const auto activeGoalContext = activeGoalService.decisionContext("mira");
+    expect(activeGoalContext.currentActivity.at("active_goal").at("status") == "active" &&
+               activeGoalContext.currentActivity.at("active_goal").at("priority") == 0.7 &&
+               activeGoalContext.currentActivity.at("active_process").at("progress") == 0.5,
+           "the decision projection preserves active goal status, priority, and process progress");
+
     auto ferrySnapshot = service.snapshotJson();
     ferrySnapshot["resources"]["boat_integrity"]["amount"] = 100;
     auto ferryBlocked = WorldService::fromSnapshot(ferrySnapshot);
