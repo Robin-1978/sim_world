@@ -451,6 +451,27 @@ Json normalizeEvolutionProposal(Json proposal, const Json& context, const std::s
                                                     {"required", Json::array()}, {"additionalProperties", false}};
                 }
             }
+            // Small models sometimes put the JSON-Schema meta fields inside
+            // `parameters.properties` during a repair.  When that shape has
+            // no actual binding names, canonicalize it to the registered
+            // empty input schema.  This does not invent a value or capability;
+            // any non-empty property map remains subject to full validation.
+            const auto parameters = operation.value("parameters", Json::object());
+            const auto properties = parameters.value("properties", Json::object());
+            const auto required = parameters.value("required", Json::array());
+            const bool nestedEmptySchema = parameters.is_object() && properties.is_object() &&
+                                           properties.size() == 1 && properties.contains("required") &&
+                                           required.is_array() &&
+                                           std::find(required.begin(), required.end(), "type") != required.end() &&
+                                           std::find(required.begin(), required.end(), "properties") != required.end();
+            const bool missingEmptySchema = parameters.is_object() && properties.is_object() &&
+                                            properties.empty() &&
+                                            (!parameters.contains("type") || !parameters.contains("required") ||
+                                             !parameters.contains("additionalProperties"));
+            if (nestedEmptySchema || missingEmptySchema) {
+                operation["parameters"] = Json{{"type", "object"}, {"properties", Json::object()},
+                                                {"required", Json::array()}, {"additionalProperties", false}};
+            }
         }
     }
     return proposal;
