@@ -1370,8 +1370,10 @@ ProviderResponse LlamaCppProvider::decide(const DecisionContext& context, const 
                                                {"function", Json{{"name", "understand_utterance"},
                                                                   {"description", "Interpret the player's utterance."},
                                                                   {"parameters", understandingSchema}}}}})},
-                {"tool_choice", Json{{"type", "function"},
-                                      {"function", Json{{"name", "understand_utterance"}}}}}};
+                {"tool_choice", endpointConfig.providerType == "llama_cpp"
+                                     ? Json("required")
+                                     : Json{{"type", "function"},
+                                            {"function", Json{{"name", "understand_utterance"}}}}}};
             configureDecoding(understandingRequest, understandingPolicy->second);
             auto understood = requestProviderJson(endpointConfig, understandingRequest, "understanding",
                                                   "understand_utterance");
@@ -1514,11 +1516,18 @@ ProviderResponse LlamaCppProvider::decide(const DecisionContext& context, const 
                     {"function", Json{{"name", "repair_action"},
                                        {"description", "Return only changed fields for the rejected action choice."},
                                        {"parameters", repairSchema}}}};
+    const bool decisionPatchMode = !validationFeedback.empty();
+    const Json decisionTools = endpointConfig.providerType == "llama_cpp"
+                                   ? (decisionPatchMode ? Json::array({repairTool}) : Json::array({chooseTool}))
+                                   : Json::array({chooseTool, repairTool});
+    Json decisionToolChoice = "required";
+    if (endpointConfig.providerType != "llama_cpp") {
+        decisionToolChoice = decisionPatchMode
+                                 ? Json{{"type", "function"}, {"function", Json{{"name", "repair_action"}}}}
+                                 : Json{{"type", "function"}, {"function", Json{{"name", "choose_action"}}}};
+    }
     Json request{{"model", endpointConfig.model}, {"temperature", endpointConfig.temperature}, {"max_tokens", policy.maxTokens},
-                 {"messages", messages}, {"tools", Json::array({chooseTool, repairTool})},
-                 {"tool_choice", validationFeedback.empty()
-                                      ? Json{{"type", "function"}, {"function", Json{{"name", "choose_action"}}}}
-                                      : Json{{"type", "function"}, {"function", Json{{"name", "repair_action"}}}}}};
+                 {"messages", messages}, {"tools", decisionTools}, {"tool_choice", decisionToolChoice}};
     configureDecoding(request, policy);
     auto completed = requestProviderJson(endpointConfig, request, "decision",
                                          validationFeedback.empty() ? "choose_action" : "repair_action");
@@ -1862,31 +1871,31 @@ ProviderResponse LlamaCppProvider::proposeEvolution(const Json& context,
     // JSON-content parser remains as an interoperability path for older
     // llama.cpp builds that ignore tools but honor structured output.
     const std::string repairToolName = evolutionLevel == "level1" ? "repair_npc_change" : "repair_world_change";
-    request["tools"] = Json::array({Json{{"type", "function"},
-                                          {"function", Json{{"name", toolName},
-                                                             {"description", evolutionLevel == "level1"
-                                                                                 ? "Suggest one private change for yourself: strategy, schedule, or a private behavior recipe."
-                                                                                 : "Suggest one shared change for the world: a declarative behavior recipe or entity archetype."},
-                                                             {"parameters", responseSchema},
-                                                             // Innovation is optional.  OpenCode Go's strict
-                                                             // dialect requires every property to be required,
-                                                             // which would force no-change proposals to emit a
-                                                             // large unused envelope.  Keep the wire envelope
-                                                             // permissive and let Runtime perform the complete
-                                                             // schema, scope and lifecycle validation.
-                                                             {"strict", false}}}},
-                                         Json{{"type", "function"},
-                                              {"function", Json{{"name", repairToolName},
-                                                                 {"description", "Return only the changed root fields in set; Runtime merges and validates the complete proposal."},
-                                                                 {"parameters", rootPatchSchema()},
-                                                                 {"strict", false}}}}});
+    const Json proposalTool{{"type", "function"},
+                            {"function", Json{{"name", toolName},
+                                               {"description", evolutionLevel == "level1"
+                                                                    ? "Suggest one private change for yourself: strategy, schedule, or a private behavior recipe."
+                                                                    : "Suggest one shared change for the world: a declarative behavior recipe or entity archetype."},
+                                               {"parameters", responseSchema},
+                                               {"strict", false}}}};
+    const Json repairTool{{"type", "function"},
+                          {"function", Json{{"name", repairToolName},
+                                             {"description", "Return only the changed root fields in set; Runtime merges and validates the complete proposal."},
+                                             {"parameters", rootPatchSchema()},
+                                             {"strict", false}}}};
     // Explicitly select the proposal function on the first pass.  The repair
     // function is advertised in the same stable tool prefix for caching, but
     // must never be chosen before a previous candidate exists.
     const bool patchMode = validationFeedback.value("repair_mode", "") == "patch";
-    request["tool_choice"] = patchMode
-                                  ? Json{{"type", "function"}, {"function", Json{{"name", repairToolName}}}}
-                                  : Json{{"type", "function"}, {"function", Json{{"name", toolName}}}};
+    request["tools"] = endpointConfig.providerType == "llama_cpp"
+                            ? (patchMode ? Json::array({repairTool}) : Json::array({proposalTool}))
+                            : Json::array({proposalTool, repairTool});
+    request["tool_choice"] = "required";
+    if (endpointConfig.providerType != "llama_cpp") {
+        request["tool_choice"] = patchMode
+                                      ? Json{{"type", "function"}, {"function", Json{{"name", repairToolName}}}}
+                                      : Json{{"type", "function"}, {"function", Json{{"name", toolName}}}};
+    }
     auto configureDecoding = [&endpointConfig](Json& target, const DecisionPolicy& selectedPolicy) {
         if (endpointConfig.providerType == "openai_compatible") {
             target["reasoning_effort"] = selectedPolicy.reasoningEffort.empty()
@@ -2115,28 +2124,39 @@ ProviderResponse LlamaCppProvider::proposeReflection(const Json& context,
     const Json stableContext{{"catalog", context.value("content", Json::object())}};
     const bool patchMode = validationFeedback.value("repair_mode", "") == "patch";
     const std::string repairToolName = "repair_daily_reflection";
+    const Json reflectionTools = endpointConfig.providerType == "llama_cpp"
+                                     ? (patchMode
+                                            ? Json::array({Json{{"type", "function"},
+                                                               {"function", Json{{"name", repairToolName},
+                                                                                   {"description", "Return only changed reflection root fields in set; Runtime merges and validates the complete result."},
+                                                                                   {"parameters", rootPatchSchema()},
+                                                                                   {"strict", false}}}}})
+                                            : Json::array({Json{{"type", "function"},
+                                                               {"function", Json{{"name", "daily_reflection"},
+                                                                                   {"description", "Return one bounded daily reflection result."},
+                                                                                   {"parameters", schema},
+                                                                                   {"strict", false}}}}}))
+                                     : Json::array({Json{{"type", "function"},
+                                                          {"function", Json{{"name", "daily_reflection"},
+                                                                              {"description", "Return one bounded daily reflection result."},
+                                                                              {"parameters", schema},
+                                                                              {"strict", false}}}},
+                                                    Json{{"type", "function"},
+                                                          {"function", Json{{"name", repairToolName},
+                                                                              {"description", "Return only changed reflection root fields in set; Runtime merges and validates the complete result."},
+                                                                              {"parameters", rootPatchSchema()},
+                                                                              {"strict", false}}}}});
+    Json reflectionToolChoice = "required";
+    if (endpointConfig.providerType != "llama_cpp") {
+        reflectionToolChoice = patchMode
+                                   ? Json{{"type", "function"}, {"function", Json{{"name", repairToolName}}}}
+                                   : Json{{"type", "function"}, {"function", Json{{"name", "daily_reflection"}}}};
+    }
     Json request{
         {"model", endpointConfig.model}, {"temperature", endpointConfig.temperature}, {"max_tokens", policy.maxTokens},
         {"messages", layeredMessages(systemPrompt, stableContext.at("catalog"),
                                       modelProjectionText(modelContext))},
-        {"tools", Json::array({Json{{"type", "function"},
-                                     {"function", Json{{"name", "daily_reflection"},
-                                                        {"description", "Return one bounded daily reflection result."},
-                                                        {"parameters", schema},
-                                                        // Runtime performs the complete nested validation.  This schema
-                                                        // contains optional and recursive innovation fields that are not
-                                                        // accepted by every OpenAI-compatible strict-schema dialect;
-                                                        // keep the tool envelope permissive and validate every returned
-                                                        // field at the Runtime boundary.
-                                                        {"strict", false}}}},
-                                    Json{{"type", "function"},
-                                         {"function", Json{{"name", repairToolName},
-                                                            {"description", "Return only changed reflection root fields in set; Runtime merges and validates the complete result."},
-                                                            {"parameters", rootPatchSchema()},
-                                                            {"strict", false}}}}})},
-        {"tool_choice", patchMode
-                             ? Json{{"type", "function"}, {"function", Json{{"name", repairToolName}}}}
-                             : Json{{"type", "function"}, {"function", Json{{"name", "daily_reflection"}}}}}};
+        {"tools", reflectionTools}, {"tool_choice", reflectionToolChoice}};
     appendValidationContinuation(request["messages"], validationFeedback,
                                  "daily_reflection", "previous_result");
     if (endpointConfig.providerType == "openai_compatible") {
