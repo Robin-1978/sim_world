@@ -42,7 +42,7 @@
         "thinking": true,
         "reasoning_budget_tokens": 256,
         "reasoning_effort": "medium",
-        "max_tokens": 2048
+        "max_tokens": 3072
       }
     },
     "reflection": {
@@ -51,7 +51,7 @@
         "thinking": true,
         "reasoning_budget_tokens": 256,
         "reasoning_effort": "medium",
-        "max_tokens": 3072
+        "max_tokens": 4096
       }
     },
     "world_evolution": {
@@ -60,7 +60,7 @@
         "thinking": true,
         "reasoning_budget_tokens": 512,
         "reasoning_effort": "high",
-        "max_tokens": 3072
+        "max_tokens": 4096
       }
     }
   }
