@@ -1880,6 +1880,8 @@ ProviderResponse LlamaCppProvider::proposeReflection(const Json& context,
         "Return exactly one daily_reflection function call and no prose. "
         "Cite only supplied event sequences; keep cognition updates small. "
         "Do not apply, approve or claim success for any proposal. "
+        "If STATE.activity.innovation_adoptions contains observed_metrics or metric_evaluation, treat them as Runtime measurements from an earlier adoption horizon. "
+        "Use only the supplied event sequences to record a concise experience, memory, strategy or goal consequence when supported; never invent a metric or infer success from overlay activation alone. "
         "Innovation is optional: propose at most one private hypothesis only when the Runtime gate and repeated-failure evidence allow it; otherwise return an empty list. "
         "When innovation_gate.eligible is true, emit exactly one small register_behavior_recipe operation. "
         "Its root must be a single meta_action leaf with children=[]; root.name must be copied exactly from innovation_gate.allowed_leaf_nodes. "
