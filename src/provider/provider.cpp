@@ -408,11 +408,48 @@ Json normalizeEvolutionProposal(Json proposal, const Json& context, const std::s
             operation.erase("person");
         } else if (operation.value("operation", "") == "register_behavior_recipe" &&
                    operation.contains("available_to") && operation["available_to"].is_array()) {
+            if (level == "level2" && operation["available_to"].size() == 1 &&
+                operation["available_to"].at(0).is_string()) {
+                const auto token = operation["available_to"].at(0).get<std::string>();
+                if (token.empty() || token == "self" || token == "me") {
+                    // A shared proposal has no private self. When a small
+                    // model emits the private token or an empty placeholder,
+                    // bind it to the complete public actor set from this
+                    // captured context. The Runtime still validates every
+                    // resulting actor against the active Content Pack.
+                    Json allActors = Json::array();
+                    const auto people = context.value("npcs", Json::object());
+                    if (people.is_object()) {
+                        for (auto item = people.begin(); item != people.end(); ++item) allActors.push_back(item.key());
+                    }
+                    if (!allActors.empty()) operation["available_to"] = std::move(allActors);
+                }
+            }
             for (auto& person : operation["available_to"]) {
                 if (person.is_string()) person = resolvePersonKey(context, person.get<std::string>());
             }
             if (level == "level1" && operation["available_to"].empty()) {
                 operation["available_to"] = Json::array({context.value("target_npc", "")});
+            }
+            if (level == "level2" && operation.contains("root") && operation["root"].is_object()) {
+                auto& root = operation["root"];
+                const auto rootName = root.value("name", "");
+                const auto registered = context.value("content", Json::object()).value(
+                    "registered_meta_actions", Json::array());
+                const auto recipeIds = context.value("content", Json::object()).value(
+                    "behavior_recipe_ids", Json::array());
+                const bool hasRelieveNeed = registered.is_array() &&
+                                            std::find(registered.begin(), registered.end(), "relieve_need") !=
+                                                registered.end();
+                const bool isAuthoredPlan = recipeIds.is_array() &&
+                                            std::find(recipeIds.begin(), recipeIds.end(), rootName) != recipeIds.end();
+                if (hasRelieveNeed && isAuthoredPlan && root.value("type", "") == "meta_action" &&
+                    root.value("children", Json::array()).is_array() && root.at("children").empty()) {
+                    root["name"] = "relieve_need";
+                    root["args"] = Json{{"action", rootName}};
+                    operation["parameters"] = Json{{"type", "object"}, {"properties", Json::object()},
+                                                    {"required", Json::array()}, {"additionalProperties", false}};
+                }
             }
         }
     }
