@@ -336,6 +336,35 @@ ctest --test-dir build --output-on-failure
 
 三条单阶段命令使用本地 Qwen；决策和 Level 1 已观察到可接受结果，Level 2 仍记录为结构化候选修复问题。当前 Codex 子进程在分别 source `/home/robin/.bashrc` 和 `/home/robin/.bash_profile` 后都没有发现 `MY_MY_API`，因此 beam-free 只能报告 `provider_auth_missing`，不能混入模型质量或缓存命中结论。恢复凭据后必须用同一探针和至少 14 日治理长跑重新记录 `finish_reason`、repair、缓存、公共证据门槛、Overlay、共享配方 Adoption 及后续效果反思。
 
+### 最新单阶段结论与下一步查询工具工作包
+
+按用户要求停止未完成的 14 日长跑；未产生的长跑输出不计入证据。当前真实本地 Qwen 单阶段结论如下：
+
+| 阶段 | 当前结论 | 仍未证明 |
+|---|---|---|
+| Decision | 通过：Eve 在 4 个 eligible 计划中选择 `reveal_clue`，证据引用有效，Runtime 启动持续 Process；普通 Tick 没有再次请求 LLM | 多日上下文变化下是否保持选择质量 |
+| Reflection | 结构和来源校验能提交认知结果，非法可选创新会被跳过或进入 bounded repair | 小模型会用真实事件写出过宽泛的推断，长期认知语义是否有用仍需评估 |
+| Level 1 | 通过单阶段结构校验：模型用显示名称 Eve 提交日程，Runtime 映射目标主体并验证 | 长时重复失败证据下是否形成私有 hypothesis、自动激活、Adoption 和效果反馈 |
+| Level 2 | 尚未通过质量门槛：空参数 Schema 归一化后仍出现不完整或未登记指标的 `test_plan`；自动队列已拒绝无公共问题证据的提案 | 共享 recipe 进入目录、被选择执行、完成 horizon 并被后续 Reflection 评估 |
+
+因此下一步不是放宽 Level 2 校验，而是实现设计文档中的三个只读感知工具：`observe_surroundings`、`recall_personal_knowledge`、`review_known_relationship`。它们先以固定 schema 和 Runtime actor-scope 验证接入单阶段决策，设置 2～3 次查询上限、deadline、重复查询拒绝和 tool observation 审计；导航、调查和交流仍走现有 BT/Process，不提供瞬移或隐式记忆写入。完成每个工具后先运行构建、CTest、单阶段真实模型请求和请求 payload 审计，再提交代码；最后才把多轮 ReAct 会话接到三 NPC 长时回归。
+
+当前 shell 直接以非交互模式 source `/home/robin/.bashrc` 时不会加载 `MY_MY_API`；必须使用一个交互 shell，再 source 文件（只检查存在性，不打印密钥）：
+
+```bash
+bash --noprofile --norc -ic 'source /home/robin/.bashrc >/dev/null 2>&1 || true; [[ -n ${MY_MY_API+x} && -n "$MY_MY_API" ]] && echo MY_MY_API=present'
+```
+
+按这个方式重新执行 Decision 探针后，beam-free 已真实返回并通过 Runtime：`choose_action(reveal_clue)`，4 个作者计划、4 个当前可执行计划，`memory_1` 引用有效，Process 已启动；usage 为 `prompt_tokens=2041`、`completion_tokens=343`（其中 reasoning 250），服务回报 `cached_tokens=0`。这次结果证明了 beam 请求和认证链路已经恢复，也暴露出当前这个短请求没有缓存命中；不能把它误写成高缓存率。
+
+后续所有真实命令都必须在同一个交互 shell 中 source 后运行，例如：
+
+```bash
+bash --noprofile --norc -ic 'source /home/robin/.bashrc >/dev/null 2>&1 || true; TIDE_MARKS_DEBUG_PROVIDER=1 ./build/tide_marks_headless --profile /home/robin/.sim_world/config/intelligence-profile.json --provider profile --probe decision --probe-target eve --wait-llm-ms 60000'
+```
+
+恢复凭据后，优先用 beam-free 重跑 Decision、Reflection、Level 1、Level 2 四个单阶段探针，逐步通过后再考虑长时运行；每次记录 `finish_reason`、repair、usage/cache、Runtime 接受质量和 Overlay/Adoption，不能只记录进程退出码。
+
 ## 恢复工作入口
 
 会话恢复时依次阅读本文件的“当前检查点”和“已完成能力记录”，再阅读 [design.md](design.md) 的“事实、意图与演化边界”“世界与社会的内在驱力模型”“NPC Runtime 与 World Intelligence”“Runtime 核心契约”。然后查看 `git status --short`，运行自动化验证命令，先修复当前工作包失败项，再继续下一项；不要为了通过测试删除功能或放宽断言。
