@@ -302,6 +302,14 @@ TIDE_MARKS_DEBUG_PROVIDER=1 ./build/tide_marks_headless --days 14 \
 
 随后提交的反思提示修正要求：当 `innovation_gate.eligible=true` 时只生成一个 `register_behavior_recipe`，根节点必须从 `allowed_leaf_nodes` 原样选择；失败计划名（例如 `repair_ferry`）不能伪装成叶节点，应该使用已登记的 `relieve_need` 并把计划 key 放进 `args.action`；`parameters` 必须是空 JSON Schema，`innovation_actions` 只能引用待处理假设。新一轮 v19 采用该修正并重新跑 14 日，只有在同一组长期门槛全部满足后才更新“完整闭环”结论。
 
+### v19 十四日长跑结果与当前阻塞
+
+v19 使用上述提示修正前后的构建完成了 14 个模拟日，从第 1 天 06:00 推进到第 15 天 06:00；最终 Runtime revision 为 20363，`llm-drain` 为 `consumed=260 pending=0`，Replay 与源状态一致。Provider 共处理 153 次 decision、98 次 reflection 和 11 次 Level 2 world-evolution 请求；decision 与 Level 2 全部返回完整 tool call，reflection 有 96 次完整 tool call 和 2 次 `finish_reason=length`。输入缓存证据按 `cached_tokens/prompt_tokens` 计算：decision 42.33%、reflection 57.40%、Level 2 62.79%，不能把这些数当成“95% 命中”，它们只说明当前稳定前缀被部分复用。
+
+事件链证明了真实长期运行、逐叶行为提交和认知游标前移：`life.day=14`、`npc.intent=138`、`npc.process_completed=132`、`npc.process_failed=4`、`npc.behavior_leaf_completed=158`、`reflection.committed=28`、`memory.reflected=20`、`experience.recorded=165`，且队列无残留。Runtime Governor 自动完成了两次 `evolution.proposal_ready → evolution.approved → evolution.overlay_activated`；两个 Overlay (`repair_ferry`、`repair_ferry_v2`) 都是 `create_entity_archetype`，没有进入 NPC 的共享行为目录。
+
+这轮仍不能称为完整自主演化闭环：没有 `innovation.hypothesis_created`，也没有 `innovation.adoption_started/completed/failed`；Level 1 的可选私有假设被反思输出中的叶节点/测试计划结构错误或证据引用错误拒绝，Level 2 的共享 recipe 也没有被生成并采用。该结论和完整分阶段统计保存在 [`qwen35-4b-llama-cpp-v19.json`](evidence/qwen35-4b-llama-cpp-v19.json)。下一步只修复可证明的机械投影问题（叶节点别名、私有 actor 归一化和指标结构归一化），不放宽 Runtime 的权限、证据、版本或事务校验；之后必须用新构建重新跑至少 14 日，并检查私有 Adoption 和共享 recipe Adoption 的完整链路。
+
 ## 恢复工作入口
 
 会话恢复时依次阅读本文件的“当前检查点”和“已完成能力记录”，再阅读 [design.md](design.md) 的“事实、意图与演化边界”“世界与社会的内在驱力模型”“NPC Runtime 与 World Intelligence”“Runtime 核心契约”。然后查看 `git status --short`，运行自动化验证命令，先修复当前工作包失败项，再继续下一项；不要为了通过测试删除功能或放宽断言。

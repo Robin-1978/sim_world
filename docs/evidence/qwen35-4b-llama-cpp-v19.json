@@ -1,0 +1,131 @@
+{
+  "kind": "real_model_long_run_evidence",
+  "schema_version": 1,
+  "run_id": "qwen35-4b-llama-cpp-v19",
+  "date": "2026-11-07",
+  "provider": {
+    "stage_requests": {
+      "understanding": 1,
+      "decision": 153,
+      "reflection": 98,
+      "evolution_level2": 11
+    },
+    "finish_reasons": {
+      "understanding:tool_calls": 1,
+      "decision:tool_calls": 153,
+      "reflection:tool_calls": 96,
+      "evolution_level2:tool_calls": 11,
+      "reflection:length": 2
+    },
+    "structured_repairs": 0,
+    "usage": {
+      "understanding": {
+        "requests": 1,
+        "prompt_tokens": 875,
+        "completion_tokens": 246,
+        "cached_tokens": 0,
+        "cache_ratio": 0.0
+      },
+      "decision": {
+        "requests": 153,
+        "prompt_tokens": 544272,
+        "completion_tokens": 43535,
+        "cached_tokens": 230398,
+        "cache_ratio": 0.423314
+      },
+      "reflection": {
+        "requests": 98,
+        "prompt_tokens": 590418,
+        "completion_tokens": 87705,
+        "cached_tokens": 338875,
+        "cache_ratio": 0.573958
+      },
+      "evolution_level2": {
+        "requests": 11,
+        "prompt_tokens": 49622,
+        "completion_tokens": 6346,
+        "cached_tokens": 31159,
+        "cache_ratio": 0.627927
+      }
+    }
+  },
+  "model": "Huihui-Qwen3.5-4B-abliterated.Q4_K_M",
+  "command": "TIDE_MARKS_DEBUG_PROVIDER=1 ./build/tide_marks_headless --days 14 --profile data/intelligence-profile.json --provider profile --wait-llm-ms 60000 --replay /tmp/tide_marks-qwen-14d-v19.jsonl --dump-events",
+  "replay": "/tmp/tide_marks-qwen-14d-v19.jsonl",
+  "duration_days": 14,
+  "final_simulation": "day 15 06:00",
+  "final_revision": 20363,
+  "llm_drain": {
+    "consumed": 260,
+    "pending": 0
+  },
+  "events": {
+    "action.resource": 14,
+    "drive.adapted": 167,
+    "evolution.approved": 2,
+    "evolution.overlay_activated": 2,
+    "evolution.proposal_ready": 2,
+    "evolution.proposal_rejected": 3,
+    "experience.observed": 146,
+    "experience.recorded": 165,
+    "innovation.hypothesis_rejected": 24,
+    "knowledge.asserted": 34,
+    "life.archive": 14,
+    "life.clue": 14,
+    "life.crossing": 14,
+    "life.day": 14,
+    "life.debt": 14,
+    "life.explain_ration": 14,
+    "life.ferry_decay": 14,
+    "life.protect_secret": 14,
+    "life.ration": 4,
+    "life.repair": 4,
+    "life.rest": 42,
+    "life.withhold": 14,
+    "memory.reflected": 20,
+    "need.critical": 6,
+    "need.deprived": 1008,
+    "need.relieved": 442,
+    "npc.behavior_leaf_completed": 158,
+    "npc.intent": 138,
+    "npc.intent_expired": 11,
+    "npc.intent_rejected": 2,
+    "npc.process_completed": 132,
+    "npc.process_failed": 4,
+    "npc.schedule_applied": 99,
+    "reflection.committed": 28,
+    "reflection.failed": 1,
+    "reflection.rejected": 13,
+    "reflection.update_rejected": 25,
+    "stimulus.habituated": 30,
+    "structure.ferry_closed": 14,
+    "structure.ferry_opened": 14,
+    "world.initialized": 1
+  },
+  "observed": {
+    "reflection_committed": 28,
+    "reflection_rejected": 13,
+    "reflection_failed": 1,
+    "reflection_update_rejected": 25,
+    "level2_proposal_ready": 2,
+    "level2_approved": 2,
+    "level2_overlay_activated": 2,
+    "innovation_adoption_started": 0,
+    "innovation_adoption_completed": 0,
+    "innovation_adoption_failed": 0,
+    "level1_hypothesis_created": 0,
+    "level1_hypothesis_rejected": 24
+  },
+  "conclusion": {
+    "runtime_long_run": true,
+    "reflection_and_level2_overlay_activation": true,
+    "level1_adoption": false,
+    "level2_shared_behavior_recipe_adoption": false,
+    "complete_autonomous_evolution_loop": false,
+    "notes": [
+      "The two activated Level 2 overlays were create_entity_archetype proposals (repair_ferry and repair_ferry_v2), not shared behavior recipes.",
+      "No innovation.adoption_started/completed/failed event occurred.",
+      "Runtime and Replay ended consistently with no pending provider work."
+    ]
+  }
+}
