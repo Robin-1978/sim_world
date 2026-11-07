@@ -5,7 +5,12 @@
 
 namespace tide_marks {
 
-TurnQueue::TurnQueue(IProvider& provider) : provider_(provider), worker_([this] { run(); }) {}
+TurnQueue::TurnQueue(IProvider& provider)
+    : provider_(provider), ownedEngine_(std::make_unique<LlmEngine>(provider)),
+      engine_(ownedEngine_.get()), worker_([this] { run(); }) {}
+
+TurnQueue::TurnQueue(LlmEngine& engine)
+    : provider_(engine.provider()), engine_(&engine), worker_([this] { run(); }) {}
 
 TurnQueue::~TurnQueue() {
     {
@@ -66,13 +71,13 @@ void TurnQueue::run() {
 
         ProviderResponse response;
         try {
-            response = provider_.decide(request.context, request.playerInput, request.validationFeedback);
+            response = engine_->decide(request.context, request.playerInput, request.validationFeedback);
         } catch (const std::exception& error) {
             response = ProviderResponse{false, {}, {}, std::string("provider_exception:") + error.what()};
         } catch (...) {
             response = ProviderResponse{false, {}, {}, "provider_exception:unknown"};
         }
-        TurnResult result{std::move(request), std::move(response), provider_.name()};
+        TurnResult result{std::move(request), std::move(response), engine_->name()};
         {
             std::lock_guard lock(mutex_);
             --inFlight_;

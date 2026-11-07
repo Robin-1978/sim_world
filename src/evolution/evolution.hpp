@@ -52,6 +52,7 @@ struct EvolutionProposalRequestResult {
     std::string message;
     std::string provider;
     EvolutionProposal proposal;
+    Json quality = Json::object();
 };
 
 struct EvolutionValidation {

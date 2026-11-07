@@ -9,6 +9,7 @@
 #include "npc/goal_selector.hpp"
 #include "navigation/path_planner.hpp"
 #include "provider/provider.hpp"
+#include "provider/llm_engine.hpp"
 #include "provider/turn_queue.hpp"
 #include "provider/intelligence_coordinator.hpp"
 #include "provider/evolution_queue.hpp"
@@ -260,6 +261,7 @@ private:
 
     WorldState state_;
     std::unique_ptr<IProvider> provider_;
+    std::unique_ptr<LlmEngine> llm_;
     std::unique_ptr<IntelligenceCoordinator> intelligence_;
     std::unique_ptr<EvolutionQueue> evolution_;
     std::unique_ptr<IWorldPersistence> persistence_;

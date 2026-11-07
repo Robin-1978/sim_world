@@ -23,8 +23,8 @@
 | 存档 schema 与事件因果链 | 已完成 | `world_state_json.*`, `save_schema_version=19`, `simulation_version=adaptive-runtime-1.21`, 事件 schema 4、稳定 `event_id`、事务 `correlation_id`、直接 `causation_sequence`、逐事件内容/模拟版本、Snapshot 因果与版本完整性校验、`event_sequence`, `instance_id`, `inventories`, `relationships`, `social_groups`, `exchange_contracts`, `NpcActivity` 聚合、`lastSimulationTick/lastDriveTick`、`definition_id` 引用、实例/内容版本校验与可重放 overlay 栈；运行态不复制角色定义 |
 | 内驱/需求模型 | 需求域是内容定义的标签，村庄默认四域、Glass Orchard 使用 stewardship/ecological；`DriveEvaluation` 统一 urgency、effective weight、预期满足、证据置信度和效用贡献，同一行动满足多个需求时逐项求和；内容定义的 `private_traits`/`trait_effects` 已进入有界非线性偏好计算，显式满足配方和有界预期适应已实现，安全事实已支持冲突/威胁/防守/撤离/修复并通过 Stimulus 投射 | `src/npc/drive_system.*`, `src/npc/goal_selector.*`, `DecisionContext.privateTraits`, `NeedContent`, `NeedState`, `need.*` events, `tests/fixtures/glass-orchard-pack` |
 | 外驱/结构上下文 | 已实现结构化 Stimulus/Constraint、到期、习惯化和快照；结构演化治理、沙箱和版本化激活均已接入 | `DecisionContext.stimuli`, `constraints`, `WorldService::projectStimuli`, `src/evolution/evolution.*` |
-| LLM 解释与权衡 | 同步对话/自驱提案、channel 策略、Qwen 结构化输出、两阶段话语理解、失败关闭和异步 TurnQueue 已完成；`DecisionContextProjector` 按主体可见性和内容声明预算拆成 `worldSnapshot/selfState/planCatalog`，候选计划暴露 BT 摘要与参数 Schema；意图参数或声明字段校验失败最多反馈修正一次，演化使用强制 function call 且校验错误最多反馈修正两次；`runtime_metadata` 单独承载实例/内容/提示/Revision 审计身份，不污染 NPC 世界事实投影 | `src/provider/decision_context_projector.*`, `IntentProposal.parameters`, `DecisionContext.runtimeMetadata`, `IProvider`, `TurnQueue`, `decision_channels`, `WorldService::converse/deliberate/pumpAsyncTurns` |
-| 模型交互投影与工具契约 | 已完成第一阶段：Provider 把模型输入拆为稳定 `CATALOG` 前缀和动态 `TASK/STATE/EVIDENCE/OPTIONS` 分区；人物、地点和连接使用内容显示名称/类型/标签，内部 ID 只在 Runtime 解析和审计层；动态候选不再生成 schema enum，function/tool schema 按用途固定；修正请求保留第一轮 assistant tool call，以结构化 observation 追加错误并只返回最小 patch；系统提示使用第二人称任务要求，不向模型暴露 Provider/Revision、目标主体 ID 或工程层级术语。下一步是补齐名称解析测试、完整请求脱敏 dump 和真实 beam-free 长跑缓存/退化指标 | `src/provider/provider.cpp`, `src/provider/decision_context_projector.cpp`, `docs/design.md` 的“LLM 交互契约与模型可读投影” |
+| LLM 解释与权衡 | `LlmEngine` 已统一同步/异步 Provider 调用，并把决策、反思、Level 1、Level 2 作为独立 Agent 合约；`DecisionContextProjector` 生成带 capture/task/world/self/evidence/drives/constraints/options 的 canonical `function_context`，Provider 只从该桥接生成脱敏模型投影；每个结果带 input/output/runtime/final disposition 质量报告，Runtime 仍是唯一提交者。结构错误最多走有界 repair，错误类型的模型 JSON fail closed。真实 Qwen 长跑本轮未重新执行，不能用 Mock 回归替代真实模型质量结论 | `src/provider/llm_engine.*`, `src/provider/decision_context_projector.*`, `IntentProposal.parameters`, `DecisionContext.functionContext`, `TurnQueue`, `EvolutionQueue`, `WorldService::converse/deliberate/pumpAsyncTurns` |
+| 模型交互投影与工具契约 | 已完成当前协议：Provider 把 canonical `function_context` 转成稳定 `CATALOG` 前缀和动态 `TASK/STATE/EVIDENCE/OPTIONS` 分区；人物、地点和连接使用内容显示名称/类型/标签，内部 ID 只在 Runtime 解析和审计层；动态候选不再生成 schema enum，function/tool schema 按用途固定；修正请求保留第一轮 assistant tool call，以结构化 observation 追加错误并只返回最小 patch；系统提示不暴露 Provider/Revision、目标主体 ID 或工程层级术语。仍需重新执行真实 beam-free 长跑来测量缓存与退化指标 | `src/provider/provider.cpp`, `src/provider/decision_context_projector.cpp`, `src/provider/llm_engine.*`, `docs/design.md` 的“LLM 交互契约与模型可读投影” |
 | 长过程执行 | 数据驱动时长、单一活动槽、配方声明的输入预留、完成/挂起/恢复事件和 Snapshot 恢复均已实现；挂起释放预留，刺激清除且资源可用时按原计划恢复并顺延完成时间；配置允许的高优先级过程可抢占低优先级预留，整组仲裁原子提交；Goal、Process、FSM、BT 是同一活动的四个投影 | `ProcessExecution.priority/preemptionPolicy`, `NpcActivity`, `reservation_mode`, `WorldService::planResourcePreemption`, `src/npc/state_machine.*` |
 | 通用资源与实例活动 | 通用资源数量、可选输入预留、声明式抢占、实体库存、资源转移、生产、原子交易、承诺和定时 Activity 已实现；Activity 可组合已注册 operator 并在嵌套事务中失败补偿 | `ResourceContent`, `ResourceState(amount,reserved)`, `WorldState.inventories`, `GameInstanceContent.inventoryInitial`, `reservation_mode`, `priority`, `preemption_policy`, `tradeResources`, `ActivityContent`；承诺关系增量与重谈时长已由 `promise_policy` 驱动 |
 | 社会关系与组织 | 已实现 NPC/玩家/组织四轴关系、声明式社会组成员与指标、交易和快照恢复；港区与 Glass Orchard 分别使用自己的组织、阵营和制度事实，没有 Runtime 特例 | `NpcState.relationships`, `WorldState.socialGroups`, `SocialGroupContent`, `relationship.adjust`, `trade.execute`, `tests/fixtures/port-pack`, `tests/fixtures/glass-orchard-pack` |
@@ -73,7 +73,7 @@
 - NPC 普通决策选择完整的已登记 BT 计划，不直接选择元动作；新 BT 只能由 Level 1/2 的 `register_behavior_recipe` 提案创建，必须经过节点/operator 引用校验和 Runtime Governor 自动预检/批准。
 - 行为配方支持内容声明的短 `description`，会随稳定计划目录投影给模型；Overlay 新增的配方也必须携带可观察结果描述，避免模型只凭 `plan_id` 猜语义。描述不赋予执行权限，完整 BT 和实际效果仍由 Runtime 校验与执行。
 - 行为参数由内容声明 JSON Schema；动态 `goto` 目标通过 `{"bind":"parameter_name"}` 绑定，Runtime 校验实体生命周期、权限和拓扑后才执行，并把已接受参数保存到 `ProcessExecution`。
-- Level 1/Level 2 的真实 Qwen function-call 回归均已通过；Level 1 返回策略 Overlay，Level 2 返回声明式内容/能力提案。Provider 校验失败最多触发两次带 `code/message/path` 的修正请求，超过次数失败关闭；bounded overlay 由 Runtime Governor 自动批准，不等待人工审批。
+- 历史证据目录包含真实 Qwen function-call 探针和长跑，但它们只代表对应旧构建、凭据和配置下的观测，不能作为本次 Engine 重构后的通过结论。当前代码由 `LlmEngine` 统一附加质量报告；Provider 校验失败最多触发两次带 `code/message/path` 的修正请求，超过次数失败关闭；bounded overlay 由 Runtime Governor 自动批准，不等待人工审批。重新获得模型凭据后，必须用最新构建按四个 Agent 阶段分别重跑探针和至少 14 日长跑。
 - 对话与自驱由 `decision_channels` 声明；通道属性、话语权限、事件/记忆投影和 Provider 策略不再依赖 trigger 字符串分支。
 - 嵌套配方失败只回滚自己的保存点，不会把所在世界时间步一起恢复；快照回滚不复制不可变事件历史。
 - 冲突与安全 operator 的 attack、sabotage、threaten、defend、evacuate、repair 均覆盖事实变化、主事件与 Snapshot；关闭的 authored topology 会阻止移动，生产输入不足或输出超重不会留下部分资源或事件。
@@ -168,7 +168,7 @@ Evolution Proposal Schema、提案库、EventLog 来源事实、回放沙箱、�
 | 内驱：需求衰减、临界、满足、预期适应、多需求排序 | 纵向完成 | `DriveEvaluation` 已进入排序和 LLM 上下文；后续增加成本/风险的通用内容字段 |
 | 外驱与结构：Stimulus、Constraint、权限、异常和安全事实 | 纵向完成 | 继续扩展可声明事实类型，不用文本关键词代替模型理解 |
 | NPC 活动生命周期：Goal / ProcessExecution / FSM / BT 单一活动槽 | 纵向完成 | 保持 `NpcActivity` 为唯一阶段所有者；候选 Goal 集合是后续扩展 |
-| LLM Intelligence：话语理解、权衡、意图、异步队列、截止和重新校验 | 纵向完成 | 真实 Qwen 对话、自驱、Level 1/2 已验证；自动演化日边界由配置驱动并经过异步 Queue、当前事实校验和 Sandbox；不让 Provider 写事实 |
+| LLM Intelligence：话语理解、权衡、意图、异步队列、截止和重新校验 | Runtime/Mock 纵向完成；真实模型待重跑 | `LlmEngine`、四类 Agent contract、canonical function context、质量报告、异步 Queue、当前事实校验和 Governor 已由 CTest 与 deterministic Mock 回归覆盖；本次重构后的真实 Qwen 对话、自驱、Level 1/2 尚未重新验证，不把历史长跑当作当前通过证据 |
 | 小村庄因果验证 | 纵向完成 | 资源→需求→意图→行动→关系/记忆→次日选择闭环已覆盖 |
 | 社会与通用 operator | 纵向完成 | 合同、交易、生产、移动、安全、知识/经验和资源仲裁已有最小切片 |
 | World Intelligence 演化治理 | 纵向完成 | Proposal→Validate→Sandbox→Approve→Overlay→Observe 已覆盖；Runtime Core 不在线热改 |
@@ -364,6 +364,21 @@ bash --noprofile --norc -ic 'source /home/robin/.bashrc >/dev/null 2>&1 || true;
 ```
 
 恢复凭据后，优先用 beam-free 重跑 Decision、Reflection、Level 1、Level 2 四个单阶段探针，逐步通过后再考虑长时运行；每次记录 `finish_reason`、repair、usage/cache、Runtime 接受质量和 Overlay/Adoption，不能只记录进程退出码。
+
+### 2026-11-07 LlmEngine 与 canonical function context 重构
+
+本轮把 Provider 调用收口到 `src/provider/llm_engine.*`。四个阶段现在有独立的质量 contract：`decision_agent`、`reflection_agent`、`level1_evolution_agent` 和 `level2_evolution_agent`。`DecisionContextProjector` 生成单一 canonical `function_context`，包含 capture、task、world、self、activity、evidence、drives、constraints 和 options；调用入口确定 channel、trigger 和玩家输入后刷新 task。Provider 从该 envelope 生成脱敏模型投影，移除主体/Process/Goal/Revision 等内部身份和其他主体私有字段，保留主体自己的私有偏好、认知和作者计划输出词汇。Level 1/2 与 Reflection 也从各自的 function context 适配模型投影，避免旧的平行上下文绕过质量边界。
+
+每次 Provider 返回都附带 `input_quality`、`output_quality`、`runtime_validation`、`repair_attempt` 和 `final_disposition`。Runtime 接受、拒绝、批准、反思提交和异步审计会把权威结果合并回质量报告；headless `--probe` 同时显示模型候选、Runtime 校验和最终执行/采用证据。质量评估对错误 JSON 类型 fail closed， malformed reflection identity 只进入三次有界 repair/rejection，不会让质量检查器抛异常或把验证拒绝误报为 transport failure。
+
+新增 deterministic 回归覆盖 canonical context 的 Revision/主体隔离、对话 task 刷新、模型不可见的私有边界，以及四个阶段质量报告的输入/输出拆分和 malformed output 拒绝。验证命令及结果：
+
+```text
+cmake --build --preset default -j2
+ctest --test-dir build --output-on-failure   # 100% tests passed (5/5 CTest targets)
+```
+
+本轮已使用本地 Qwen 端点完成 Decision、Reflection、Level 1、Level 2 四个单阶段探针和一日 smoke。每个候选同时记录了 C++ contract 结果和独立 `quality_agent` 的语义审查；例如 Decision 的 `contract_score=1.0`、`semantic_quality.status=passed`，且 `evidence_refs` 经过 Runtime 引用校验。这里的语义 verdict 仍是非权威模型证据，不能替代后续执行效果。Level 2 探针的结构和语义审查可以通过，但公共问题证据数为 0，因此 `automatic_governor_admissible=false`，没有自动激活；这不是“演化成功”。一日 smoke 推进到第二天、队列清空并产生真实 Decision/Reflection 审计，但尚未证明完整的 `hypothesis → Governor approval → Overlay activation → adoption → process completion → horizon metrics → later reflection` 闭环。下一步仍需构造带真实重复失败证据的多日运行，分别验证 Level 1 私有假设和 Level 2 共享 recipe 的采用与效果，并用后续 Runtime outcome 校准 `quality_agent` 的判断。
 
 ## 恢复工作入口
 

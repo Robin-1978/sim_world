@@ -1,6 +1,7 @@
 #pragma once
 
 #include "provider/provider.hpp"
+#include "provider/llm_engine.hpp"
 
 #include <condition_variable>
 #include <cstddef>
@@ -53,6 +54,7 @@ struct TurnResult {
 class TurnQueue {
 public:
     explicit TurnQueue(IProvider& provider);
+    explicit TurnQueue(LlmEngine& engine);
     ~TurnQueue();
 
     TurnQueue(const TurnQueue&) = delete;
@@ -66,6 +68,8 @@ private:
     void run();
 
     IProvider& provider_;
+    std::unique_ptr<LlmEngine> ownedEngine_;
+    LlmEngine* engine_{nullptr};
     mutable std::mutex mutex_;
     std::condition_variable condition_;
     std::deque<TurnRequest> pending_;

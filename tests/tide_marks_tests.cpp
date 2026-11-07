@@ -52,6 +52,64 @@ private:
     int& calls_;
 };
 
+class SemanticReviewProvider final : public IProvider {
+public:
+    ProviderResponse decide(const DecisionContext& context, const std::string& input) override {
+        return mock_.decide(context, input);
+    }
+
+    QualityReviewResponse reviewQuality(const Json& request) override {
+        reviewedStage = request.value("stage", "");
+        reviewedRequest = request;
+        Json evidenceRefs = Json::array();
+        const auto function = request.value("context", Json::object()).value("function_context", Json::object());
+        const auto refs = function.value("evidence", Json::object()).value("evidence_refs", Json::object());
+        if (refs.is_object() && !refs.empty()) evidenceRefs.push_back(refs.begin().key());
+        if (returnMalformed) {
+            return QualityReviewResponse{true, Json{{"schema_version", 1}, {"verdict", "accept"},
+                                                    {"scores", Json{{"grounding", 1.0}, {"coherence", 1.0},
+                                                                      {"usefulness", 1.0}, {"risk_control", 1.0}}},
+                                                    {"confidence", 1.0},
+                                                    {"evidence_refs", Json::array({"invented_ref"})}}, {}};
+        }
+        if (returnRejected) {
+            return QualityReviewResponse{
+                true,
+                Json{{"schema_version", 1},
+                     {"verdict", "reject"},
+                     {"scores", Json{{"grounding", 0.2}, {"coherence", 0.3},
+                                      {"usefulness", 0.1}, {"risk_control", 0.2}}},
+                     {"confidence", 0.9}, {"evidence_refs", evidenceRefs},
+                     {"evidence", Json::array({"The candidate does not address the observed task."})},
+                     {"concerns", Json::array({"The proposed choice is unsupported by the current evidence."})},
+                     {"recommendation", "Revise the candidate."}},
+                {}};
+        }
+        return QualityReviewResponse{
+            true,
+            Json{{"schema_version", 1},
+                 {"verdict", "accept"},
+                 {"scores", Json{{"grounding", 0.9}, {"coherence", 0.8},
+                                  {"usefulness", 0.75}, {"risk_control", 0.95}}},
+                 {"confidence", 0.85},
+                 {"evidence_refs", evidenceRefs},
+                 {"evidence", Json::array({"candidate cites the captured option and drive evidence"})},
+                 {"concerns", Json::array()},
+                 {"recommendation", "Proceed to Runtime validation and measure the outcome."}},
+            {}};
+    }
+
+    [[nodiscard]] std::string name() const override { return "semantic-review-test"; }
+
+    std::string reviewedStage;
+    Json reviewedRequest = Json::object();
+    bool returnMalformed{false};
+    bool returnRejected{false};
+
+private:
+    MockProvider mock_;
+};
+
 class RecordingPersistence final : public IWorldPersistence {
 public:
     void saveSnapshot(const std::string& path, const Json& snapshot) const override {
@@ -1490,6 +1548,122 @@ void decision_context_obeys_authored_visibility_budgets() {
            "the subject-specific context budget limits adjacent topology");
     expect(context.selfState.at("relationships").size() <= 1,
            "relationship projection obeys the same authored context budget");
+}
+
+void function_context_is_canonical_and_actor_scoped() {
+    auto content = ContentPackLoader::load(ContentPackLoader::defaultRoot());
+    content.npcDeliberation.enabled = false;
+    auto provider = std::make_unique<FailingProvider>();
+    auto* providerRaw = provider.get();
+    auto service = WorldService::fromContent(content, std::move(provider));
+    static_cast<void>(service.converse("mira", "where is the ferry?", "function-context-test"));
+    const auto& context = providerRaw->observedContext;
+    const auto& function = context.functionContext;
+    expect(function.is_object() && function.value("schema_version", 0) == 1 &&
+               function.at("capture").value("world_revision", 0ULL) == context.worldRevision &&
+               function.at("capture").value("npc_state_version", 0ULL) == context.npcStateVersion,
+           "the canonical function context captures the exact decision revision and actor version");
+    expect(function.at("task").value("channel", "") == content.conversationChannelId &&
+               function.at("task").value("player_input", "") == "where is the ferry?" &&
+               function.at("task").value("speech_act_classification_required", false),
+           "the invocation task is refreshed after channel and utterance classification are known");
+    const auto& world = function.at("world");
+    const auto& self = function.at("self");
+    expect(world.dump().find("hidden_goal") == std::string::npos &&
+               world.dump().find("private_traits") == std::string::npos &&
+               self.contains("private_traits") && self.contains("private_preferences"),
+           "the actor receives its own private state while peer/world projections omit private fields");
+    expect(function.at("options").is_array() && function.at("options").size() == context.planCatalog.size(),
+           "eligible authored options are projected once through the canonical function context");
+}
+
+void llm_quality_reports_are_stage_scoped_and_fail_closed() {
+    auto content = ContentPackLoader::load(ContentPackLoader::defaultRoot());
+    content.npcDeliberation.enabled = false;
+    auto service = WorldService::fromContent(content, std::make_unique<MockProvider>());
+    const auto decisionContext = service.decisionContext("mira");
+    ProviderResponse decision;
+    decision.ok = true;
+    decision.proposal.worldRevision = decisionContext.worldRevision;
+    decision.proposal.npcStateVersion = decisionContext.npcStateVersion;
+    const auto decisionQuality = LlmEngine::assessDecision(decisionContext, decision);
+    expect(decisionQuality.value("agent", "") == "decision_agent" &&
+               decisionQuality.contains("input_quality") && decisionQuality.contains("output_quality") &&
+               decisionQuality.value("final_disposition", "") == "engine_rejected",
+           "decision quality separates input/output contracts and rejects an incomplete candidate");
+
+    auto reflection = service.requestDailyReflection("mira");
+    reflection.ok = true;
+    reflection.reflectionResult = Json{{"schema_version", "1"}, {"npc_id", "mira"}};
+    const auto reflectionQuality = LlmEngine::assessReflection(
+        WorldEvolutionSystem::reflectionContext(service, "mira"), reflection);
+    expect(!reflectionQuality.value("passed", true) &&
+               std::find(reflectionQuality.at("issues").begin(), reflectionQuality.at("issues").end(),
+                         "schema_version") != reflectionQuality.at("issues").end(),
+           "malformed reflection JSON becomes a structured quality failure without throwing");
+
+    const auto evolutionContext = WorldEvolutionSystem::proposalContext(
+        service, "level1", "quality-test", Json::object(), "mira");
+    ProviderResponse evolution;
+    evolution.ok = true;
+    evolution.evolutionProposal = Json{{"proposal_kind", "innovation"},
+                                       {"evidence_event_sequences", Json::array()},
+                                       {"operations", Json::array()}};
+    const auto evolutionQuality = LlmEngine::assessEvolution(evolutionContext, "level1", evolution);
+    expect(evolutionQuality.value("agent", "") == "level1_evolution_agent" &&
+               !evolutionQuality.value("passed", true) &&
+               evolutionQuality.contains("runtime_validation"),
+           "Level 1 evolution quality reports bounded output failures before Runtime admission");
+}
+
+void semantic_quality_is_separate_from_code_contract_validation() {
+    auto content = ContentPackLoader::load(ContentPackLoader::defaultRoot());
+    content.npcDeliberation.enabled = false;
+    auto provider = std::make_unique<SemanticReviewProvider>();
+    auto* providerRaw = provider.get();
+    auto service = WorldService::fromContent(content, std::move(provider));
+    LlmEngine engine(*providerRaw);
+
+    const auto context = service.decisionContext("mira");
+    const auto reviewed = engine.decide(context, "");
+    expect(reviewed.quality.value("passed", false) &&
+               reviewed.quality.value("contract_score", 0.0) == 1.0,
+           "the deterministic layer reports only the hard candidate contract");
+    expect(reviewed.quality.value("semantic_quality", Json::object()).value("status", "") == "passed" &&
+               reviewed.quality.value("quality_status", "") == "semantically_reviewed" &&
+               reviewed.quality.value("final_disposition", "") == "candidate_semantically_supported",
+           "an independent quality agent supplies the semantic verdict instead of C++ pretending to understand it");
+    expect(providerRaw->reviewedStage == "decision" &&
+               providerRaw->reviewedRequest.contains("context") &&
+               providerRaw->reviewedRequest.at("context").contains("function_context") &&
+               providerRaw->reviewedRequest.contains("candidate") &&
+               providerRaw->reviewedRequest.contains("contract_validation"),
+           "the semantic reviewer receives the same captured function context, candidate and hard evidence");
+
+    providerRaw->returnMalformed = true;
+    const auto malformedReview = engine.decide(context, "");
+    expect(malformedReview.quality.value("semantic_quality", Json::object()).value("status", "") ==
+               "inconclusive" &&
+               malformedReview.quality.value("semantic_quality", Json::object()).value("reason", "") ==
+                   "review_contract_failed",
+           "a semantic review with invented evidence is rejected as inconclusive by the Runtime boundary");
+
+    providerRaw->returnMalformed = false;
+    providerRaw->returnRejected = true;
+    const auto rejectedReview = engine.decide(context, "");
+    expect(rejectedReview.quality.value("semantic_quality", Json::object()).value("status", "") ==
+               "failed" &&
+               rejectedReview.quality.value("final_disposition", "") ==
+                   "candidate_semantically_rejected",
+           "a valid semantic reviewer can reject a structurally valid candidate without mutating the world");
+
+    MockProvider offline;
+    LlmEngine offlineEngine(offline);
+    const auto inconclusive = offlineEngine.decide(context, "");
+    expect(inconclusive.quality.value("semantic_quality", Json::object()).value("status", "") ==
+               "inconclusive" &&
+               inconclusive.quality.value("quality_status", "") == "semantic_review_inconclusive",
+           "without a semantic reviewer the engine reports inconclusive rather than a false quality pass");
 }
 
 void action_validator_rejects_malformed_nested_schema_without_throwing() {
@@ -4164,6 +4338,12 @@ int main() {
         decision_context_separates_authored_catalog_from_eligible_plans);
     run("decision_context_obeys_authored_visibility_budgets",
         decision_context_obeys_authored_visibility_budgets);
+    run("function_context_is_canonical_and_actor_scoped",
+        function_context_is_canonical_and_actor_scoped);
+    run("llm_quality_reports_are_stage_scoped_and_fail_closed",
+        llm_quality_reports_are_stage_scoped_and_fail_closed);
+    run("semantic_quality_is_separate_from_code_contract_validation",
+        semantic_quality_is_separate_from_code_contract_validation);
     run("action_validator_rejects_malformed_nested_schema_without_throwing",
         action_validator_rejects_malformed_nested_schema_without_throwing);
     run("action_validator_enforces_unique_array_parameters",

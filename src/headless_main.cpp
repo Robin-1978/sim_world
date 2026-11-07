@@ -56,6 +56,7 @@ Json probeProviderStages(WorldService& service, const std::string& stage,
             addResult(Json{{"kind", "decision"}, {"npc_id", npcId}, {"accepted", turn.accepted},
                            {"action_id", turn.actionId}, {"error", turn.error},
                            {"dialogue_bytes", turn.dialogue.size()},
+                           {"llm_quality", turn.event ? turn.event->data.value("llm_quality", Json::object()) : Json::object()},
                            {"quality", Json{{"catalog_plan_count", context.planCatalog.size()},
                                              {"eligible_plan_count", std::count_if(
                                                  context.candidates.begin(), context.candidates.end(),
@@ -71,7 +72,7 @@ Json probeProviderStages(WorldService& service, const std::string& stage,
             const auto& npcId = authored.definition.id;
             const auto response = service.requestDailyReflection(npcId);
             Json result{{"kind", "reflection"}, {"npc_id", npcId}, {"provider_ok", response.ok},
-                        {"error", response.error}};
+                        {"error", response.error}, {"llm_quality", response.quality}};
             if (response.ok && response.reflectionResult.is_object()) {
                 const auto& reflection = response.reflectionResult;
                 const auto cognition = reflection.value("cognition_updates", Json::object());
@@ -104,7 +105,7 @@ Json probeProviderStages(WorldService& service, const std::string& stage,
         // Level 1 target produces a false `missing_target_npc` failure.
         const auto outcome = EvolutionManager::propose(service, level, "probe:" + level, target);
         Json result{{"kind", level}, {"provider_ok", outcome.accepted}, {"error", outcome.accepted ? "" : outcome.code},
-                    {"message", outcome.message}};
+                    {"message", outcome.message}, {"llm_quality", outcome.quality}};
         if (outcome.accepted) {
             const auto proposal = EvolutionManager::toJson(outcome.proposal);
             result["proposal_id"] = proposal.value("id", "");

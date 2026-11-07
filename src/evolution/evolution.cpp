@@ -12,6 +12,13 @@
 
 namespace tide_marks {
 namespace {
+void annotateQuality(Json& quality, const std::string& disposition, const std::string& code) {
+    if (!quality.is_object()) quality = Json::object();
+    quality["runtime_validation"] = Json{{"status", disposition == "candidate_validated" ? "accepted" : "rejected"},
+                                          {"authoritative", true}, {"code", code}};
+    quality["final_disposition"] = disposition;
+}
+
 std::string requiredString(const Json& value, const char* key) {
     if (!value.contains(key) || !value.at(key).is_string() || value.at(key).get<std::string>().empty()) {
         throw std::runtime_error(std::string("evolution proposal requires ") + key);
@@ -613,15 +620,18 @@ EvolutionProposalRequestResult EvolutionManager::propose(const WorldService& wor
     // behavior tree to fix both its root and nested-node errors.
     for (int attempt = 0; attempt < 3; ++attempt) {
         const auto response = world.requestEvolutionProposal(evolutionLevel, trigger, feedback, scopedTarget);
+        result.quality = response.quality;
         if (!response.ok) {
             result.code = response.error.empty() ? "evolution_provider_unavailable" : response.error;
             result.message = "The configured LLM did not return an evolution proposal.";
+            annotateQuality(result.quality, "rejected", result.code);
             return result;
         }
         try {
             if (!response.evolutionProposal.is_object()) {
                 result.code = "invalid_evolution_proposal";
                 result.message = "The provider returned a non-object evolution proposal.";
+                annotateQuality(result.quality, "rejected", result.code);
                 return result;
             }
             auto proposal = EvolutionManager::normalizeProviderProposal(
@@ -640,6 +650,7 @@ EvolutionProposalRequestResult EvolutionManager::propose(const WorldService& wor
                 }
                 result.code = validation.code;
                 result.message = validation.message;
+                annotateQuality(result.quality, "rejected", result.code);
                 return result;
             }
             result.accepted = true;
@@ -648,6 +659,7 @@ EvolutionProposalRequestResult EvolutionManager::propose(const WorldService& wor
                                  ? "The LLM produced a validated proposal; Runtime preflight and autonomous admissibility remain."
                                  : "The LLM repaired its proposal after Runtime validation feedback; Runtime preflight and autonomous admissibility remain.";
             result.proposal = proposal;
+            annotateQuality(result.quality, "candidate_validated", result.code);
             return result;
         } catch (const std::exception& error) {
             if (attempt == 0) {
@@ -661,11 +673,13 @@ EvolutionProposalRequestResult EvolutionManager::propose(const WorldService& wor
             }
             result.code = "invalid_evolution_proposal";
             result.message = error.what();
+            annotateQuality(result.quality, "rejected", result.code);
             return result;
         }
     }
     result.code = "invalid_evolution_proposal";
     result.message = "The provider did not produce a valid proposal after bounded repair.";
+    annotateQuality(result.quality, "rejected", result.code);
     return result;
 }
 

@@ -18,6 +18,16 @@ namespace {
 // slice plus unresolved issues.
 constexpr std::size_t kMaxEvolutionEvidenceEntries = 4;
 
+Json runtimeQuality(Json quality, const std::string& disposition, const std::string& code = {}) {
+    if (!quality.is_object()) quality = Json::object();
+    quality["runtime_validation"] = Json{
+        {"status", disposition == "committed" || disposition == "approved" ? "accepted"
+                                                                                : disposition == "rejected" ? "rejected" : "audited"},
+        {"authoritative", true}, {"code", code}};
+    quality["final_disposition"] = disposition;
+    return quality;
+}
+
 // EventLog is authoritative and remains complete in WorldState.  Providers
 // receive a deterministic evidence projection instead of the raw event data:
 // intent/dialogue events often contain the entire decision context and tool
@@ -585,7 +595,8 @@ Json WorldEvolutionSystem::proposalContext(const WorldService& world,
     }
     const auto problemEvidence = evolutionLevel == "level2" ? publicProblemEvidence(state)
                                                               : PublicProblemEvidence{};
-    return Json{{"trigger", trigger}, {"evolution_level", evolutionLevel},
+    Json result{{"schema_version", 1}, {"agent_role", evolutionLevel == "level1" ? "level1_evolution" : "level2_evolution"},
+                {"trigger", trigger}, {"evolution_level", evolutionLevel},
                 {"target_npc", scopedTarget},
                 {"reflection", Json{{"cadence", "daily_boundary"},
                                      {"innovation_optional", true},
@@ -604,6 +615,17 @@ Json WorldEvolutionSystem::proposalContext(const WorldService& world,
                 {"allowed_operations", allowedOperations}, {"evidence_events", events},
                 {"problem_evidence", problemEvidence.events},
                 {"validation_feedback", validationFeedback}};
+    result["function_context"] = Json{
+        {"schema_version", 1},
+        {"agent_role", evolutionLevel == "level1" ? "level1_evolution" : "level2_evolution"},
+        {"capture", Json{{"base_world_revision", state.revision},
+                          {"base_content_version", content.contentVersion},
+                          {"time", state.now.minute}}},
+        {"task", Json{{"trigger", trigger}, {"scope", evolutionLevel == "level1" ? "personal" : "shared"}}},
+        {"state", Json{{"resources", resources}, {"npcs", npcs}, {"content", contentSummary}}},
+        {"evidence", Json{{"events", events}, {"problem_evidence", problemEvidence.events}}},
+        {"options", Json{{"allowed_operations", allowedOperations}}}};
+    return result;
 }
 
 Json WorldEvolutionSystem::reflectionContext(const WorldService& world,
@@ -737,7 +759,8 @@ Json WorldEvolutionSystem::reflectionContext(const WorldService& world,
         placeNames[place.id] = place.spatial.displayName;
     }
     const auto* authoredTarget = world.authoredNpc(targetNpcId);
-    return Json{{"schema_version", 1}, {"trigger", "daily_reflection"},
+    Json result{{"schema_version", 1}, {"agent_role", "reflection"},
+                {"trigger", "daily_reflection"},
                 {"target_npc", targetNpcId},
                 {"target_name", authoredTarget == nullptr ? targetNpcId : authoredTarget->definition.name},
                 {"base_world_revision", world.state_.revision},
@@ -787,6 +810,19 @@ Json WorldEvolutionSystem::reflectionContext(const WorldService& world,
                 // removes the maps before constructing model-facing messages.
                 {"projection_names", Json{{"people", std::move(peopleNames)},
                                            {"places", std::move(placeNames)}}}};
+    result["function_context"] = Json{
+        {"schema_version", 1}, {"agent_role", "reflection"},
+        {"capture", Json{{"base_world_revision", world.state_.revision},
+                          {"base_content_version", world.content_.contentVersion},
+                          {"time", world.state_.now.minute}, {"target_npc", targetNpcId}}},
+        {"task", Json{{"trigger", "daily_reflection"}, {"target_npc", targetNpcId},
+                        {"cursor", result.value("reflection_cursor", Json::object())}}},
+        {"state", result.value("current_state", Json::object())},
+        {"evidence", Json{{"new_since_cursor", result.value("new_evidence", Json::array())},
+                           {"failures", result.value("failure_candidates", Json::array())}}},
+        {"innovation", Json{{"gate", result.value("innovation_gate", Json::object())},
+                             {"pending", result.value("pending_innovation_hypotheses", Json::array())}}}};
+    return result;
 }
 
 ProviderResponse WorldEvolutionSystem::requestReflection(const WorldService& world,
@@ -794,7 +830,7 @@ ProviderResponse WorldEvolutionSystem::requestReflection(const WorldService& wor
                                                          const Json& validationFeedback) {
     const auto context = reflectionContext(world, targetNpcId);
     if (context.empty()) return ProviderResponse{false, {}, {}, "unknown_npc", Json::object(), Json::object()};
-    return world.provider_->proposeReflection(context, targetNpcId, validationFeedback);
+    return world.llm_->proposeReflection(context, targetNpcId, validationFeedback);
 }
 
 ProviderResponse WorldEvolutionSystem::requestProposal(const WorldService& world,
@@ -806,7 +842,7 @@ ProviderResponse WorldEvolutionSystem::requestProposal(const WorldService& world
         return ProviderResponse{false, {}, {}, "invalid_evolution_level", Json::object()};
     }
     const auto context = proposalContext(world, evolutionLevel, trigger, validationFeedback, targetNpcId);
-    return world.provider_->proposeEvolution(context, evolutionLevel, validationFeedback);
+    return world.llm_->proposeEvolution(context, evolutionLevel, validationFeedback);
 }
 
 void WorldEvolutionSystem::scheduleAutomatic() {
@@ -896,6 +932,13 @@ std::size_t WorldEvolutionSystem::pumpAsyncProposals() {
             data["attempt"] = queued.request.attempt;
             data["request_kind"] = queued.request.requestKind;
             data["provider"] = queued.provider;
+            const auto disposition = type == "reflection.committed" ? "committed"
+                                   : (type.find("approved") != std::string::npos ? "approved"
+                                      : (type.find("rejected") != std::string::npos || type.find("failed") != std::string::npos
+                                             ? "rejected"
+                                             : "audited"));
+            data["llm_quality"] = runtimeQuality(queued.response.quality, disposition,
+                                                   data.value("code", ""));
             world_.addEvent(type, kWorldActor, queued.request.evolutionLevel, detail, std::move(data));
         };
         if (queued.request.requestKind == "reflection") {
@@ -1724,7 +1767,9 @@ CommandResult WorldEvolutionSystem::commitReflection(const EvolutionRequest& req
              {"innovation_count", normalizedHypotheses.size()}, {"unresolved_issue_count", npc.unresolvedIssues.size()},
              {"innovation_rejected", !innovationRejection.empty()},
              {"innovation_normalizations", innovationNormalizations},
-             {"rejected_update_count", rejectedUpdates.size()}});
+             {"rejected_update_count", rejectedUpdates.size()},
+             {"llm_quality", runtimeQuality(response.quality, "committed",
+                                              innovationRejection.value("code", ""))}});
     npc.reflectionCursor.lastEventSequence = reflectionEvent.sequence;
     npc.reflectionCursor.reflectionRevision = reflectionEvent.worldRevision;
     ++npc.stateVersion;

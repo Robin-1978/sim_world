@@ -91,6 +91,7 @@ add_library(tide_marks_core
     src/navigation/path_planner.cpp
     src/physics/physics_world.cpp
     src/provider/provider.cpp
+    src/provider/llm_engine.cpp
     src/provider/provider_profile.cpp
     src/provider/decision_context_projector.cpp
     src/provider/intelligence_coordinator.cpp

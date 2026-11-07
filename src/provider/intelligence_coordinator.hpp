@@ -15,6 +15,7 @@ namespace tide_marks {
 class IntelligenceCoordinator {
 public:
     explicit IntelligenceCoordinator(IProvider& provider);
+    explicit IntelligenceCoordinator(LlmEngine& engine);
 
     [[nodiscard]] TurnSubmitResult submit(TurnRequest request);
     [[nodiscard]] std::vector<TurnResult> drain();

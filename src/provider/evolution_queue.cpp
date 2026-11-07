@@ -6,7 +6,11 @@
 namespace tide_marks {
 
 EvolutionQueue::EvolutionQueue(IProvider& provider)
-    : provider_(provider), worker_([this] { run(); }) {}
+    : provider_(provider), ownedEngine_(std::make_unique<LlmEngine>(provider)),
+      engine_(ownedEngine_.get()), worker_([this] { run(); }) {}
+
+EvolutionQueue::EvolutionQueue(LlmEngine& engine)
+    : provider_(engine.provider()), engine_(&engine), worker_([this] { run(); }) {}
 
 EvolutionQueue::~EvolutionQueue() {
     {
@@ -68,18 +72,18 @@ void EvolutionQueue::run() {
         ProviderResponse response;
         try {
             if (request.requestKind == "reflection") {
-                response = provider_.proposeReflection(request.context, request.targetNpcId,
-                                                        request.validationFeedback);
+                response = engine_->proposeReflection(request.context, request.targetNpcId,
+                                                       request.validationFeedback);
             } else {
-                response = provider_.proposeEvolution(request.context, request.evolutionLevel,
-                                                      request.validationFeedback);
+                response = engine_->proposeEvolution(request.context, request.evolutionLevel,
+                                                     request.validationFeedback);
             }
         } catch (const std::exception& error) {
             response = ProviderResponse{false, {}, {}, std::string("provider_exception:") + error.what(), Json::object()};
         } catch (...) {
             response = ProviderResponse{false, {}, {}, "provider_exception:unknown", Json::object()};
         }
-        EvolutionResult result{std::move(request), std::move(response), provider_.name()};
+        EvolutionResult result{std::move(request), std::move(response), engine_->name()};
         {
             std::lock_guard lock(mutex_);
             --inFlight_;

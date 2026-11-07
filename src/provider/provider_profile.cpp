@@ -247,7 +247,7 @@ IntelligenceProfile loadIntelligenceProfile(const std::string& path) {
     }
     for (const auto& [purpose, value] : root.at("purposes").items()) {
         if (purpose != "decision" && purpose != "npc_evolution" && purpose != "reflection" &&
-            purpose != "world_evolution") {
+            purpose != "world_evolution" && purpose != "quality_review") {
             throw std::runtime_error("unsupported purpose '" + purpose + "': " + path);
         }
         auto binding = readPurposeProvider(value, purpose, path);
@@ -313,6 +313,11 @@ std::unique_ptr<IProvider> makeProviderFromProfile(const IntelligenceProfile& pr
         config.purposePolicies.emplace("reflection", reflectionPolicy);
         config.purposePolicies.emplace("world_evolution",
                                       profile.purposes.at("world_evolution").policies.at("proposal"));
+        if (const auto qualityPurpose = profile.purposes.find("quality_review");
+            qualityPurpose != profile.purposes.end()) {
+            config.purposePolicies.emplace("quality_review",
+                                           qualityPurpose->second.policies.at("proposal"));
+        }
         config.fallbackPolicy = config.decisionPolicies.begin()->second;
         return std::make_unique<LlamaCppProvider>(std::move(config));
     }

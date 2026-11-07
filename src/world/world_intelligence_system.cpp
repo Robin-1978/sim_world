@@ -62,6 +62,15 @@ bool privateDisclosure(const NpcDefinition& definition, const std::string& dialo
            text.find("private preference") != std::string::npos ||
            text.find("private trait") != std::string::npos;
 }
+
+Json runtimeQuality(Json quality, const std::string& disposition, const std::string& code = {}) {
+    if (!quality.is_object()) quality = Json::object();
+    quality["runtime_validation"] = Json{
+        {"status", disposition == "committed" ? "accepted" : "rejected"},
+        {"authoritative", true}, {"code", code}};
+    quality["final_disposition"] = disposition;
+    return quality;
+}
 }  // namespace
 
 DialogueTurn WorldIntelligenceSystem::converse(const std::string& npcId,
@@ -125,6 +134,26 @@ TurnRequest WorldIntelligenceSystem::makeTurnRequest(const std::string& npcId, c
         request.context.speechAct = channel->second.defaultSpeechAct;
         request.context.worldActionAllowed = channel->second.defaultWorldActionAllowed;
     }
+    // DecisionContextProjector builds the world bridge before the channel is
+    // known. Refresh only the invocation task envelope here so the canonical
+    // function context exactly matches the request sent to the agent.
+    if (request.context.functionContext.is_object()) {
+        request.context.functionContext["task"] = Json{
+            {"channel", request.context.channel}, {"trigger", request.context.trigger},
+            {"speech_act", request.context.speechAct},
+            {"action_required", request.context.actionRequired},
+            {"world_action_allowed", request.context.worldActionAllowed},
+            {"speech_act_classification_required", request.context.speechActClassificationRequired},
+            {"speech_acts", [&request] {
+                 Json values = Json::array();
+                 for (const auto& speechAct : request.context.speechActs) {
+                     values.push_back(Json{{"id", speechAct.id}, {"description", speechAct.description},
+                                           {"world_action_allowed", speechAct.worldActionAllowed}});
+                 }
+                 return values;
+             }()},
+            {"player_input", input}};
+    }
     request.worldRevision = request.context.worldRevision;
     return request;
 }
@@ -153,7 +182,7 @@ DialogueTurn WorldIntelligenceSystem::executeTurn(const std::string& npcId, cons
         return result;
     }
     auto request = makeTurnRequest(npcId, input, turnId, channelId, trigger);
-    auto response = world_.provider_->decide(request.context, input);
+    auto response = world_.llm_->decide(request.context, input);
     auto turnResult = commitTurn(request, response);
     // A provider response can be structurally valid while its parameters do
     // not satisfy the authored plan contract. Give the real LLM one bounded,
@@ -192,7 +221,7 @@ DialogueTurn WorldIntelligenceSystem::executeTurn(const std::string& npcId, cons
                             {"previous_dialogue", response.dialogue},
                             {"previous_speech_act", response.proposal.speechAct},
                             {"previous_utterance_understanding", response.proposal.utteranceUnderstanding}};
-        auto repaired = world_.provider_->decide(request.context, input, feedback);
+        auto repaired = world_.llm_->decide(request.context, input, feedback);
         if (repaired.ok) turnResult = commitTurn(request, std::move(repaired));
     }
     return turnResult;
@@ -325,6 +354,7 @@ DialogueTurn WorldIntelligenceSystem::commitTurn(const TurnRequest& request, Pro
             Json{{"turn_id", request.turnId}, {"action_id", ""}, {"trigger", request.trigger},
                  {"speech_act", effectiveSpeechAct}, {"world_action_requested", false},
                  {"utterance_understanding", response.proposal.utteranceUnderstanding},
+                 {"llm_quality", runtimeQuality(response.quality, "committed")},
                  {"process_status", "conversation_only"}, {"provider", result.provider},
                  {"cited_evidence_refs", response.proposal.citedEvidenceRefs},
                  {"context_world_revision", response.proposal.worldRevision},
@@ -480,6 +510,7 @@ DialogueTurn WorldIntelligenceSystem::commitTurn(const TurnRequest& request, Pro
              {"tradeoffs", response.proposal.tradeoffs},
              {"expected_relief", response.proposal.expectedRelief},
              {"parameters", response.proposal.parameters},
+             {"llm_quality", runtimeQuality(response.quality, "committed")},
              {"utility_score", candidate->utilityScore},
              {"utility_contributions", candidate->utilityContributions},
              {"confidence", response.proposal.confidence}, {"provider", result.provider},
@@ -592,7 +623,8 @@ std::size_t WorldIntelligenceSystem::pumpAsyncTurns() {
                       {"created_at", queued.request.createdAt.minute},
                       {"deadline", queued.request.deadline.minute},
                       {"current_minute", world_.state_.now.minute},
-                      {"provider", queued.provider}});
+                      {"provider", queued.provider},
+                      {"llm_quality", runtimeQuality(previousResponse.quality, "rejected", turn.error)}});
     }
     return consumed;
 }

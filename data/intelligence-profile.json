@@ -62,6 +62,15 @@
         "reasoning_effort": "high",
         "max_tokens": 4096
       }
+    },
+    "quality_review": {
+      "provider": "local_qwen",
+      "policy": {
+        "thinking": true,
+        "reasoning_budget_tokens": 128,
+        "reasoning_effort": "medium",
+        "max_tokens": 1024
+      }
     }
   }
 }

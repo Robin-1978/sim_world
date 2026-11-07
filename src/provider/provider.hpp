@@ -124,6 +124,11 @@ struct DecisionContext {
     // world fact. Providers may echo it in diagnostics, but prompts must not
     // use it to infer locations, resources, motives, or actions.
     Json runtimeMetadata = Json::object();
+    // Canonical internal function context assembled by the projector. This is
+    // a typed, provenance-bearing bridge between WorldState and an agent
+    // invocation; adapters may derive a redacted model projection from it,
+    // but must never expose its internal ids or treat it as authority.
+    Json functionContext = Json::object();
     Json selfState = Json::object();
     Json planCatalog = Json::array();
     Json currentActivity = Json{{"status", "idle"}};
@@ -167,6 +172,12 @@ struct ProviderResponse {
     // routes ordinary updates locally and only forwards embedded innovation
     // hypotheses to the governed evolution lane.
     Json reflectionResult = Json::object();
+    // The LlmEngine attaches a bounded, non-authoritative quality report to
+    // every provider call. Runtime still owns all semantic validation and
+    // commits, but the report makes it possible to distinguish a transport
+    // success, a structurally valid candidate, and an output that is actually
+    // useful for the current stage.
+    Json quality = Json::object();
 };
 
 // Runtime decisions are based on adapter capabilities, never on a display
@@ -177,6 +188,16 @@ struct ProviderCapabilities {
     bool structuredRepair{false};
     bool automaticEvolution{false};
     bool promptPrefixCaching{false};
+    // A semantic reviewer is a separate model call.  Its output is advisory
+    // evidence, never Runtime authority; a provider that does not implement
+    // it must be reported as inconclusive rather than as a quality pass.
+    bool semanticQualityReview{false};
+};
+
+struct QualityReviewResponse {
+    bool ok{false};
+    Json review = Json::object();
+    std::string error;
 };
 
 // A decision policy is content/runtime configuration, not a model name
@@ -236,6 +257,14 @@ public:
                                                const Json& validationFeedback) {
         (void)validationFeedback;
         return proposeReflection(context, targetNpcId);
+    }
+    // A quality agent reviews a redacted candidate against the captured
+    // function context.  The result is a claim from another model, not a
+    // permission or a fact; Runtime still owns all hard validation and
+    // outcome measurement.
+    virtual QualityReviewResponse reviewQuality(const Json& request) {
+        (void)request;
+        return QualityReviewResponse{false, Json::object(), "quality_reviewer_unavailable"};
     }
     // Returns non-secret execution identity for audit envelopes.  It never
     // includes API key values or environment variable contents.
@@ -325,9 +354,10 @@ public:
     ProviderResponse proposeReflection(const Json& context,
                                        const std::string& targetNpcId,
                                        const Json& validationFeedback) override;
+    QualityReviewResponse reviewQuality(const Json& request) override;
     [[nodiscard]] Json runtimeMetadata(const std::string& purpose) const override;
     [[nodiscard]] ProviderCapabilities capabilities() const override {
-        return ProviderCapabilities{true, true, true};
+        return ProviderCapabilities{true, true, true, true};
     }
     [[nodiscard]] std::string name() const override {
         return config_.providerId.empty() ? config_.providerType : config_.providerId;

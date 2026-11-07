@@ -7,6 +7,9 @@ namespace tide_marks {
 IntelligenceCoordinator::IntelligenceCoordinator(IProvider& provider)
     : queue_(std::make_unique<TurnQueue>(provider)) {}
 
+IntelligenceCoordinator::IntelligenceCoordinator(LlmEngine& engine)
+    : queue_(std::make_unique<TurnQueue>(engine)) {}
+
 TurnSubmitResult IntelligenceCoordinator::submit(TurnRequest request) {
     auto result = queue_->submit(std::move(request));
     for (const auto& supersededId : result.supersededTurnIds) {

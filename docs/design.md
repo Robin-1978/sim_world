@@ -571,6 +571,12 @@ Behavior DSL 只组合注册节点、条件和元动作，例如：
 
 LLM 是对结构化上下文的解释器和候选方案生成器，不是事实存储、过程时钟或代码执行器。Runtime 先按当前可见性、权限、游标和预算检索少量证据，再生成面向模型的可读投影；模型返回候选工具调用，Runtime 对引用、参数、资源、拓扑、权限、Revision 和事务边界做最终判断。模型输出永远不能直接写入 `WorldState`，也不能宣称某个过程已经执行或成功。
 
+实现层由 `LlmEngine` 统一包住所有 Provider 调用。`decision_agent`、`reflection_agent`、`level1_evolution_agent` 和 `level2_evolution_agent` 是四个独立的 Agent 合约；话语理解是 decision Agent 内部独立的 `utterance_understanding_agent` function 阶段，最终候选的语义审查由独立的 `quality_agent` 完成，不能把任一模型返回直接当成 Runtime 事实。每次调用都先接收一个带 `schema_version`、主体、捕获 Revision、任务、世界、self、证据、驱力、约束和 options 的 canonical `function_context`，再由 Provider 做只读脱敏投影。模型看不到主体 ID、Process/Goal ID、Revision、其他主体私有认知或 Runtime 元数据；自己的私有偏好和认知可以在自己的 scope 内出现，输出仍只能引用显示名称、作者计划 key 和本次证据 ref。`WorldIntelligenceSystem` 在确定 channel、trigger 和玩家输入后会刷新 task envelope，保证质量检查看到的输入就是实际调用输入。
+
+这里必须明确区分“代码能判定的质量”和“语义质量”。`input_quality`、`output_quality` 和 `contract_score` 只表示 C++ 硬约束：function context 形状、Revision/主体边界、tool schema、候选资格、证据引用和预算；它们不能回答“这个选择是否明智”或“这个创新是否有价值”。每个候选在硬约束通过后再交给独立的 `quality_agent`，它使用同一份脱敏 function context、候选和硬校验报告，输出 grounding、coherence、usefulness、risk_control、引用证据和 `accept/revise/reject/inconclusive`。Runtime 只校验质量代理的 schema 和证据引用，把它记录为非权威的 `semantic_quality`；没有质量代理、质量代理输出不完整或引用不存在时，状态必须是 `inconclusive`，不能冒充通过。`runtime_validation` 由 WorldService/EvolutionSystem 在提交后标记为 accepted、rejected 或 audited；`outcome_quality` 只有在执行 horizon 后由 Runtime 指标产生。`final_disposition` 区分 `candidate_ready`、`candidate_semantically_supported`、`committed`、`approved`、`rejected` 和失败。因此“返回了 JSON”“通过硬约束”“语义审查通过”“实际采用并完成 horizon”不会被统计成同一件事。
+
+质量代理也不是绝对真理：它是另一条 LLM 证据链，可能误判，不能授予权限或写入事实。长期验收要把 semantic verdict 与后续 Runtime outcome、对照组和回放结果一起校准；只有 outcome 指标才可以证明创新有效。质量评估器对错误类型的 JSON fail closed，不会因为模型返回字符串版本号、数组越界或错误对象类型而抛异常；可修复的结构错误最多在同一会话追加有界 patch，权限、资源、Revision、证据和治理错误直接拒绝。
+
 模型投影使用稳定顺序的自然语言分区，而不是把 Runtime 快照作为一坨 JSON 发送。每个请求按用途使用固定的 `<CATALOG>`、`<TASK>`、`<STATE>`、`<EVIDENCE>`、`<OPTIONS>` 区段：
 
 1. `CATALOG` 只包含内容包声明的行为标签、计划说明、参数含义、地点名称/类型/标签和话语行为说明；它是可复用的稳定前缀。每个行为配方可以声明一条不超过 240 字符的 `description`，模型据此理解可观察结果；没有描述时才回退到 `plan_id`。完整 BT、节点参数和执行时钟仍由 Runtime 保留，不能用名称猜测。

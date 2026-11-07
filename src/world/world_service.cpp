@@ -21,8 +21,9 @@ namespace tide_marks {
 WorldService::WorldService(std::unique_ptr<IProvider> provider,
                            std::unique_ptr<IWorldPersistence> persistence)
     : provider_(provider ? std::move(provider) : makeDefaultRuntimeProvider()),
-      intelligence_(std::make_unique<IntelligenceCoordinator>(*provider_)),
-      evolution_(std::make_unique<EvolutionQueue>(*provider_)),
+      llm_(std::make_unique<LlmEngine>(*provider_)),
+      intelligence_(std::make_unique<IntelligenceCoordinator>(*llm_)),
+      evolution_(std::make_unique<EvolutionQueue>(*llm_)),
       persistence_(persistence ? std::move(persistence) : std::make_unique<JsonFilePersistence>()) {}
 
 WorldService WorldService::load(std::string contentRoot, std::unique_ptr<IProvider> provider) {

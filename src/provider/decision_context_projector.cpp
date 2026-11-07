@@ -663,6 +663,8 @@ DecisionContext DecisionContextProjector::build(const WorldState& state,
                              {"location_view", locationView(content, npc.location)},
                              {"mode", npc.mode}, {"strategy", npc.strategy},
                              {"goal_stage", npc.goalStage}, {"state_version", npc.stateVersion},
+                             {"private_traits", context.privateTraits},
+                             {"private_preferences", context.privateCharacter},
                              {"needs", Json::object()}, {"relationships", Json::object()},
                              {"inventory", quantityMapJson(inventoryQuantities)},
                              {"activity", context.currentActivity}};
@@ -705,6 +707,49 @@ DecisionContext DecisionContextProjector::build(const WorldState& state,
         }
         context.planCatalog.push_back(std::move(plan));
     }
+    // Keep one canonical, inspectable bridge for every decision agent. The
+    // provider-specific prompt builder may redact or rename fields, while the
+    // Runtime quality gate can verify that all model-visible sections came
+    // from this same captured world projection.
+    Json constraintsJson = Json::array();
+    for (const auto& constraint : context.constraints) {
+        constraintsJson.push_back(Json{{"id", constraint.id}, {"category", constraint.category},
+                                       {"scope", constraint.scope}, {"hard", constraint.hard},
+                                       {"reason", constraint.reason}});
+    }
+    Json drivesJson = Json::array();
+    for (const auto& drive : context.drives) {
+        drivesJson.push_back(Json{{"id", drive.id}, {"domain", drive.domain},
+                                  {"dimension", drive.dimension}, {"deficit", drive.deficit},
+                                  {"drive", drive.drive}, {"critical", drive.critical},
+                                  {"expected_relief", drive.expectedRelief}});
+    }
+    Json stimuliJson = Json::array();
+    for (const auto& stimulus : context.stimuli) {
+        stimuliJson.push_back(Json{{"id", stimulus.id}, {"source_sequence", stimulus.sourceSequence},
+                                   {"category", stimulus.category}, {"salience", stimulus.effectiveSalience},
+                                   {"valence", stimulus.valence}, {"expires_at", stimulus.expiresAt.minute}});
+    }
+    context.functionContext = Json{
+        {"schema_version", 1},
+        {"agent", Json{{"id", context.npcId}, {"name", context.npcName}, {"role", "npc_decision"}}},
+        {"capture", Json{{"world_revision", context.worldRevision},
+                          {"npc_state_version", context.npcStateVersion},
+                          {"content_version", context.contentVersion},
+                          {"prompt_version", context.promptVersion},
+                          {"time", context.now.minute}}},
+        {"task", Json{{"channel", context.channel}, {"trigger", context.trigger},
+                       {"speech_act", context.speechAct},
+                       {"action_required", context.actionRequired},
+                       {"world_action_allowed", context.worldActionAllowed}}},
+        {"world", context.worldSnapshot},
+        {"self", context.selfState},
+        {"activity", context.currentActivity},
+        {"evidence", Json{{"cognitive", context.cognitiveEvidence},
+                           {"stimuli", stimuliJson}, {"evidence_refs", context.evidenceRefs}}},
+        {"drives", drivesJson},
+        {"constraints", constraintsJson},
+        {"options", context.planCatalog}};
     return context;
 }
 
