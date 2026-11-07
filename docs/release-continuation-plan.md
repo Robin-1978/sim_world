@@ -310,6 +310,10 @@ v19 使用上述提示修正前后的构建完成了 14 个模拟日，从第 1 
 
 这轮仍不能称为完整自主演化闭环：没有 `innovation.hypothesis_created`，也没有 `innovation.adoption_started/completed/failed`；Level 1 的可选私有假设被反思输出中的叶节点/测试计划结构错误或证据引用错误拒绝，Level 2 的共享 recipe 也没有被生成并采用。该结论和完整分阶段统计保存在 [`qwen35-4b-llama-cpp-v19.json`](evidence/qwen35-4b-llama-cpp-v19.json)。下一步只修复可证明的机械投影问题（叶节点别名、私有 actor 归一化和指标结构归一化），不放宽 Runtime 的权限、证据、版本或事务校验；之后必须用新构建重新跑至少 14 日，并检查私有 Adoption 和共享 recipe Adoption 的完整链路。
 
+### v20 对照与 v21 验证计划
+
+v20 使用提交 `815673e` 的旧可执行文件运行，不能代表随后提交的 Level 2 actor scope、共享 recipe 引导和本地输出预算。它只作为对照，必须从日志中分开记录 `finish_reason=length`、`innovation.hypothesis_created`、Runtime Governor 的批准/激活和 Adoption 事件。提交 `91d3f3b` 将仓库内本地 Qwen profile 的 Reflection 上限调到 4096、Level 1 proposal 调到 3072、Level 2 proposal 调到 4096；这只解决完整工具调用的预算边界，不放宽任何 Runtime 校验。下一轮 v21 必须用最新构建完成至少 14 日真实 Qwen 长跑，并同时检查：三主体 ReflectionCursor 前移、Level 1 私有 hypothesis 的 Runtime 自动批准/激活/采用、Level 2 共享 recipe 是否进入候选目录并被选择执行、逐叶事件与 Replay 一致，以及后续 Reflection 是否读取 Runtime 计算的 adoption metrics。缺少任何一条都只能报告部分闭环。
+
 ## 恢复工作入口
 
 会话恢复时依次阅读本文件的“当前检查点”和“已完成能力记录”，再阅读 [design.md](design.md) 的“事实、意图与演化边界”“世界与社会的内在驱力模型”“NPC Runtime 与 World Intelligence”“Runtime 核心契约”。然后查看 `git status --short`，运行自动化验证命令，先修复当前工作包失败项，再继续下一项；不要为了通过测试删除功能或放宽断言。

@@ -708,6 +708,10 @@ Snapshot 包含 `save_schema_version`、`simulation_version`、`content_version/
 
 这些扩展不能通过增加更多角色特例来完成。每一项都要回答：新增了什么可观察事实，哪个注册 Operator 提交它，事件和 Snapshot 如何保存，主体如何获得授权视图，LLM 如何提出但不能越权，以及怎样从同一 Snapshot 重复验证结果。
 
+### 预算与结构化输出边界
+
+结构化输出的 `max_tokens` 必须覆盖有限推理和一个完整工具参数对象，但更大的上限不能替代 Schema、证据和事务校验。当前本地 Qwen profile 为 Reflection 4096、Level 1 proposal 3072、Level 2 proposal 4096；决策使用较小的专用预算。Reflection 的创新分支限制为最多一个私有 `register_behavior_recipe`、一个已注册 `meta_action` 叶节点和空输入 Schema；超出边界的内容仍由 Runtime 拒绝或进入有界 patch。长跑记录 `finish_reason=length`、工具参数大小、修正轮次和最终提交结果，不能把“没有截断”当作创新成功。
+
 ## 11. 研究依据与边界
 
 - Tay & Diener, *Needs and subjective well-being around the world*, 2011, DOI: 10.1037/a0023779。
