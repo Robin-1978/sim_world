@@ -314,6 +314,28 @@ v19 使用上述提示修正前后的构建完成了 14 个模拟日，从第 1 
 
 v20 使用提交 `815673e` 的旧可执行文件运行，不能代表随后提交的 Level 2 actor scope、共享 recipe 引导和本地输出预算。它只作为对照，必须从日志中分开记录 `finish_reason=length`、`innovation.hypothesis_created`、Runtime Governor 的批准/激活和 Adoption 事件。提交 `91d3f3b` 将仓库内本地 Qwen profile 的 Reflection 上限调到 4096、Level 1 proposal 调到 3072、Level 2 proposal 调到 4096；提交 `07c33a0` 又按传输适配了工具选择：llama.cpp 使用字符串 `required` 和单工具请求，OpenAI-compatible 网关保留函数名对象；提交 `7fdb9cf` 对明确无绑定的嵌套空参数 Schema 做有界归一化。下一轮 v21 必须用最新构建完成至少 14 日真实 Qwen 长跑，并同时检查：三主体 ReflectionCursor 前移、Level 1 私有 hypothesis 的 Runtime 自动批准/激活/采用、Level 2 共享 recipe 是否进入候选目录并被选择执行、逐叶事件与 Replay 一致，以及后续 Reflection 是否读取 Runtime 计算的 adoption metrics。缺少任何一条都只能报告部分闭环。
 
+### v22 基础 Provider 质量探针与治理门槛
+
+本阶段先用最新构建做单阶段真实 Qwen 检查，避免把“请求返回”误报成“演化成功”。`--probe decision --probe-target eve` 的实际请求让模型在 4 个当前 eligible 计划中选择 `reveal_clue`；Runtime 接受了该选择，证据引用有效，并启动了持续 `ProcessExecution`。探针现在同时输出作者目录数量、eligible 数量、选中计划是否 eligible、证据引用是否有效、过程是否启动等质量字段；普通 Tick 不会增加 Provider 请求。
+
+`--probe level1 --probe-target eve` 已改为调用与显式 Runtime 请求相同的 bounded normalize/validate/repair 路径。Qwen 用可见名称 `Eve` 产生日程提案，Runtime 映射到目标主体并通过结构校验；探针不再把请求上下文中已知的目标误报成 `missing_target_npc`。计划目录的 BT 执行摘要也会把已登记叶节点展开成可读步骤，例如消耗/生产资源和应用需求缓解，而不是只显示 `relieve_need`。
+
+Level 2 的真实探针暴露了两个小模型退化：空参数 Schema 被复制到 `parameters.properties`，以及创新测试计划使用未登记指标/不完整字段。Provider 只对确认没有实际绑定名的 Schema 做保守空 Schema 归一化；其余创新字段仍由 Runtime 拒绝并要求 bounded repair。当前单阶段 Level 2 结果仍不能宣称质量通过，直到模型能在同一会话返回完整的 `test_plan`。
+
+自动 Level 2 队列新增公共问题证据门槛：提案必须引用本次 Runtime 计算的重复公共失败或持续匮乏序列；仅引用 `world.initialized` 等存在但无关的事件不会激活 Overlay。这样“结构有效”与“治理上有理由进入世界”分开计数。安静世界不会因为模型想创新而创建共享内容。该门槛不放宽 `EvolutionManager` 的引用、权限、版本和行为树校验，显式探针仍可观察一个待治理候选，但报告会标记其 `automatic_governor_admissible=false`。
+
+本阶段的验证命令为：
+
+```text
+cmake --build --preset default -j2
+ctest --test-dir build --output-on-failure
+./build/tide_marks_headless --profile data/intelligence-profile.json --provider profile --probe decision --probe-target eve --wait-llm-ms 60000
+./build/tide_marks_headless --profile data/intelligence-profile.json --provider profile --probe level1 --probe-target eve --wait-llm-ms 60000
+./build/tide_marks_headless --profile data/intelligence-profile.json --provider profile --probe level2 --wait-llm-ms 60000
+```
+
+三条单阶段命令使用本地 Qwen；决策和 Level 1 已观察到可接受结果，Level 2 仍记录为结构化候选修复问题。当前 Codex 子进程在分别 source `/home/robin/.bashrc` 和 `/home/robin/.bash_profile` 后都没有发现 `MY_MY_API`，因此 beam-free 只能报告 `provider_auth_missing`，不能混入模型质量或缓存命中结论。恢复凭据后必须用同一探针和至少 14 日治理长跑重新记录 `finish_reason`、repair、缓存、公共证据门槛、Overlay、共享配方 Adoption 及后续效果反思。
+
 ## 恢复工作入口
 
 会话恢复时依次阅读本文件的“当前检查点”和“已完成能力记录”，再阅读 [design.md](design.md) 的“事实、意图与演化边界”“世界与社会的内在驱力模型”“NPC Runtime 与 World Intelligence”“Runtime 核心契约”。然后查看 `git status --short`，运行自动化验证命令，先修复当前工作包失败项，再继续下一项；不要为了通过测试删除功能或放宽断言。

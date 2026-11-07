@@ -1,6 +1,7 @@
 #include "tide_marks.hpp"
 #include "core/json_utils.hpp"
 #include "evolution/evolution.hpp"
+#include "world/world_evolution_system.hpp"
 
 #include <algorithm>
 #include <cstdlib>
@@ -39,9 +40,30 @@ Json probeProviderStages(WorldService& service, const std::string& stage,
             const auto& npcId = authored.definition.id;
             if (!probeTarget.empty() && npcId != probeTarget) continue;
             const auto turn = service.deliberate(npcId, probeTrigger, "probe:decision:" + npcId);
+            const auto context = service.decisionContext(npcId);
+            const auto selected = std::find_if(
+                context.candidates.begin(), context.candidates.end(),
+                [&turn](const auto& candidate) { return candidate.actionId == turn.actionId; });
+            const bool eligible = selected != context.candidates.end() && selected->availableNow;
+            const bool evidenceValid = [&turn, &context] {
+                if (!turn.event) return false;
+                const auto refs = turn.event->data.value("cited_evidence_refs", Json::array());
+                if (!refs.is_array()) return false;
+                return std::all_of(refs.begin(), refs.end(), [&context](const auto& ref) {
+                    return ref.is_string() && context.evidenceRefs.contains(ref.template get<std::string>());
+                });
+            }();
             addResult(Json{{"kind", "decision"}, {"npc_id", npcId}, {"accepted", turn.accepted},
                            {"action_id", turn.actionId}, {"error", turn.error},
-                           {"dialogue_bytes", turn.dialogue.size()}});
+                           {"dialogue_bytes", turn.dialogue.size()},
+                           {"quality", Json{{"catalog_plan_count", context.planCatalog.size()},
+                                             {"eligible_plan_count", std::count_if(
+                                                 context.candidates.begin(), context.candidates.end(),
+                                                 [](const auto& candidate) { return candidate.availableNow; })},
+                                             {"selected_plan_is_eligible", eligible},
+                                             {"evidence_refs_valid", evidenceValid},
+                                             {"llm_choice_accepted_by_runtime", turn.accepted},
+                                             {"process_running_after_commit", service.state().npcs.at(npcId).activity.process.has_value()}}}});
         }
     };
     const auto runReflection = [&]() {
@@ -76,22 +98,52 @@ Json probeProviderStages(WorldService& service, const std::string& stage,
                 target = service.content().npcs.front().definition.id;
             }
         }
-        const auto response = service.requestEvolutionProposal(level, "probe:" + level,
-                                                                Json::object(), target);
-        Json result{{"kind", level}, {"provider_ok", response.ok}, {"error", response.error}};
-        if (response.ok && response.evolutionProposal.is_object()) {
-            const auto& proposal = response.evolutionProposal;
+        // Use the same bounded normalization/validation/repair path as an
+        // explicit Runtime request. A raw provider response is not evidence
+        // of proposal quality, and validating it without the request-scoped
+        // Level 1 target produces a false `missing_target_npc` failure.
+        const auto outcome = EvolutionManager::propose(service, level, "probe:" + level, target);
+        Json result{{"kind", level}, {"provider_ok", outcome.accepted}, {"error", outcome.accepted ? "" : outcome.code},
+                    {"message", outcome.message}};
+        if (outcome.accepted) {
+            const auto proposal = EvolutionManager::toJson(outcome.proposal);
             result["proposal_id"] = proposal.value("id", "");
-            result["proposal_kind"] = proposal.value("proposal_kind", "");
+            result["proposal_kind"] = proposal.value("kind", proposal.value("proposal_kind", ""));
             result["operation_count"] = proposal.value("operations", Json::array()).size();
             try {
                 auto normalized = EvolutionManager::normalizeProviderProposal(
                     proposal, service, level, service.providerName());
+                if (level == "level1") normalized.targetNpcId = target;
                 const auto validation = EvolutionManager::validate(
                     normalized, service.content(), service.state());
                 result["runtime_valid"] = validation.valid;
                 result["runtime_code"] = validation.code;
                 result["runtime_message"] = validation.message;
+                if (level == "level2") {
+                    const auto captured = WorldEvolutionSystem::proposalContext(
+                        service, level, "probe:" + level, Json::object(), target);
+                    std::set<std::uint64_t> problemSequences;
+                    for (const auto& item : captured.value("problem_evidence", Json::array())) {
+                        if (item.is_object()) problemSequences.insert(item.value("sequence", std::uint64_t{0}));
+                    }
+                    bool evidenceSupported = false;
+                    for (const auto& item : proposal.value("evidence_event_sequences", Json::array())) {
+                        if (!item.is_number_integer() && !item.is_number_unsigned()) continue;
+                        const auto sequence = item.is_number_unsigned()
+                                                   ? item.get<std::uint64_t>()
+                                                   : item.get<std::int64_t>() > 0
+                                                         ? static_cast<std::uint64_t>(item.get<std::int64_t>())
+                                                         : 0;
+                        if (sequence != 0 && problemSequences.contains(sequence)) evidenceSupported = true;
+                    }
+                    result["quality"] = Json{{"public_problem_evidence_count", problemSequences.size()},
+                                              {"cited_public_problem_evidence", evidenceSupported},
+                                              {"runtime_validation_passed", validation.valid},
+                                              {"automatic_governor_admissible", validation.valid && evidenceSupported}};
+                } else {
+                    result["quality"] = Json{{"runtime_validation_passed", validation.valid},
+                                              {"automatic_governor_admissible", validation.valid}};
+                }
             } catch (const std::exception& error) {
                 result["runtime_valid"] = false;
                 result["runtime_code"] = "probe_normalization_error";

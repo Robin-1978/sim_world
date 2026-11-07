@@ -468,7 +468,30 @@ Json normalizeEvolutionProposal(Json proposal, const Json& context, const std::s
                                             properties.empty() &&
                                             (!parameters.contains("type") || !parameters.contains("required") ||
                                              !parameters.contains("additionalProperties"));
-            if (nestedEmptySchema || missingEmptySchema) {
+            // A small model may copy the *schema of the schema* into
+            // `parameters.properties`, for example
+            // `{properties:{type:"const",required:[]}}`.  Those keys are
+            // JSON-Schema keywords, not recipe input names: retaining them
+            // would make Runtime believe the recipe requires a `type` or
+            // `required` input and reject an otherwise valid no-input leaf.
+            // Canonicalize only when every nested value is a schema keyword
+            // with the wrong wire type; an actual parameter named `type` or
+            // `required` still has an object-valued schema and is preserved.
+            const std::set<std::string> schemaKeywords{"type", "properties", "required", "additionalProperties"};
+            bool metadataOnly = properties.is_object() && !properties.empty();
+            if (metadataOnly) {
+                for (auto item = properties.begin(); item != properties.end(); ++item) {
+                    if (!schemaKeywords.contains(item.key())) {
+                        metadataOnly = false;
+                        break;
+                    }
+                    if (item.value().is_object()) {
+                        metadataOnly = false;
+                        break;
+                    }
+                }
+            }
+            if (nestedEmptySchema || missingEmptySchema || metadataOnly) {
                 operation["parameters"] = Json{{"type", "object"}, {"properties", Json::object()},
                                                 {"required", Json::array()}, {"additionalProperties", false}};
             }
@@ -1727,6 +1750,12 @@ ProviderResponse LlamaCppProvider::proposeEvolution(const Json& context,
         "replace parameters with a JSON Schema such as {\"type\":\"object\",\"properties\":{},\"additionalProperties\":false}; "
         "never put a runtime parameter value such as destination directly beside type. If feedback says behavior_recipe_root_missing, "
         "return root as a sibling of parameters in the same operation and keep every recipe metadata field outside parameters. "
+        "If feedback says innovation_novelty_basis_invalid, set innovation.novelty_basis to exactly one of "
+        "new_combination, new_capability, or new_archetype; never write an explanatory sentence there. "
+        "If feedback says innovation_test_plan_invalid, replace the complete test_plan and use only the registered metrics "
+        "events_added, final_revision, npc_count, knowledge_count, experience_count, advance_minutes, or resource_total; "
+        "include horizon_minutes, metrics, baseline, scenario, expected_metrics, constraints, resource_budget, "
+        "success_criteria and failure_criteria. "
         "If proposal_kind is no_change, return an empty operations array and cite the evidence that was evaluated; Runtime will record the no-change result without creating an overlay. If proposal_kind is innovation, include innovation with hypothesis, novelty_basis, operation_ids, "
         "expected_benefits, risks and test_plan {horizon_minutes, metrics, baseline, scenario, expected_metrics, constraints, resource_budget, success_criteria, failure_criteria}. Innovation is an optional daily-reflection "
         "result, not a per-tick request. A private recipe must keep available_to exactly at self; a shared proposal may "

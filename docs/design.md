@@ -595,6 +595,10 @@ DecisionContext 的认知条目不是简单取最后 N 条字符串：Runtime �
 
 每个用途只有一份固定 function/tool schema。工具名、必填字段、枚举和嵌套结构不会随 NPC、地点、日期或 Content Pack 候选集合改变；动态候选放在 `CATALOG`/`OPTIONS`。工具 description 说明何时调用、调用的边界和每个参数的含义，不能把大段动态状态塞进 schema。`choose_action`、`daily_reflection`、个人变更和共享变更分别使用自己的稳定契约；Runtime 负责把当前主体和范围注入结果，模型不重复输出这些审计字段。`choose_action.action_id` 是计划候选 key，`parameters` 的 wire schema 保持稳定并允许内容特定键以维持缓存前缀；具体键、类型、枚举和当前计划归属由 C++ 的 ActionValidator 再次校验，不能把 permissive wire schema 当成执行权限。`CATALOG` 还必须给每个计划一个短语义描述和通用预期结果；它不展开完整 BT，BT 的具体节点、时钟和效果仍由 Runtime 执行。
 
+Provider 质量验收还要区分三件事：模型是否返回了一个完整 tool call、候选是否通过 Runtime 结构/权限/版本校验、候选是否有资格进入治理或实际执行。`headless --probe` 会输出这三层的最小证据：决策的 eligible 计划、证据引用和 Process 启动；Level 1 的目标主体映射和 proposal 校验；Level 2 的公共问题证据支持与自动 Governor 资格。空参数 Schema 的归一化只处理模型把 Schema 关键字错嵌进 `properties` 且没有真实绑定名的情况；它不会补充参数、叶节点、证据或效果指标，剩余错误必须走同一会话的 bounded repair 或被拒绝。
+
+Level 2 自动队列必须引用 Runtime 计算的重复公共失败或持续匮乏事件。模型即使引用了一个存在的初始化事件，也不能因此创建共享 Overlay；安静世界的正确结果是没有 Level 2 请求或 `no_change`。这条“证据相关性”门槛与 `EvolutionManager` 的事件存在性、Content Pack 权限、行为树引用和事务校验叠加，分别防止无关事实、越权能力和不可执行提案进入世界。
+
 修正采用同一会话内的 ReAct 式观察续接：首次返回的 assistant tool call 原样保留，Runtime 追加结构化 `tool` observation（错误码、字段路径、允许范围和当前候选），第二轮只要求返回一个最小 patch 工具调用。修正不得重建或改写之前的静态目录和工具定义；Runtime 将 patch 合并到第一轮候选后重新做完整校验，超过有界次数即失败关闭。成功的工具结果也作为 observation 追加并进入下一次反思/评估，而不是让模型假设执行成功。该协议同时满足可回放性、错误可解释性和 llama.cpp/OpenAI-compatible prefix cache 的稳定性。
 
 上下文组织采用“静态前缀、动态尾部”：系统任务、工具定义和内容目录先固定，当前时间、需求、证据和可执行候选后置。字段顺序、数字格式和空集合表示保持稳定；显示数值在投影层做有限精度归一化，Runtime 事实仍保存原始精度。缓存命中率是观测指标，不是正确性的替代品；任何命中都不能绕过当次 Runtime 校验。

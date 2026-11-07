@@ -343,6 +343,28 @@ PublicProblemEvidence publicProblemEvidence(const WorldState& state) {
     return result;
 }
 
+bool level2EvidenceSupportsProposal(const EvolutionRequest& request, const Json& proposal) {
+    const auto problems = request.context.value("problem_evidence", Json::array());
+    if (!problems.is_array() || problems.empty()) return false;
+    std::set<std::uint64_t> problemSequences;
+    for (const auto& item : problems) {
+        if (!item.is_object()) continue;
+        const auto sequence = item.value("sequence", std::uint64_t{0});
+        if (sequence != 0) problemSequences.insert(sequence);
+    }
+    const auto cited = proposal.value("evidence_event_sequences", Json::array());
+    if (!cited.is_array()) return false;
+    for (const auto& item : cited) {
+        std::uint64_t sequence = 0;
+        if (item.is_number_unsigned()) sequence = item.get<std::uint64_t>();
+        else if (item.is_number_integer() && item.get<std::int64_t>() > 0) {
+            sequence = static_cast<std::uint64_t>(item.get<std::int64_t>());
+        }
+        if (sequence != 0 && problemSequences.contains(sequence)) return true;
+    }
+    return false;
+}
+
 std::uint64_t lastLevel2EvaluationSequence(const WorldState& state) {
     std::uint64_t sequence = 0;
     for (const auto& event : state.events) {
@@ -1087,6 +1109,24 @@ std::size_t WorldEvolutionSystem::pumpAsyncProposals() {
             audit("evolution.no_change", "The world reflection found no justified declarative change",
                   Json{{"evidence_event_sequences", queued.response.evolutionProposal.value(
                                                        "evidence_event_sequences", Json::array())}});
+            finish();
+            continue;
+        }
+        // A shared change is justified only by the deterministic public
+        // problem index captured for this request.  EvolutionManager checks
+        // that cited sequences exist, but existence alone would let a model
+        // turn an unrelated initialization event into a world overlay.  The
+        // automatic Level 2 lane therefore requires at least one citation
+        // from the Runtime's repeated failure/deprivation evidence; explicit
+        // callers may still inspect a proposed candidate without activating it.
+        if (queued.request.evolutionLevel == "level2" &&
+            !level2EvidenceSupportsProposal(queued.request, queued.response.evolutionProposal)) {
+            audit("evolution.proposal_rejected",
+                  "The Runtime rejected a Level 2 change without cited public problem evidence",
+                  Json{{"code", "evolution_evidence_insufficient"},
+                       {"message", "A shared overlay must cite a current repeated public failure or deprivation event."},
+                       {"evidence_event_sequences", queued.response.evolutionProposal.value(
+                                                           "evidence_event_sequences", Json::array())}});
             finish();
             continue;
         }

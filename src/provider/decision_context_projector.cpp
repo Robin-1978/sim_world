@@ -83,8 +83,44 @@ std::string behaviorNodeExplanation(const BehaviorNodeContent& node,
     }
     if (node.type == "meta_action") {
         const auto found = content.metaActions.find(node.name);
-        if (found != content.metaActions.end() && !found->second.description.empty()) {
-            return found->second.description;
+        if (found != content.metaActions.end()) {
+            const auto& definition = found->second;
+            Json args = definition.defaultArgs;
+            if (node.args.is_object()) {
+                for (auto item = node.args.begin(); item != node.args.end(); ++item) args[item.key()] = item.value();
+            }
+            const auto scalar = [&args](const char* key, const std::string& fallback) {
+                if (!args.contains(key)) return fallback;
+                const auto& value = args.at(key);
+                if (value.is_string()) return value.get<std::string>();
+                if (value.is_number() || value.is_boolean()) return value.dump();
+                return fallback;
+            };
+            if (definition.operation == "resource.consume") {
+                return "consume " + scalar("amount", "the declared amount") + " units of " +
+                       scalar("resource", "the declared resource");
+            }
+            if (definition.operation == "resource.produce") {
+                return "produce " + scalar("amount", "the declared amount") + " units of " +
+                       scalar("resource", "the declared resource");
+            }
+            if (definition.operation == "resource.reserve") {
+                return "reserve " + scalar("amount", "the declared amount") + " units of " +
+                       scalar("resource", "the declared resource");
+            }
+            if (definition.operation == "resource.release") {
+                return "release " + scalar("amount", "the declared amount") + " units of " +
+                       scalar("resource", "the declared resource");
+            }
+            if (definition.operation == "need.relieve") {
+                return "apply the authored need relief for " + scalar("action", "this plan");
+            }
+            if (definition.operation == "link.set_state") {
+                return "set the authored connection state for " + scalar("link", "the declared connection");
+            }
+            if (!definition.description.empty() && definition.description != definition.id) {
+                return definition.description;
+            }
         }
         return "perform the authored operation " + node.name;
     }

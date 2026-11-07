@@ -353,7 +353,12 @@ public:
         observedLevel = level;
         observedContext = context;
         observedTargets.push_back(context.value("target_npc", ""));
-        const auto evidence = context.at("evidence_events").at(0).at("sequence");
+        // Shared proposals must cite the deterministic public-problem index,
+        // rather than an arbitrary first event such as world.initialized.
+        const auto problemEvidence = context.value("problem_evidence", Json::array());
+        const auto evidence = !problemEvidence.empty()
+                                  ? problemEvidence.at(0).at("sequence")
+                                  : context.at("evidence_events").at(0).at("sequence");
         if (returnNoChange) {
             return ProviderResponse{true, {}, "The world evidence does not justify a new overlay.", {},
                                      Json{{"id", "world-no-change"}, {"proposal_kind", "no_change"},
